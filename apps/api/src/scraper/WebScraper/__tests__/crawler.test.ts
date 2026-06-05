@@ -13,8 +13,6 @@ describe("WebCrawler", () => {
     typeof robotsParser
   >;
 
-  let maxCrawledDepth: number;
-
   beforeEach(() => {
     // Setup default mocks
     mockAxios.get.mockImplementation(url => {

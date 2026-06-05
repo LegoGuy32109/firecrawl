@@ -65,7 +65,7 @@ function estimateTargetCredits(target: MonitorTarget): number {
   return Math.max(1, limit) * perPage;
 }
 
-export function estimateMonitorCreditsPerRun(
+function estimateMonitorCreditsPerRun(
   targets: MonitorTarget[],
   judgeEnabled: boolean = false,
 ): number {

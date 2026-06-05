@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "@jest/globals";
+import { it, expect, beforeAll } from "@jest/globals";
 import { deepResearch, idmux, Identity } from "./lib";
 import { describeIf, HAS_AI, TEST_PRODUCTION } from "../lib";
 

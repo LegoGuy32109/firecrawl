@@ -46,7 +46,6 @@ describe("Job Priority Tests", () => {
 
   test("getJobPriority should return correct priority based on plan and set length", async () => {
     const team_id = "team1";
-    const plan = "standard";
     (redisEvictConnection.scard as jest.Mock).mockResolvedValue(150);
 
     const priority = await getJobPriority({ team_id });
@@ -61,22 +60,18 @@ describe("Job Priority Tests", () => {
     const team_id = "team1";
 
     (redisEvictConnection.scard as jest.Mock).mockResolvedValue(50);
-    let plan = "hobby";
     let priority = await getJobPriority({ team_id });
     expect(priority).toBe(10);
 
     (redisEvictConnection.scard as jest.Mock).mockResolvedValue(150);
-    plan = "hobby";
     priority = await getJobPriority({ team_id });
     expect(priority).toBe(25); // basePriority + Math.ceil((150 - 50) * 0.3)
 
     (redisEvictConnection.scard as jest.Mock).mockResolvedValue(25);
-    plan = "free";
     priority = await getJobPriority({ team_id });
     expect(priority).toBe(10);
 
     (redisEvictConnection.scard as jest.Mock).mockResolvedValue(60);
-    plan = "free";
     priority = await getJobPriority({ team_id });
     expect(priority).toBe(28); // basePriority + Math.ceil((60 - 25) * 0.5)
   });
