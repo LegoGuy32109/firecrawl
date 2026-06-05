@@ -1,5 +1,6 @@
 import {
   calculateMonitorCheckActualCredits,
+  calculateMonitorCheckActualCreditsPaginated,
   getMonitorTargetPerPageCredits,
 } from "./billing";
 import type { MonitorTarget } from "./types";
@@ -118,6 +119,28 @@ describe("monitor billing helpers", () => {
           ],
         }),
       ).toEqual({ actualCredits: 1, unknownTargetIds: ["missing"] });
+    });
+
+    it("aggregates all pages across pagination chunks", async () => {
+      const pages = [
+        { target_id: "json", status: "same" },
+        { target_id: "json", status: "changed" },
+        { target_id: "base", status: "new" },
+        { target_id: "json", status: "removed" },
+        { target_id: "missing", status: "same" },
+        { target_id: "missing", status: "changed" },
+      ];
+
+      await expect(
+        calculateMonitorCheckActualCreditsPaginated({
+          targets: [scrapeTarget("json", ["json"]), scrapeTarget("base")],
+          pageSize: 2,
+          loadPages: async ({ limit, skip }) => pages.slice(skip, skip + limit),
+        }),
+      ).resolves.toEqual({
+        actualCredits: 11,
+        unknownTargetIds: ["missing"],
+      });
     });
   });
 });

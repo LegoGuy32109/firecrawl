@@ -79,3 +79,38 @@ export function calculateMonitorCheckActualCredits(params: {
     unknownTargetIds: Array.from(unknownTargetIds),
   };
 }
+
+export async function calculateMonitorCheckActualCreditsPaginated(params: {
+  targets: MonitorTarget[];
+  pageSize: number;
+  loadPages: (params: {
+    limit: number;
+    skip: number;
+  }) => Promise<MonitorCreditPage[]>;
+}): Promise<{ actualCredits: number; unknownTargetIds: string[] }> {
+  const unknownTargetIds = new Set<string>();
+  let actualCredits = 0;
+  let skip = 0;
+
+  while (true) {
+    const pages = await params.loadPages({
+      limit: params.pageSize,
+      skip,
+    });
+    const chunk = calculateMonitorCheckActualCredits({
+      targets: params.targets,
+      pages,
+    });
+
+    actualCredits += chunk.actualCredits;
+    chunk.unknownTargetIds.forEach(targetId => unknownTargetIds.add(targetId));
+
+    if (pages.length < params.pageSize) break;
+    skip += params.pageSize;
+  }
+
+  return {
+    actualCredits,
+    unknownTargetIds: Array.from(unknownTargetIds),
+  };
+}
