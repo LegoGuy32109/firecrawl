@@ -2,7 +2,7 @@ import { url } from "../types";
 
 describe("URL Schema Validation", () => {
   beforeEach(() => {
-    jest.resetAllMocks();
+    vi.resetAllMocks();
   });
 
   it("should prepend http:// to URLs without a protocol", () => {

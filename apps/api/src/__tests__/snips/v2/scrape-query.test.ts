@@ -1,4 +1,11 @@
-import { concurrentIf, HAS_AI, HAS_FIREWORKS, TEST_PRODUCTION } from "../lib";
+import {
+  ALLOW_TEST_SUITE_WEBSITE,
+  concurrentIf,
+  HAS_AI,
+  HAS_FIREWORKS,
+  TEST_PRODUCTION,
+  TEST_SUITE_WEBSITE,
+} from "../lib";
 import {
   scrape,
   scrapeWithFailure,
@@ -18,12 +25,12 @@ beforeAll(async () => {
 }, 10000 + scrapeTimeout);
 
 describe("Query format", () => {
-  concurrentIf(TEST_PRODUCTION || HAS_AI)(
+  concurrentIf(TEST_PRODUCTION || (HAS_AI && ALLOW_TEST_SUITE_WEBSITE))(
     "returns a non-empty answer for a valid query",
     async () => {
       const response = await scrape(
         {
-          url: "https://firecrawl.dev",
+          url: TEST_SUITE_WEBSITE,
           formats: [{ type: "query", prompt: "What is Firecrawl?" }],
         },
         identity,
@@ -37,12 +44,12 @@ describe("Query format", () => {
     scrapeTimeout,
   );
 
-  concurrentIf(TEST_PRODUCTION || HAS_AI)(
+  concurrentIf(TEST_PRODUCTION || (HAS_AI && ALLOW_TEST_SUITE_WEBSITE))(
     "returns a non-empty answer for a valid question",
     async () => {
       const response = await scrape(
         {
-          url: "https://firecrawl.dev",
+          url: TEST_SUITE_WEBSITE,
           formats: [{ type: "question", question: "What is Firecrawl?" }],
         },
         identity,
@@ -56,12 +63,12 @@ describe("Query format", () => {
     scrapeTimeout,
   );
 
-  concurrentIf(TEST_PRODUCTION || HAS_AI)(
+  concurrentIf(TEST_PRODUCTION || (HAS_AI && ALLOW_TEST_SUITE_WEBSITE))(
     "returns both answer and markdown when formats include markdown and query",
     async () => {
       const response = await scrape(
         {
-          url: "https://firecrawl.dev",
+          url: TEST_SUITE_WEBSITE,
           formats: [
             "markdown",
             { type: "query", prompt: "What is Firecrawl?" },
@@ -79,12 +86,12 @@ describe("Query format", () => {
     scrapeTimeout,
   );
 
-  concurrentIf(TEST_PRODUCTION || HAS_FIREWORKS)(
+  concurrentIf(TEST_PRODUCTION || (HAS_FIREWORKS && ALLOW_TEST_SUITE_WEBSITE))(
     "returns non-empty highlights for a valid highlights query",
     async () => {
       const response = await scrape(
         {
-          url: "https://firecrawl.dev",
+          url: TEST_SUITE_WEBSITE,
           formats: [{ type: "highlights", query: "What is Firecrawl?" }],
         },
         identity,
@@ -98,12 +105,12 @@ describe("Query format", () => {
     scrapeTimeout,
   );
 
-  concurrentIf(TEST_PRODUCTION || HAS_FIREWORKS)(
+  concurrentIf(TEST_PRODUCTION || (HAS_FIREWORKS && ALLOW_TEST_SUITE_WEBSITE))(
     "returns a direct quote answer when query mode is directQuote",
     async () => {
       const response = await scrape(
         {
-          url: "https://firecrawl.dev",
+          url: TEST_SUITE_WEBSITE,
           formats: [
             {
               type: "query",
@@ -122,12 +129,12 @@ describe("Query format", () => {
     scrapeTimeout,
   );
 
-  concurrentIf(TEST_PRODUCTION || HAS_AI)(
+  concurrentIf(TEST_PRODUCTION || (HAS_AI && ALLOW_TEST_SUITE_WEBSITE))(
     "does not include answer field when query format is not provided",
     async () => {
       const response = await scrape(
         {
-          url: "https://firecrawl.dev",
+          url: TEST_SUITE_WEBSITE,
           formats: ["markdown"],
         },
         identity,
@@ -144,7 +151,7 @@ describe("Query format", () => {
       const longPrompt = "a".repeat(10001);
       const response = await scrapeWithFailure(
         {
-          url: "https://firecrawl.dev",
+          url: TEST_SUITE_WEBSITE,
           formats: [{ type: "query", prompt: longPrompt }],
         } as any,
         identity,
@@ -161,7 +168,7 @@ describe("Query format", () => {
     async () => {
       const response = await scrapeWithFailure(
         {
-          url: "https://firecrawl.dev",
+          url: TEST_SUITE_WEBSITE,
           formats: [{ type: "question", question: "a".repeat(10001) }],
         } as any,
         identity,
@@ -178,7 +185,7 @@ describe("Query format", () => {
     async () => {
       const response = await scrapeWithFailure(
         {
-          url: "https://firecrawl.dev",
+          url: TEST_SUITE_WEBSITE,
           formats: [{ type: "highlights", query: "a".repeat(10001) }],
         } as any,
         identity,

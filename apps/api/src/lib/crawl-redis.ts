@@ -1,5 +1,6 @@
 import { InternalOptions } from "../scraper/scrapeURL";
 import { ScrapeOptions, TeamFlags } from "../controllers/v2/types";
+import { WebhookConfig } from "../services/webhook/types";
 import { WebCrawler } from "../scraper/WebScraper/crawler";
 import { redisEvictConnection } from "../services/redis";
 import { logger as _logger } from "./logger";
@@ -19,6 +20,17 @@ export type StoredCrawl = {
   createdAt: number;
   maxConcurrency?: number;
   zeroDataRetention?: boolean;
+  // which queue backend this crawl's group + jobs live on; a crawl never
+  // spans backends. Absent on crawls created before the FDB rollout (= pg).
+  queueBackend?: "pg" | "fdb";
+  // Crawl-scoped context the finish path needs (completion webhook, api version,
+  // request id). Persisted here so it survives even when a member job's input
+  // data has been shed — which the FDB queue does for ZDR crawls on completion.
+  // Absent on crawls created before this was added; the finish path then falls
+  // back to reading these off a representative member's job data.
+  v1?: boolean;
+  webhook?: WebhookConfig;
+  requestId?: string;
 };
 
 export async function saveCrawl(id: string, crawl: StoredCrawl) {
@@ -203,6 +215,69 @@ export async function getDoneJobsOrdered(
     "crawl:" + id + ":jobs_donez_ordered",
     start,
     end,
+  );
+}
+
+export async function getLastDoneJobTimestamp(
+  id: string,
+): Promise<number | null> {
+  await redisEvictConnection.expire(
+    "crawl:" + id + ":jobs_donez_ordered",
+    24 * 60 * 60,
+  );
+  const result = await redisEvictConnection.zrange(
+    "crawl:" + id + ":jobs_donez_ordered",
+    -1,
+    -1,
+    "WITHSCORES",
+  );
+  if (!result || result.length < 2) return null;
+  const score = parseInt(result[1], 10);
+  return Number.isFinite(score) ? score : null;
+}
+
+export async function getDoneJobsOrderedUntil(
+  id: string,
+  until: number = Infinity,
+  start = 0,
+  count = -1,
+): Promise<string[]> {
+  await redisEvictConnection.expire(
+    "crawl:" + id + ":jobs_donez_ordered",
+    24 * 60 * 60,
+  );
+  return await redisEvictConnection.zrangebyscore(
+    "crawl:" + id + ":jobs_donez_ordered",
+    -Infinity,
+    until,
+    "LIMIT",
+    start,
+    count,
+  );
+}
+
+async function isCrawlFinished(id: string) {
+  await redisEvictConnection.expire(
+    "crawl:" + id + ":kickoff:finish",
+    24 * 60 * 60,
+  );
+  return (
+    (await redisEvictConnection.scard("crawl:" + id + ":jobs_done")) ===
+      (await redisEvictConnection.scard("crawl:" + id + ":jobs")) &&
+    (await isCrawlKickoffFinished(id))
+  );
+}
+
+export async function isCrawlKickoffFinished(id: string) {
+  await redisEvictConnection.expire(
+    "crawl:" + id + ":kickoff:finish",
+    24 * 60 * 60,
+  );
+  return (
+    (await redisEvictConnection.get("crawl:" + id + ":kickoff:finish")) !==
+      null &&
+    (await redisEvictConnection.scard("crawl:" + id + ":sitemap_jobs_done")) ===
+      (await redisEvictConnection.scard("crawl:" + id + ":sitemap_jobs"))
   );
 }
 

@@ -33,7 +33,10 @@ import {
   resolveBillingMetadata,
   toAutumnBillingProperties,
 } from "../billing/types";
-import { autumnService } from "../autumn/autumn.service";
+import {
+  autumnService,
+  featureIdForBillingEndpoint,
+} from "../autumn/autumn.service";
 import {
   _addScrapeJobToBullMQ,
   addScrapeJob,
@@ -48,6 +51,7 @@ import { createWebhookSender, WebhookEvent } from "../webhook/index";
 import { CustomError } from "../../lib/custom-error";
 import { startWebScraperPipeline } from "../../main/runWebScraper";
 import { CostTracking } from "../../lib/cost-tracking";
+import { chargeKeylessCredits } from "../../lib/keyless";
 import { normalizeUrlOnlyHostname } from "../../lib/canonical-url";
 import { isUrlBlocked } from "../../scraper/WebScraper/utils/blocklist";
 import { UNSUPPORTED_SITE_MESSAGE } from "../../lib/strings";
@@ -116,6 +120,10 @@ async function billScrapeJob(
     ...toAutumnBillingProperties(billing),
     apiKeyId: job.data.apiKeyId,
   };
+  // Scrapes initiated by a search (billing.endpoint === "search", e.g. search +
+  // scrapeOptions) are metered against SEARCH_CREDITS, matching the search
+  // request's own credits. Standalone scrapes stay on CREDITS.
+  const featureId = featureIdForBillingEndpoint(billing.endpoint);
   let trackedInRequest = false;
 
   if (job.data.is_scrape !== true && !job.data.internalOptions?.bypassBilling) {
@@ -129,6 +137,12 @@ async function billScrapeJob(
       unsupportedFeatures,
     );
 
+    // Charge the keyless free tier's per-IP daily credit budget unless this
+    // request reserved credits in the controller and will reconcile there.
+    if (!job.data.keylessReserved) {
+      await chargeKeylessCredits(job.data.team_id, creditsToBeBilled);
+    }
+
     if (
       job.data.team_id !== config.BACKGROUND_INDEX_TEAM_ID! &&
       config.USE_DB_AUTHENTICATION
@@ -139,6 +153,7 @@ async function billScrapeJob(
           value: creditsToBeBilled,
           properties: autumnProperties,
           requestScoped: true,
+          featureId,
         });
         const billingJobId = uuidv7();
         logger.debug(
@@ -182,6 +197,7 @@ async function billScrapeJob(
             teamId: job.data.team_id,
             value: creditsToBeBilled,
             properties: autumnProperties,
+            featureId,
           });
         }
         captureExceptionWithZdrCheck(error, {
@@ -509,6 +525,9 @@ async function processJob(job: NuQJob<ScrapeJobSingleUrls>) {
               [doc.metadata.url ?? doc.metadata.sourceURL!],
               1,
               sc.crawlerOptions?.maxDepth ?? 10,
+              false,
+              false,
+              true,
             );
             if (filterResult.links.length === 0) {
               const url = doc.metadata.url ?? doc.metadata.sourceURL!;
@@ -1296,10 +1315,14 @@ export const processJobInternal = async (job: NuQJob<ScrapeJobData>) => {
 };
 
 async function processJobWithTracing(job: NuQJob<ScrapeJobData>, logger: any) {
+  // FDB-backed jobs hold their concurrency slot through the queue lease; the
+  // Redis slot mirror and promotion-on-done below are PG-backend machinery
+  const isFdbJob = (job as any).backend === "fdb";
   try {
     try {
       let extendLockInterval: NodeJS.Timeout | null = null;
       if (
+        !isFdbJob &&
         job.data?.mode !== "kickoff" &&
         job.data?.team_id &&
         !job.data.skipNuq
@@ -1369,7 +1392,7 @@ async function processJobWithTracing(job: NuQJob<ScrapeJobData>, logger: any) {
         }
       }
     } finally {
-      if (!job.data.skipNuq) {
+      if (!job.data.skipNuq && !isFdbJob) {
         await concurrentJobDone(job);
       }
     }

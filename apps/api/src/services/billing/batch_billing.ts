@@ -4,7 +4,10 @@ import { billTeam6 } from "../../db/rpc";
 import * as Sentry from "@sentry/node";
 import { withAuth } from "../../lib/withAuth";
 import { setCachedACUC, setCachedACUCTeam } from "../../controllers/auth";
-import { autumnService } from "../autumn/autumn.service";
+import {
+  autumnService,
+  featureIdForBillingEndpoint,
+} from "../autumn/autumn.service";
 import {
   resolveBillingMetadata,
   toAutumnBillingProperties,
@@ -79,6 +82,7 @@ async function refundRequestTrackedCredits(group: GroupedBillingOperation) {
         apiKeyId: group.api_key_id,
         subscriptionId: group.subscription_id,
       },
+      featureId: featureIdForBillingEndpoint(group.billing.endpoint),
     });
   } catch (error) {
     logger.warn("Failed to refund Autumn request-tracked credits", {
@@ -220,6 +224,7 @@ export async function processBillingBatch() {
               apiKeyId: group.api_key_id,
               subscriptionId: group.subscription_id,
             },
+            featureId: featureIdForBillingEndpoint(group.billing.endpoint),
           });
         }
       } catch (error) {
