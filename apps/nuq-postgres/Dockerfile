@@ -3,6 +3,11 @@
 ARG PG_MAJOR=17
 FROM postgres:${PG_MAJOR}
 
+# Keep the base image's HTTP Debian mirrors so apt does not need bootstrapped CA
+# certs, but add retries and force IPv4 for transient container network issues.
+RUN set -eux; \
+    printf 'Acquire::Retries "5";\nAcquire::ForceIPv4 "true";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' > /etc/apt/apt.conf.d/80-retries
+
 # Install pg_cron for the specified Postgres major version
 RUN set -eux; \
     apt-get update; \

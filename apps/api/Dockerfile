@@ -7,6 +7,12 @@ ENV CI=true
 
 RUN corepack enable
 
+# Docker build networks can be flaky with Debian mirrors. Keep the base image's
+# HTTP sources so apt does not need bootstrapped CA certs, but add retries and
+# force IPv4 to avoid common container IPv6 routing failures.
+RUN set -eux; \
+    printf 'Acquire::Retries "5";\nAcquire::ForceIPv4 "true";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' > /etc/apt/apt.conf.d/80-retries
+
 # Build Go shared library
 FROM golang:1.24 AS go-build
 WORKDIR /app
@@ -21,6 +27,7 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
+    ca-certificates \
     curl \
     build-essential \
     pkg-config \
@@ -65,6 +72,7 @@ FROM base AS runtime
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
+    ca-certificates \
     git \
     procps \
     curl \
