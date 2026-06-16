@@ -163,7 +163,7 @@ function estimateTargetPageCount(target: MonitorTarget): number {
   return Math.max(1, limit);
 }
 
-function estimateMonitorCreditsPerRun(
+export function estimateMonitorCreditsPerRun(
   targets: MonitorTarget[],
   judgeEnabled: boolean = false,
 ): number {

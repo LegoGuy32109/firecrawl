@@ -236,51 +236,6 @@ export async function getLastDoneJobTimestamp(
   return Number.isFinite(score) ? score : null;
 }
 
-export async function getDoneJobsOrderedUntil(
-  id: string,
-  until: number = Infinity,
-  start = 0,
-  count = -1,
-): Promise<string[]> {
-  await redisEvictConnection.expire(
-    "crawl:" + id + ":jobs_donez_ordered",
-    24 * 60 * 60,
-  );
-  return await redisEvictConnection.zrangebyscore(
-    "crawl:" + id + ":jobs_donez_ordered",
-    -Infinity,
-    until,
-    "LIMIT",
-    start,
-    count,
-  );
-}
-
-async function isCrawlFinished(id: string) {
-  await redisEvictConnection.expire(
-    "crawl:" + id + ":kickoff:finish",
-    24 * 60 * 60,
-  );
-  return (
-    (await redisEvictConnection.scard("crawl:" + id + ":jobs_done")) ===
-      (await redisEvictConnection.scard("crawl:" + id + ":jobs")) &&
-    (await isCrawlKickoffFinished(id))
-  );
-}
-
-export async function isCrawlKickoffFinished(id: string) {
-  await redisEvictConnection.expire(
-    "crawl:" + id + ":kickoff:finish",
-    24 * 60 * 60,
-  );
-  return (
-    (await redisEvictConnection.get("crawl:" + id + ":kickoff:finish")) !==
-      null &&
-    (await redisEvictConnection.scard("crawl:" + id + ":sitemap_jobs_done")) ===
-      (await redisEvictConnection.scard("crawl:" + id + ":sitemap_jobs"))
-  );
-}
-
 export async function finishCrawlKickoff(id: string) {
   await redisEvictConnection.set(
     "crawl:" + id + ":kickoff:finish",
