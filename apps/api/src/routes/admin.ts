@@ -1,20 +1,18 @@
 import express from "express";
 import { config } from "../config";
-import { redisHealthController } from "../controllers/v0/admin/redis-health";
-import { autumnHealthController } from "../controllers/v0/admin/autumn-health";
+import { adminIndexController } from "../admin/admin-index";
+import { redisHealthController } from "../admin/redis-health";
+import { autumnHealthController } from "../admin/autumn-health";
 import { authMiddleware, checkCreditsMiddleware, wrap } from "./shared";
-import { acucCacheClearController } from "../controllers/v0/admin/acuc-cache-clear";
-import { checkFireEngine } from "../controllers/v0/admin/check-fire-engine";
-import { cclogController } from "../controllers/v0/admin/cclog";
-import { indexQueuePrometheus } from "../controllers/v0/admin/index-queue-prometheus";
-import { triggerPrecrawl } from "../controllers/v0/admin/precrawl";
-import {
-  metricsController,
-  nuqMetricsController,
-} from "../controllers/v0/admin/metrics";
+import { acucCacheClearController } from "../admin/acuc-cache-clear";
+import { checkFireEngine } from "../admin/check-fire-engine";
+import { cclogController } from "../admin/cclog";
+import { indexQueuePrometheus } from "../admin/index-queue-prometheus";
+import { triggerPrecrawl } from "../admin/precrawl";
+import { metricsController, nuqMetricsController } from "../admin/metrics";
 import { realtimeSearchController } from "../controllers/v2/f-search";
-import { concurrencyQueueBackfillController } from "../controllers/v0/admin/concurrency-queue-backfill";
-import { crawlMonitorController } from "../controllers/v0/admin/crawl-monitor";
+import { concurrencyQueueBackfillController } from "../admin/concurrency-queue-backfill";
+import { crawlMonitorController } from "../admin/crawl-monitor";
 import {
   handleIntegrationAdminCreateUserProxy,
   handleIntegrationAdminRotateProxy,
@@ -23,6 +21,8 @@ import {
 import { RateLimiterMode } from "../types";
 
 export const adminRouter = express.Router();
+
+adminRouter.get(`/admin/${config.BULL_AUTH_KEY}`, adminIndexController);
 
 adminRouter.get(
   `/admin/${config.BULL_AUTH_KEY}/redis-health`,

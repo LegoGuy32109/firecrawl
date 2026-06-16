@@ -1,8 +1,8 @@
 import type { Request, Response } from "express";
-import { getRedisConnection } from "../../../services/queue-service";
-import { nuqGetLocalMetrics } from "../../../services/worker/nuq";
-import { scrapeQueue } from "../../../services/worker/nuq-router";
-import { teamConcurrencySemaphore } from "../../../services/worker/team-semaphore";
+import { getRedisConnection } from "../services/queue-service";
+import { nuqGetLocalMetrics } from "../services/worker/nuq";
+import { scrapeQueue } from "../services/worker/nuq-router";
+import { teamConcurrencySemaphore } from "../services/worker/team-semaphore";
 
 export async function metricsController(_: Request, res: Response) {
   let cursor: string = "0";

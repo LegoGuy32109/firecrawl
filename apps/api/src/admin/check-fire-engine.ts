@@ -1,5 +1,5 @@
-import { logger } from "../../../lib/logger";
-import { config } from "../../../config";
+import { logger } from "../lib/logger";
+import { config } from "../config";
 import * as Sentry from "@sentry/node";
 import { Request, Response } from "express";
 

@@ -1,14 +1,14 @@
-import { getRedisConnection } from "../../../services/queue-service";
-import { db } from "../../../db/connection";
-import * as schema from "../../../db/schema";
-import { logger as _logger } from "../../../lib/logger";
+import { getRedisConnection } from "../services/queue-service";
+import { db } from "../db/connection";
+import * as schema from "../db/schema";
+import { logger as _logger } from "../lib/logger";
 import { Request, Response } from "express";
 import {
   nuqFdbHealthCheck,
   scrapeQueueFdb,
   withFdbTimeout,
-} from "../../../services/worker/nuq-fdb";
-import { fdbQueueEnabled } from "../../../services/worker/nuq-router";
+} from "../services/worker/nuq-fdb";
+import { fdbQueueEnabled } from "../services/worker/nuq-router";
 
 const FDB_OPTIONAL_COUNT_TIMEOUT_MS = 500;
 
