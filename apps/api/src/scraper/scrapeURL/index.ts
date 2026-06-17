@@ -1040,6 +1040,7 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
         contentType: engineResult.contentType,
         timezone: engineResult.timezone,
         proxyUsed: engineResult.proxyUsed ?? "basic",
+        ...(engineResult.live ? { live: engineResult.live } : {}),
         ...(config.TEST_SUITE_SELF_HOSTED
           ? {
               engine: result.engine,

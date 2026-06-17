@@ -5,6 +5,11 @@ import { z } from "zod";
 import { logger as _logger } from "../../lib/logger";
 import { config } from "../../config";
 import {
+  browserLiveArtifactPath,
+  browserLiveViewPath,
+  browserLiveWsPath,
+} from "../../lib/live";
+import {
   insertBrowserSession,
   getBrowserSession,
   getBrowserSessionByBrowserId,
@@ -33,6 +38,7 @@ import {
 } from "../../lib/browser-billing";
 import { autumnService } from "../../services/autumn/autumn.service";
 import { makeResponder } from "./response-enveloper";
+import type { LiveMetadata } from "./types";
 import {
   AuthError,
   BillingError,
@@ -50,6 +56,7 @@ const browserCreateRequestSchema = z.object({
   ttl: z.number().min(30).max(3600).default(600),
   activityTtl: z.number().min(10).max(3600).default(300),
   streamWebView: z.boolean().default(true),
+  __playgroundLive: z.boolean().optional(),
   integration: integrationSchema.optional().transform(val => val || null),
   profile: z
     .object({
@@ -68,6 +75,7 @@ interface BrowserCreateResponse {
   liveViewUrl?: string;
   interactiveLiveViewUrl?: string;
   expiresAt?: string;
+  live?: LiveMetadata;
   error?: string;
 }
 
@@ -76,6 +84,7 @@ const browserExecuteRequestSchema = z.object({
   language: z.enum(["python", "node", "bash"]).default("node"),
   timeout: z.number().min(1).max(300).default(30),
   origin: z.string().optional(),
+  __playgroundLive: z.boolean().optional(),
 });
 
 type BrowserExecuteRequest = z.infer<typeof browserExecuteRequestSchema>;
@@ -87,6 +96,7 @@ interface BrowserExecuteResponse {
   stderr?: string;
   exitCode?: number;
   killed?: boolean;
+  live?: LiveMetadata;
   error?: string;
 }
 
@@ -94,6 +104,10 @@ interface BrowserDeleteResponse {
   success: boolean;
   sessionDurationMs?: number;
   creditsBilled?: number;
+  screenshotUrl?: string;
+  recordingUrl?: string;
+  framesCaptured?: number;
+  live?: LiveMetadata;
   error?: string;
 }
 
@@ -110,6 +124,21 @@ interface BrowserListResponse {
     lastActivity: string;
   }>;
   error?: string;
+}
+
+function buildBrowserLive(
+  sessionId: string,
+  status: LiveMetadata["status"],
+  extra: Partial<LiveMetadata> = {},
+): LiveMetadata {
+  return {
+    mode: "single",
+    status,
+    sessionId,
+    liveViewUrl: browserLiveViewPath(sessionId),
+    liveViewWsUrl: browserLiveWsPath(sessionId),
+    ...extra,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -348,7 +377,7 @@ export async function browserCreateController(
       origin: "api",
       integration: integration ?? null,
       zeroDataRetention: false,
-      api_key_id: req.acuc!.api_key_id,
+      api_key_id: req.acuc?.api_key_id ?? null,
     });
     await insertBrowserSession({
       id: sessionId,
@@ -357,8 +386,8 @@ export async function browserCreateController(
       workspace_id: "",
       context_id: "",
       cdp_url: svcResponse.cdpUrl,
-      cdp_path: svcResponse.iframeUrl, // repurposed: stores view URL
-      cdp_interactive_path: svcResponse.interactiveIframeUrl, // repurposed: stores interactive view URL
+      cdp_path: browserLiveViewPath(sessionId),
+      cdp_interactive_path: browserLiveViewPath(sessionId),
       stream_web_view: streamWebView,
       status: "active",
       ttl_total: ttl,
@@ -396,9 +425,10 @@ export async function browserCreateController(
   return r.ok({
     id: sessionId,
     cdpUrl: svcResponse.cdpUrl,
-    liveViewUrl: svcResponse.iframeUrl,
-    interactiveLiveViewUrl: svcResponse.interactiveIframeUrl,
+    liveViewUrl: browserLiveViewPath(sessionId),
+    interactiveLiveViewUrl: `${browserLiveViewPath(sessionId)}?interactive=1`,
     expiresAt: svcResponse.expiresAt,
+    live: buildBrowserLive(sessionId, "streaming"),
   });
 }
 
@@ -512,6 +542,7 @@ export async function browserExecuteController(
     stderr: execResult.stderr,
     exitCode: execResult.exitCode,
     killed: execResult.killed,
+    live: buildBrowserLive(id, "streaming"),
   });
 }
 
@@ -585,7 +616,13 @@ export async function browserDeleteController(
     logger.info("Session already destroyed by another path, skipping billing", {
       sessionId: session.id,
     });
-    return r.ok({});
+    return r.ok({
+      sessionDurationMs: sessionDurationMs ?? 0,
+      live: buildBrowserLive(id, "completed", {
+        screenshotUrl: browserLiveArtifactPath(id, "final.jpeg"),
+        recordingDurationMs: sessionDurationMs ?? 0,
+      }),
+    });
   }
 
   const wallClockMs = Date.now() - new Date(session.created_at).getTime();
@@ -629,7 +666,14 @@ export async function browserDeleteController(
     creditsBilled,
   });
 
-  return r.ok({});
+  return r.ok({
+    sessionDurationMs: durationMs,
+    live: buildBrowserLive(id, "completed", {
+      screenshotUrl: browserLiveArtifactPath(id, "final.jpeg"),
+      recordingDurationMs: durationMs,
+      ...(sessionDurationMs ? {} : {}),
+    }),
+  });
 }
 
 export async function browserListController(

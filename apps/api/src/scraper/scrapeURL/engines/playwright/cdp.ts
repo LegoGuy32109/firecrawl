@@ -6,6 +6,7 @@ import { robustFetch } from "../../lib/fetch";
 import { getInnerJson } from "@mendable/firecrawl-rs";
 import { hasFormatOfType } from "../../../../lib/format-utils";
 import { ActionError } from "../../error";
+import type { LiveMetadata } from "../../../../controllers/v2/types";
 
 export async function scrapeURLWithPlaywrightCDP(
   meta: Meta,
@@ -32,6 +33,9 @@ export async function scrapeURLWithPlaywrightCDP(
         full_page_screenshot: wantsFullPage,
       }),
       actions: meta.options.actions,
+      __playgroundLive:
+        (meta.options as { __playgroundLive?: boolean }).__playgroundLive ===
+        true,
     },
     method: "POST",
     logger: meta.logger.child("scrapeURLWithPlaywrightCDP/robustFetch"),
@@ -61,6 +65,28 @@ export async function scrapeURLWithPlaywrightCDP(
           actionIndex: z.number().optional(),
           selector: z.string().optional(),
           message: z.string().optional(),
+        })
+        .optional(),
+      live: z
+        .object({
+          mode: z.enum(["single", "multi"]),
+          status: z.enum(["streaming", "completed", "unavailable", "warning"]),
+          scrapeId: z.string().optional(),
+          liveViewUrl: z.string().optional(),
+          liveViewWsUrl: z.string().optional(),
+          screenshotUrl: z.string().optional(),
+          recordingUrl: z.string().optional(),
+          framesCaptured: z.number().optional(),
+          recordingDurationMs: z.number().optional(),
+          warning: z.string().optional(),
+          warnings: z.array(z.any()).optional(),
+          error: z
+            .object({
+              code: z.string().optional(),
+              message: z.string(),
+              details: z.record(z.string(), z.any()).optional(),
+            })
+            .optional(),
         })
         .optional(),
     }),
@@ -128,6 +154,7 @@ export async function scrapeURLWithPlaywrightCDP(
             pdfs: [],
           },
     proxyUsed: "basic",
+    ...(response.live ? { live: response.live as LiveMetadata } : {}),
   };
 }
 

@@ -791,6 +791,10 @@ export const scrapeOptions = strictWithMessage(baseScrapeOptions)
 
 export type BaseScrapeOptions = z.infer<typeof baseScrapeOptions>;
 
+const browserLiveScrapeOptions = baseScrapeOptions.extend({
+  __playgroundLive: z.boolean().optional(),
+});
+
 export type ScrapeOptions = BaseScrapeOptions;
 
 export type UploadedParseFileKind = "html" | "pdf" | "document";
@@ -923,7 +927,7 @@ export const agentRequestSchema = z.strictObject({
 export type AgentRequest = z.infer<typeof agentRequestSchema>;
 // export type AgentRequestInput = z.input<typeof agentRequestSchema>;
 
-const scrapeRequestSchemaBase = baseScrapeOptions.extend({
+const scrapeRequestSchemaBase = browserLiveScrapeOptions.extend({
   url: URL,
   origin: z.string().optional().prefault("api"),
   integration: integrationSchema.optional().transform(val => val || null),
@@ -947,10 +951,10 @@ export type ScrapeRequest = z.infer<typeof scrapeRequestSchema>;
 // This is needed because zod v4's .strict() changes type inference for optional fields
 // We explicitly make formats optional since it has .prefault() which should make it optional
 export type ScrapeRequestInput = Omit<
-  z.input<typeof baseScrapeOptions>,
+  z.input<typeof browserLiveScrapeOptions>,
   "formats"
 > & {
-  formats?: z.input<typeof baseScrapeOptions>["formats"];
+  formats?: z.input<typeof browserLiveScrapeOptions>["formats"];
 } & {
   url: z.input<typeof URL>;
   origin?: string;
@@ -1008,7 +1012,7 @@ export const parseRequestSchema = strictWithMessage(parseRequestSchemaBase)
 export type ParseRequest = z.infer<typeof parseRequestSchema>;
 export type ParseRequestInput = z.input<typeof parseRequestSchemaBase>;
 
-const batchScrapeRequestSchemaBase = baseScrapeOptions.extend({
+const batchScrapeRequestSchemaBase = browserLiveScrapeOptions.extend({
   urls: URL.array().min(1),
   origin: z.string().optional().prefault("api"),
   integration: integrationSchema.optional().transform(val => val || null),
@@ -1032,23 +1036,24 @@ export const batchScrapeRequestSchema = strictWithMessage(
   .refine(waitForRefine, waitForRefineOpts)
   .transform(extractTransformRequired);
 
-const batchScrapeRequestSchemaNoURLValidationBase = baseScrapeOptions.extend({
-  urls: z.string().array().min(1),
-  origin: z.string().optional().prefault("api"),
-  integration: integrationSchema.optional().transform(val => val || null),
-  webhook: webhookSchema.optional(),
-  appendToId: z.uuid().optional(),
-  ignoreInvalidURLs: z.boolean().prefault(true),
-  maxConcurrency: z.int().positive().optional(),
-  zeroDataRetention: z.boolean().optional(),
-  __agentInterop: z
-    .object({
-      auth: z.string(),
-      requestId: z.string(),
-      shouldBill: z.boolean(),
-    })
-    .optional(),
-});
+const batchScrapeRequestSchemaNoURLValidationBase =
+  browserLiveScrapeOptions.extend({
+    urls: z.string().array().min(1),
+    origin: z.string().optional().prefault("api"),
+    integration: integrationSchema.optional().transform(val => val || null),
+    webhook: webhookSchema.optional(),
+    appendToId: z.uuid().optional(),
+    ignoreInvalidURLs: z.boolean().prefault(true),
+    maxConcurrency: z.int().positive().optional(),
+    zeroDataRetention: z.boolean().optional(),
+    __agentInterop: z
+      .object({
+        auth: z.string(),
+        requestId: z.string(),
+        shouldBill: z.boolean(),
+      })
+      .optional(),
+  });
 
 export const batchScrapeRequestSchemaNoURLValidation = strictWithMessage(
   batchScrapeRequestSchemaNoURLValidationBase,
@@ -1060,10 +1065,10 @@ export type BatchScrapeRequest = z.infer<typeof batchScrapeRequestSchema>;
 // Use z.input on the base schema before strict() to preserve optional fields with defaults
 // We explicitly make formats optional since it has .prefault() which should make it optional
 export type BatchScrapeRequestInput = Omit<
-  z.input<typeof baseScrapeOptions>,
+  z.input<typeof browserLiveScrapeOptions>,
   "formats"
 > & {
-  formats?: z.input<typeof baseScrapeOptions>["formats"];
+  formats?: z.input<typeof browserLiveScrapeOptions>["formats"];
 } & {
   urls: z.input<typeof URL>[];
   origin?: string;
@@ -1115,7 +1120,9 @@ const crawlRequestSchemaBase = crawlerOptions.extend({
   url: URL,
   origin: z.string().optional().prefault("api"),
   integration: integrationSchema.optional().transform(val => val || null),
-  scrapeOptions: baseScrapeOptions.prefault(() => baseScrapeOptions.parse({})),
+  scrapeOptions: browserLiveScrapeOptions.prefault(() =>
+    browserLiveScrapeOptions.parse({}),
+  ),
   webhook: webhookSchema.optional(),
   limit: z.number().prefault(10000),
   maxConcurrency: z.int().positive().optional(),
@@ -1202,6 +1209,7 @@ export type Document = {
   branding?: BrandingProfile;
   warning?: string;
   warnings?: Warning[];
+  live?: LiveMetadata;
   attributes?: {
     selector: string;
     attribute: string;
@@ -1286,6 +1294,7 @@ export type Document = {
     cachedAt?: string;
     creditsUsed?: number;
     postprocessorsUsed?: string[];
+    live?: LiveMetadata;
     indexId?: string; // ID used to store the document in the index (GCS)
     concurrencyLimited?: boolean;
     concurrencyQueueDurationMs?: number;
@@ -1312,6 +1321,39 @@ export type VideoItem = {
   width?: number;
   height?: number;
   metadata?: Record<string, unknown>;
+};
+
+export type LiveMetadata = {
+  mode: "single" | "multi";
+  status: "streaming" | "completed" | "unavailable" | "warning";
+  sessionId?: string;
+  scrapeId?: string;
+  activeSessionId?: string;
+  liveViewUrl?: string;
+  liveViewWsUrl?: string;
+  screenshotUrl?: string;
+  recordingUrl?: string;
+  framesCaptured?: number;
+  recordingDurationMs?: number;
+  warning?: string;
+  warnings?: Warning[];
+  error?: {
+    code?: ErrorCodes | WarningCodes;
+    message: string;
+    details?: Record<string, unknown>;
+  };
+  sessions?: {
+    scrapeId?: string;
+    sessionId: string;
+    status: "streaming" | "completed" | "unavailable" | "warning";
+    liveViewUrl?: string;
+    liveViewWsUrl?: string;
+    screenshotUrl?: string;
+    recordingUrl?: string;
+    framesCaptured?: number;
+    recordingDurationMs?: number;
+    warning?: string;
+  }[];
 };
 
 export enum ResponseStatus {
@@ -1396,6 +1438,7 @@ export type ResponseCore = {
   diagnostics: Diagnostics;
   warning?: string;
   warnings?: Warning[];
+  live?: LiveMetadata;
 };
 
 type ErrorCore = ResponseCore & {
@@ -2010,7 +2053,7 @@ export const searchRequestSchema = z
     // scrapeURL. Falls back to the provider snippet when the URL isn't indexed.
     highlights: z.boolean().optional().prefault(false),
     __searchPreviewToken: z.string().optional(),
-    scrapeOptions: baseScrapeOptions
+    scrapeOptions: browserLiveScrapeOptions
       .extend({
         formats: z
           .preprocess(

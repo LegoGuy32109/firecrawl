@@ -15,6 +15,7 @@ import {
   GatingError,
   LifecycleError,
   LocalError,
+  LiveWarning,
   MapError,
   MapWarning,
   MediaWarning,
@@ -484,6 +485,22 @@ export const WARNING_CATALOG = {
   [ScrapeWarning.ENGINE_PARTIAL_FEATURES]: warn(
     "The selected engine does not support every requested feature.",
     "Review the result and use supported formats/actions.",
+  ),
+  [LiveWarning.CAPTURE_UNAVAILABLE]: warn(
+    "Live capture is unavailable for this request.",
+    "Retry with a browser-capable local endpoint or disable live capture.",
+  ),
+  [LiveWarning.RECORDING_FAILED]: warn(
+    "Live recording could not be saved.",
+    "Review the local service logs or proceed with screenshot-only capture.",
+  ),
+  [LiveWarning.SCREENSHOT_FAILED]: warn(
+    "Live screenshot capture failed.",
+    "Retry the request or continue without the screenshot artifact.",
+  ),
+  [LiveWarning.WS_PROXY_FAILED]: warn(
+    "Live view WebSocket proxy failed.",
+    "Reconnect the viewer or retry the request.",
   ),
   [ExtractWarning.CONTENT_TRIMMED_CHARS]: warn(
     "Extraction input was trimmed by character limit.",

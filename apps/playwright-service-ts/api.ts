@@ -1,4 +1,5 @@
 import express, { Request, Response } from "express";
+import http from "http";
 import {
   chromium,
   Browser,
@@ -12,6 +13,11 @@ import UserAgent from "user-agents";
 import { getError } from "./helpers/get_error";
 import { lookup } from "dns/promises";
 import IPAddr from "ipaddr.js";
+import { copyFile, mkdir, readFile, rm } from "fs/promises";
+import os from "os";
+import path from "path";
+import crypto from "crypto";
+import { createRequire } from "module";
 
 dotenv.config();
 
@@ -221,9 +227,318 @@ interface UrlModel {
     languages?: string[];
   };
   actions?: ScrapeAction[];
+  __playgroundLive?: boolean;
+}
+
+interface BrowserCreateRequest {
+  ttl?: number;
+  activityTtl?: number;
+  streamWebView?: boolean;
+  persistentStorage?: { uniqueId: string; write: boolean };
+}
+
+interface BrowserExecRequest {
+  code: string;
+  language?: "python" | "node" | "bash";
+  timeout?: number;
+  origin?: string;
+}
+
+interface BrowserServiceCreateResponse {
+  sessionId: string;
+  cdpUrl: string;
+  viewUrl: string;
+  iframeUrl: string;
+  interactiveIframeUrl: string;
+  expiresAt: string;
+  live?: {
+    mode: "single";
+    status: "streaming" | "completed" | "unavailable" | "warning";
+    sessionId?: string;
+    liveViewUrl?: string;
+    liveViewWsUrl?: string;
+    screenshotUrl?: string;
+    recordingUrl?: string;
+    framesCaptured?: number;
+    recordingDurationMs?: number;
+    warning?: string;
+    warnings?: Array<{ code: string; message: string; details?: Record<string, unknown> }>;
+  };
+}
+
+interface BrowserServiceExecResponse {
+  stdout: string;
+  result: string;
+  stderr: string;
+  exitCode: number;
+  killed: boolean;
+}
+
+interface BrowserServiceDeleteResponse {
+  ok: boolean;
+  sessionDurationMs?: number;
+  screenshotUrl?: string;
+  recordingUrl?: string;
+  framesCaptured?: number;
+  recordingDurationMs?: number;
+  live?: {
+    mode: "single";
+    status: "streaming" | "completed" | "unavailable" | "warning";
+    sessionId?: string;
+    liveViewUrl?: string;
+    liveViewWsUrl?: string;
+    screenshotUrl?: string;
+    recordingUrl?: string;
+    framesCaptured?: number;
+    recordingDurationMs?: number;
+    warning?: string;
+    warnings?: Array<{ code: string; message: string; details?: Record<string, unknown> }>;
+  };
 }
 
 let browser: Browser;
+const nodeRequire = createRequire(__filename);
+const { WebSocketServer, WebSocket } = require("ws");
+
+type ScreencastFrameEnvelope = {
+  type: "frame";
+  mimeType: "image/jpeg";
+  data: string;
+  frameIndex: number;
+  timestamp: number;
+};
+
+type LiveSessionRecord = {
+  sessionId: string;
+  context: BrowserContext;
+  page: Page;
+  cdp: any;
+  clients: Set<any>;
+  latestFrame: ScreencastFrameEnvelope | null;
+  frameCount: number;
+  createdAt: number;
+  artifactDir: string;
+  screenshotPath: string | null;
+  recordingPath: string | null;
+  recordingEnabled: boolean;
+  interactive: boolean;
+};
+
+type ScrapeArtifactRecord = {
+  artifactDir: string;
+  screenshotPath?: string;
+  recordingPath?: string;
+};
+
+const browserSessions = new Map<string, LiveSessionRecord>();
+const scrapeArtifacts = new Map<string, ScrapeArtifactRecord>();
+const serviceArtifactRoot = path.join(os.tmpdir(), "firecrawl-playwright-service");
+
+async function ensureDir(dir: string): Promise<void> {
+  await mkdir(dir, { recursive: true });
+}
+
+function browserSessionArtifactPath(sessionId: string, name: string): string {
+  return path.join(serviceArtifactRoot, "browser", sessionId, name);
+}
+
+function scrapeSessionArtifactPath(scrapeId: string, name: string): string {
+  return path.join(serviceArtifactRoot, "scrape", scrapeId, name);
+}
+
+function browserLivePath(sessionId: string): string {
+  return `/browsers/${encodeURIComponent(sessionId)}/view`;
+}
+
+function browserLiveWsPath(sessionId: string): string {
+  return `/browsers/${encodeURIComponent(sessionId)}/view/ws`;
+}
+
+function browserArtifactUrl(sessionId: string, name: string): string {
+  return `/browsers/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(name)}`;
+}
+
+function scrapeArtifactUrl(scrapeId: string, name: string): string {
+  return `/scrapes/${encodeURIComponent(scrapeId)}/artifacts/${encodeURIComponent(name)}`;
+}
+
+function apiBrowserLiveViewPath(sessionId: string): string {
+  return `/v2/live/browser/${encodeURIComponent(sessionId)}/view`;
+}
+
+function apiBrowserLiveWsPath(sessionId: string): string {
+  return `/v2/live/browser/${encodeURIComponent(sessionId)}/ws`;
+}
+
+function apiBrowserArtifactPath(sessionId: string, name: string): string {
+  return `/v2/live/browser/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(name)}`;
+}
+
+function apiScrapeArtifactPath(scrapeId: string, name: string): string {
+  return `/v2/live/scrape/${encodeURIComponent(scrapeId)}/artifacts/${encodeURIComponent(name)}`;
+}
+
+function serializeValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function appendLiveWarning(
+  warnings: Array<{ code: string; message: string; details?: Record<string, unknown> }>,
+  code: string,
+  message: string,
+  details?: Record<string, unknown>,
+) {
+  warnings.push({ code, message, ...(details ? { details } : {}) });
+}
+
+function buildLiveMetadata(
+  kind: "browser" | "scrape",
+  id: string,
+  status: "streaming" | "completed" | "unavailable" | "warning",
+  extra: Partial<{
+    screenshotUrl: string;
+    recordingUrl: string;
+    framesCaptured: number;
+    recordingDurationMs: number;
+    warning: string;
+    warnings: Array<{ code: string; message: string; details?: Record<string, unknown> }>;
+    error: { code?: string; message: string; details?: Record<string, unknown> };
+  }> = {},
+) {
+  const base =
+    kind === "browser"
+      ? {
+          sessionId: id,
+          liveViewUrl: apiBrowserLiveViewPath(id),
+          liveViewWsUrl: apiBrowserLiveWsPath(id),
+        }
+      : {
+          scrapeId: id,
+        };
+
+  return {
+    mode: "single" as const,
+    status,
+    ...base,
+    ...(extra.warning ? { warning: extra.warning } : {}),
+    ...(extra.warnings ? { warnings: extra.warnings } : {}),
+    ...(extra.error ? { error: extra.error } : {}),
+    ...(extra.screenshotUrl ? { screenshotUrl: extra.screenshotUrl } : {}),
+    ...(extra.recordingUrl ? { recordingUrl: extra.recordingUrl } : {}),
+    ...(extra.framesCaptured !== undefined
+      ? { framesCaptured: extra.framesCaptured }
+      : {}),
+    ...(extra.recordingDurationMs !== undefined
+      ? { recordingDurationMs: extra.recordingDurationMs }
+      : {}),
+  };
+}
+
+async function captureBrowserArtifacts(session: LiveSessionRecord) {
+  const warnings: Array<{ code: string; message: string; details?: Record<string, unknown> }> = [];
+  let screenshotUrl: string | undefined;
+  let recordingUrl: string | undefined;
+  let recordingDurationMs: number | undefined;
+
+  try {
+    const screenshotPath = browserSessionArtifactPath(session.sessionId, "final.jpeg");
+    await session.page.screenshot({ path: screenshotPath, type: "jpeg" });
+    session.screenshotPath = screenshotPath;
+    screenshotUrl = apiBrowserArtifactPath(session.sessionId, "final.jpeg");
+  } catch (error) {
+    appendLiveWarning(
+      warnings,
+      "LIVE_SCREENSHOT_FAILED",
+      "Final screenshot capture failed.",
+      {
+        sessionId: session.sessionId,
+        reason: error instanceof Error ? error.message : String(error),
+      },
+    );
+  }
+
+  return {
+    screenshotUrl,
+    recordingUrl,
+    recordingDurationMs,
+    warnings,
+  };
+}
+
+async function startBrowserScreencast(session: LiveSessionRecord) {
+  session.cdp = await session.context.newCDPSession(session.page);
+  await session.cdp.send("Page.startScreencast", {
+    format: "jpeg",
+    quality: 80,
+    everyNthFrame: 1,
+  });
+
+  session.cdp.on("Page.screencastFrame", async (event: any) => {
+    session.frameCount += 1;
+    const envelope: ScreencastFrameEnvelope = {
+      type: "frame",
+      mimeType: "image/jpeg",
+      data: event.data,
+      frameIndex: session.frameCount,
+      timestamp: Date.now(),
+    };
+    session.latestFrame = envelope;
+    for (const client of session.clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(envelope));
+      }
+    }
+    try {
+      await session.cdp.send("Page.screencastFrameAck", {
+        sessionId: event.sessionId,
+      });
+    } catch {}
+  });
+}
+
+function attachBrowserSessionClient(session: LiveSessionRecord, client: any) {
+  session.clients.add(client);
+  client.send(
+    JSON.stringify({
+      type: "status",
+      status: "streaming",
+      sessionId: session.sessionId,
+      frameCount: session.frameCount,
+    }),
+  );
+  if (session.latestFrame) {
+    client.send(JSON.stringify(session.latestFrame));
+  } else {
+    void (async () => {
+      try {
+        const screenshot = await session.page.screenshot({
+          type: "jpeg",
+          quality: 80,
+        });
+        const envelope: ScreencastFrameEnvelope = {
+          type: "frame",
+          mimeType: "image/jpeg",
+          data: screenshot.toString("base64"),
+          frameIndex: session.frameCount + 1,
+          timestamp: Date.now(),
+        };
+        session.latestFrame = envelope;
+        session.frameCount = envelope.frameIndex;
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify(envelope));
+        }
+      } catch {}
+    })();
+  }
+  client.on("close", () => {
+    session.clients.delete(client);
+  });
+}
 
 type ScrapeAction =
   | { type: "wait"; milliseconds?: number; selector?: string }
@@ -284,6 +599,7 @@ const createContext = async (
   userAgentOverride?: string,
   mobile: boolean = false,
   location?: UrlModel["location"],
+  recordVideoDir?: string,
 ): Promise<{
   context: BrowserContext;
   securityState: ContextSecurityState;
@@ -303,6 +619,13 @@ const createContext = async (
     ignoreHTTPSErrors: skipTlsVerification,
     serviceWorkers: "block",
   };
+
+  if (recordVideoDir) {
+    contextOptions.recordVideo = {
+      dir: recordVideoDir,
+      size: viewport,
+    };
+  }
 
   if (mobile) {
     contextOptions.isMobile = true;
@@ -383,6 +706,275 @@ const shutdownBrowser = async () => {
     await browser.close();
   }
 };
+
+async function createLiveBrowserSession(options: {
+  live: boolean;
+  recording: boolean;
+  skipTlsVerification?: boolean;
+  userAgentOverride?: string;
+  mobile?: boolean;
+  location?: UrlModel["location"];
+}): Promise<LiveSessionRecord> {
+  if (!browser) {
+    await initializeBrowser();
+  }
+
+  const sessionId = crypto.randomUUID();
+  const artifactDir = path.join(serviceArtifactRoot, "browser", sessionId);
+  await ensureDir(artifactDir);
+
+  const contextBundle = await createContext(
+    options.skipTlsVerification ?? false,
+    options.userAgentOverride,
+    options.mobile ?? false,
+    options.location,
+    options.recording ? artifactDir : undefined,
+  );
+  const page = await contextBundle.context.newPage();
+  await page.setContent(
+    `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Request processing</title>
+    <style>
+      html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: #111;
+        color: #f5f5f5;
+        font-family: Arial, sans-serif;
+      }
+      body {
+        display: grid;
+        place-items: center;
+      }
+      .panel {
+        padding: 24px 32px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.04);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+      }
+      .title {
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+      .subtitle {
+        margin-top: 8px;
+        font-size: 13px;
+        opacity: 0.72;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="panel">
+      <div class="title">Request processing</div>
+      <div class="subtitle">Waiting for the first browser frame...</div>
+    </div>
+  </body>
+</html>`,
+  );
+  const session: LiveSessionRecord = {
+    sessionId,
+    context: contextBundle.context,
+    page,
+    cdp: undefined as unknown as LiveSessionRecord["cdp"],
+    clients: new Set<WebSocket>(),
+    latestFrame: null,
+    frameCount: 0,
+    createdAt: Date.now(),
+    artifactDir,
+    screenshotPath: null,
+    recordingPath: null,
+    recordingEnabled: options.recording,
+    interactive: options.live,
+  };
+
+  if (options.live) {
+    await startBrowserScreencast(session);
+  }
+
+  browserSessions.set(sessionId, session);
+  return session;
+}
+
+async function runNodeCode(
+  session: LiveSessionRecord,
+  code: string,
+): Promise<BrowserServiceExecResponse> {
+  const logs: string[] = [];
+  const captureConsole = (...args: unknown[]) => {
+    logs.push(args.map(serializeValue).join(" "));
+  };
+
+  try {
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    const fn = new AsyncFunction(
+      "page",
+      "context",
+      "browser",
+      "console",
+      "require",
+      "process",
+      "__dirname",
+      "__filename",
+      `"use strict"; return (async () => { ${code} })();`,
+    );
+    const result = await fn(
+      session.page,
+      session.context,
+      browser,
+      { log: captureConsole, info: captureConsole, warn: captureConsole, error: captureConsole },
+      nodeRequire,
+      process,
+      __dirname,
+      __filename,
+    );
+    return {
+      stdout: logs.join("\n"),
+      result: serializeValue(result),
+      stderr: "",
+      exitCode: 0,
+      killed: false,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      stdout: logs.join("\n"),
+      result: "",
+      stderr: message,
+      exitCode: 1,
+      killed: false,
+    };
+  }
+}
+
+async function runBashCode(
+  session: LiveSessionRecord,
+  code: string,
+): Promise<BrowserServiceExecResponse> {
+  const trimmed = code.trim();
+  if (trimmed === "agent-browser get url") {
+    return {
+      stdout: session.page.url(),
+      result: session.page.url(),
+      stderr: "",
+      exitCode: 0,
+      killed: false,
+    };
+  }
+
+  if (trimmed === "agent-browser snapshot -i") {
+    const text = await session.page.locator("body").innerText().catch(() => "");
+    return {
+      stdout: text,
+      result: text,
+      stderr: "",
+      exitCode: 0,
+      killed: false,
+    };
+  }
+
+  return {
+    stdout: "",
+    result: "",
+    stderr: `Unsupported bash command: ${trimmed}`,
+    exitCode: 1,
+    killed: false,
+  };
+}
+
+async function executeBrowserSessionCode(
+  sessionId: string,
+  params: { code: string; language: string; timeout: number },
+): Promise<BrowserServiceExecResponse> {
+  const session = browserSessions.get(sessionId);
+  if (!session) {
+    return {
+      stdout: "",
+      result: "",
+      stderr: "Session not found",
+      exitCode: 1,
+      killed: false,
+    };
+  }
+
+  if (params.language === "bash") {
+    return runBashCode(session, params.code);
+  }
+
+  return runNodeCode(session, params.code);
+}
+
+async function finalizeBrowserSession(sessionId: string): Promise<
+  BrowserServiceDeleteResponse & {
+    screenshotUrl?: string;
+    recordingUrl?: string;
+    framesCaptured?: number;
+    recordingDurationMs?: number;
+  }
+> {
+  const session = browserSessions.get(sessionId);
+  if (!session) {
+    return { ok: true };
+  }
+
+  const elapsed = Date.now() - session.createdAt;
+  const artifacts = await captureBrowserArtifacts(session);
+  const warnings = [...artifacts.warnings];
+  let screenshotUrl: string | undefined;
+  let recordingUrl: string | undefined;
+  let framesCaptured: number | undefined;
+  let recordingDurationMs: number | undefined;
+  const video = session.page.video();
+
+  try {
+    await session.context.close();
+  } catch {
+    try {
+      await session.context.close();
+    } catch {}
+  }
+
+  screenshotUrl = artifacts.screenshotUrl;
+  recordingDurationMs = artifacts.recordingDurationMs;
+  if (video) {
+    try {
+      const videoPath = await video.path();
+      const videoDest = browserSessionArtifactPath(sessionId, "recording.webm");
+      await rm(videoDest, { force: true }).catch(() => {});
+      await copyFile(videoPath, videoDest);
+      session.recordingPath = videoDest;
+      recordingUrl = apiBrowserArtifactPath(sessionId, "recording.webm");
+      recordingDurationMs = elapsed;
+    } catch (error) {
+      appendLiveWarning(
+        warnings,
+        "LIVE_RECORDING_FAILED",
+        "Recording artifact capture failed.",
+        {
+          sessionId,
+          reason: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
+  }
+  framesCaptured = session.frameCount;
+  browserSessions.delete(sessionId);
+
+  return {
+    ok: true,
+    sessionDurationMs: elapsed,
+    screenshotUrl,
+    recordingUrl,
+    framesCaptured,
+    recordingDurationMs,
+  };
+}
 
 const isValidUrl = (urlString: string): boolean => {
   try {
@@ -549,6 +1141,275 @@ const executeActions = async (
   return results;
 };
 
+app.get("/browsers/:sessionId/view", async (req: Request, res: Response) => {
+  res.status(200).type("html").send(renderBrowserViewHtml(String(req.params.sessionId)));
+});
+
+app.get("/browsers/:sessionId/artifacts/:name", async (req: Request, res: Response) => {
+  const sessionId = String(req.params.sessionId);
+  const name = safeArtifactFilename(String(req.params.name));
+  if (!name) {
+    return res.status(400).json({ error: "Invalid artifact name" });
+  }
+  const artifactPath = browserSessionArtifactPath(sessionId, name);
+  try {
+    const file = await readArtifactResponse(artifactPath);
+    return res.status(200).type(file.contentType).send(file.body);
+  } catch {
+    return res.status(404).json({ error: "Artifact not found" });
+  }
+});
+
+app.post("/browsers", async (req: Request, res: Response) => {
+  const body = (req.body ?? {}) as BrowserCreateRequest;
+  const streamWebView = body.streamWebView !== false;
+  const session = await createLiveBrowserSession({
+    live: streamWebView,
+    recording: streamWebView,
+  });
+
+  return res.status(200).json({
+    sessionId: session.sessionId,
+    cdpUrl: browserLiveWsPath(session.sessionId),
+    viewUrl: browserLivePath(session.sessionId),
+    iframeUrl: browserLivePath(session.sessionId),
+    interactiveIframeUrl: `${browserLivePath(session.sessionId)}?interactive=1`,
+    expiresAt: new Date(Date.now() + (body.ttl ?? 600) * 1000).toISOString(),
+    live: buildLiveMetadata("browser", session.sessionId, "streaming"),
+  } satisfies BrowserServiceCreateResponse);
+});
+
+app.post(
+  "/browsers/:sessionId/exec",
+  async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as BrowserExecRequest;
+    if (!body.code || typeof body.code !== "string") {
+      return res.status(400).json({
+        stdout: "",
+        result: "",
+        stderr: "Code is required",
+        exitCode: 1,
+        killed: false,
+      } satisfies BrowserServiceExecResponse);
+    }
+
+    const execResult = await executeBrowserSessionCode(String(req.params.sessionId), {
+      code: body.code,
+      language: body.language ?? "node",
+      timeout: body.timeout ?? 30,
+    });
+    return res.status(execResult.exitCode === 0 ? 200 : 422).json(execResult);
+  },
+);
+
+app.delete("/browsers/:sessionId", async (req: Request, res: Response) => {
+  const sessionId = String(req.params.sessionId);
+  const deleteResult = await finalizeBrowserSession(sessionId);
+  return res.status(200).json({
+    ...deleteResult,
+    live: buildLiveMetadata("browser", sessionId, "completed", {
+      screenshotUrl: deleteResult.screenshotUrl,
+      recordingUrl: deleteResult.recordingUrl,
+      framesCaptured: deleteResult.framesCaptured,
+      recordingDurationMs: deleteResult.recordingDurationMs,
+    }),
+  });
+});
+
+app.get("/scrapes/:scrapeId/artifacts/:name", async (req: Request, res: Response) => {
+  const scrapeId = String(req.params.scrapeId);
+  const name = safeArtifactFilename(String(req.params.name));
+  if (!name) {
+    return res.status(400).json({ error: "Invalid artifact name" });
+  }
+  const artifactPath = scrapeSessionArtifactPath(scrapeId, name);
+  try {
+    const file = await readArtifactResponse(artifactPath);
+    return res.status(200).type(file.contentType).send(file.body);
+  } catch {
+    return res.status(404).json({ error: "Artifact not found" });
+  }
+});
+
+function safeArtifactFilename(name: string): string | null {
+  const base = path.posix.basename(name);
+  if (!base || base === "." || base === "..") {
+    return null;
+  }
+  return base;
+}
+
+async function readArtifactResponse(
+  artifactPath: string,
+): Promise<{ body: Buffer; contentType: string }> {
+  const body = await readFile(artifactPath);
+  const ext = path.extname(artifactPath).toLowerCase();
+  const contentType =
+    ext === ".jpeg" || ext === ".jpg"
+      ? "image/jpeg"
+      : ext === ".webm"
+        ? "video/webm"
+        : ext === ".png"
+          ? "image/png"
+          : "application/octet-stream";
+  return { body, contentType };
+}
+
+async function createScrapeArtifacts(
+  scrapeId: string,
+  page: Page,
+  recordingEnabled: boolean,
+): Promise<{
+  warnings: Array<{ code: string; message: string; details?: Record<string, unknown> }>;
+  screenshotUrl?: string;
+  recordingUrl?: string;
+}> {
+  const warnings: Array<{ code: string; message: string; details?: Record<string, unknown> }> = [];
+  const artifactDir = path.join(serviceArtifactRoot, "scrape", scrapeId);
+  await ensureDir(artifactDir);
+
+  let screenshotUrl: string | undefined;
+  try {
+    const screenshotPath = scrapeSessionArtifactPath(scrapeId, "final.jpeg");
+    await page.screenshot({ path: screenshotPath, type: "jpeg" });
+    const record = scrapeArtifacts.get(scrapeId) ?? { artifactDir };
+    record.artifactDir = artifactDir;
+    record.screenshotPath = screenshotPath;
+    scrapeArtifacts.set(scrapeId, record);
+    screenshotUrl = apiScrapeArtifactPath(scrapeId, "final.jpeg");
+  } catch (error) {
+    appendLiveWarning(warnings, "LIVE_SCREENSHOT_FAILED", "Screenshot capture failed.", {
+      scrapeId,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  if (recordingEnabled) {
+    try {
+      const video = page.video();
+      if (video) {
+        const videoPath = await video.path();
+        const record = scrapeArtifacts.get(scrapeId) ?? { artifactDir };
+        const videoDest = scrapeSessionArtifactPath(scrapeId, "recording.webm");
+        await rm(videoDest, { force: true }).catch(() => {});
+        await copyFile(videoPath, videoDest);
+        record.recordingPath = videoDest;
+        record.artifactDir = artifactDir;
+        scrapeArtifacts.set(scrapeId, record);
+        return {
+          warnings,
+          screenshotUrl,
+          recordingUrl: apiScrapeArtifactPath(scrapeId, "recording.webm"),
+        };
+      }
+    } catch (error) {
+      appendLiveWarning(
+        warnings,
+        "LIVE_RECORDING_FAILED",
+        "Recording artifact capture failed.",
+        {
+          scrapeId,
+          reason: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
+  }
+
+  scrapeArtifacts.set(scrapeId, {
+    artifactDir,
+    screenshotPath: screenshotUrl ? scrapeSessionArtifactPath(scrapeId, "final.jpeg") : undefined,
+  });
+
+  return {
+    warnings,
+    screenshotUrl,
+  };
+}
+
+function renderBrowserViewHtml(sessionId: string): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Firecrawl Live View</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0b1020; color: #e5eefc; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    body { display: grid; place-items: center; }
+    .shell { width: min(100vw, 1280px); height: min(100vh, 900px); display: grid; grid-template-rows: auto 1fr; gap: 12px; padding: 12px; box-sizing: border-box; }
+    .status { padding: 10px 12px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); border-radius: 10px; }
+    canvas { width: 100%; height: 100%; background: #11182d; border-radius: 12px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="status" id="status">Request processing...</div>
+    <canvas id="canvas"></canvas>
+  </div>
+  <script>
+    const statusEl = document.getElementById('status');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const setStatus = (value) => { statusEl.textContent = value; };
+    const fitCanvas = () => {
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = Math.max(1, Math.floor(rect.width * devicePixelRatio));
+      canvas.height = Math.max(1, Math.floor(rect.height * devicePixelRatio));
+    };
+    const drawPlaceholder = () => {
+      fitCanvas();
+      ctx.fillStyle = '#11182d';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#c7d2fe';
+      ctx.font = String(Math.max(18, Math.floor(canvas.width / 40))) + 'px ui-monospace, monospace';
+      ctx.fillText('Request processing...', 24, 48);
+    };
+    let reconnectTimer = null;
+    const connect = () => {
+      setStatus('Connecting live stream...');
+      drawPlaceholder();
+      const wsUrl = new URL('./ws', location.href);
+      wsUrl.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(wsUrl.toString());
+      ws.onopen = () => setStatus('Streaming');
+      ws.onmessage = (event) => {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'frame' && payload.data) {
+          const img = new Image();
+          img.onload = () => {
+            fitCanvas();
+            ctx.fillStyle = '#11182d';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            const scale = Math.min(
+              canvas.width / img.width,
+              canvas.height / img.height,
+            );
+            const drawWidth = Math.max(1, Math.floor(img.width * scale));
+            const drawHeight = Math.max(1, Math.floor(img.height * scale));
+            const x = Math.floor((canvas.width - drawWidth) / 2);
+            const y = Math.floor((canvas.height - drawHeight) / 2);
+            ctx.drawImage(img, x, y, drawWidth, drawHeight);
+          };
+          img.src = 'data:image/jpeg;base64,' + payload.data;
+        } else if (payload.type === 'status' && payload.status) {
+          setStatus(payload.status === 'streaming' ? 'Streaming' : String(payload.status));
+        }
+      };
+      ws.onerror = () => setStatus('Live stream error');
+      ws.onclose = () => {
+        setStatus('Live stream closed');
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(connect, 1000);
+      };
+      window.addEventListener('resize', drawPlaceholder, { once: true });
+    };
+    drawPlaceholder();
+    connect();
+  </script>
+</body>
+</html>`;
+}
+
 app.get("/health", async (req: Request, res: Response) => {
   try {
     if (!browser) {
@@ -587,6 +1448,7 @@ app.post("/scrape", async (req: Request, res: Response) => {
     mobile = false,
     location,
     actions = [],
+    __playgroundLive = false,
   }: UrlModel = req.body;
 
   console.log(`================= Scrape Request =================`);
@@ -636,6 +1498,15 @@ app.post("/scrape", async (req: Request, res: Response) => {
   let requestContext: BrowserContext | null = null;
   let securityState: ContextSecurityState | null = null;
   let page: Page | null = null;
+  const scrapeId = crypto.randomUUID();
+  const liveCaptureEnabled = __playgroundLive === true;
+  let liveResponse:
+    | {
+        live?: ReturnType<typeof buildLiveMetadata>;
+        warnings?: Array<{ code: string; message: string; details?: Record<string, unknown> }>;
+      }
+    | undefined;
+  let pageVideo: ReturnType<Page["video"]> | null = null;
 
   try {
     // Extract user-agent from request headers (case-insensitive) so it can
@@ -652,6 +1523,7 @@ app.post("/scrape", async (req: Request, res: Response) => {
       userAgentOverride,
       mobile,
       location,
+      liveCaptureEnabled ? path.join(serviceArtifactRoot, "scrape", scrapeId) : undefined,
     );
     requestContext = contextBundle.context;
     securityState = contextBundle.securityState;
@@ -758,6 +1630,56 @@ app.post("/scrape", async (req: Request, res: Response) => {
       screenshotData = screenshotBuffer.toString("base64");
     }
 
+    if (liveCaptureEnabled) {
+      pageVideo = page.video();
+      try {
+        await ensureDir(path.join(serviceArtifactRoot, "scrape", scrapeId));
+        const screenshotPath = scrapeSessionArtifactPath(scrapeId, "final.jpeg");
+        await page.screenshot({
+          type: "jpeg",
+          quality: 80,
+          fullPage: full_page_screenshot,
+          path: screenshotPath,
+        });
+        scrapeArtifacts.set(scrapeId, {
+          artifactDir: path.join(serviceArtifactRoot, "scrape", scrapeId),
+          screenshotPath,
+        });
+        liveResponse = {
+          live: buildLiveMetadata("scrape", scrapeId, "completed", {
+            screenshotUrl: apiScrapeArtifactPath(scrapeId, "final.jpeg"),
+          }),
+          warnings: [],
+        };
+      } catch (error) {
+        liveResponse = {
+          live: buildLiveMetadata("scrape", scrapeId, "warning", {
+            warning: "Live capture is unavailable for this request.",
+            warnings: [
+              {
+                code: "LIVE_CAPTURE_UNAVAILABLE",
+                message: "Live capture is unavailable for this request.",
+                details: {
+                  dependency: "browser-service",
+                  reason: error instanceof Error ? error.message : String(error),
+                },
+              },
+            ],
+          }),
+          warnings: [
+            {
+              code: "LIVE_CAPTURE_UNAVAILABLE",
+              message: "Live capture is unavailable for this request.",
+              details: {
+                dependency: "browser-service",
+                reason: error instanceof Error ? error.message : String(error),
+              },
+            },
+          ],
+        };
+      }
+    }
+
     if (!pageError) {
       console.log(`✅ Scrape successful!`);
     } else {
@@ -766,14 +1688,74 @@ app.post("/scrape", async (req: Request, res: Response) => {
       );
     }
 
-    res.json({
+    liveResponse = liveResponse ?? undefined;
+
+    const responseBody = {
       content: result.content,
       pageStatusCode: result.status,
       contentType: result.contentType,
       ...(pageError && { pageError }),
       ...(screenshotData !== undefined && { screenshot: screenshotData }),
       ...(actionResults.length > 0 && { actionResults }),
-    });
+      ...(liveResponse?.live ? { live: liveResponse.live } : {}),
+      ...(liveResponse?.warnings && liveResponse.warnings.length > 0
+        ? { warnings: liveResponse.warnings }
+        : {}),
+    };
+
+    if (liveCaptureEnabled) {
+      await page.close().catch(() => {});
+      page = null;
+      if (requestContext) {
+        await requestContext.close().catch(() => {});
+        requestContext = null;
+      }
+      if (pageVideo) {
+        try {
+          const videoPath = await pageVideo.path();
+          const videoDest = scrapeSessionArtifactPath(scrapeId, "recording.webm");
+          await rm(videoDest, { force: true }).catch(() => {});
+          await copyFile(videoPath, videoDest);
+          scrapeArtifacts.set(scrapeId, {
+            artifactDir: path.join(serviceArtifactRoot, "scrape", scrapeId),
+            screenshotPath: scrapeSessionArtifactPath(scrapeId, "final.jpeg"),
+            recordingPath: videoDest,
+          });
+          responseBody.live = buildLiveMetadata("scrape", scrapeId, "completed", {
+            screenshotUrl: apiScrapeArtifactPath(scrapeId, "final.jpeg"),
+            recordingUrl: apiScrapeArtifactPath(scrapeId, "recording.webm"),
+          });
+        } catch (error) {
+          responseBody.live = buildLiveMetadata("scrape", scrapeId, "warning", {
+            screenshotUrl: apiScrapeArtifactPath(scrapeId, "final.jpeg"),
+            warning: "Recording artifact capture failed.",
+            warnings: [
+              {
+                code: "LIVE_RECORDING_FAILED",
+                message: "Recording artifact capture failed.",
+                details: {
+                  scrapeId,
+                  reason: error instanceof Error ? error.message : String(error),
+                },
+              },
+            ],
+          });
+          responseBody.warnings = [
+            ...(responseBody.warnings ?? []),
+            {
+              code: "LIVE_RECORDING_FAILED",
+              message: "Recording artifact capture failed.",
+              details: {
+                scrapeId,
+                reason: error instanceof Error ? error.message : String(error),
+              },
+            },
+          ];
+        }
+      }
+    }
+
+    return res.json(responseBody);
   } catch (error) {
     if (error instanceof InsecureConnectionError) {
       return res.json({
@@ -807,7 +1789,35 @@ app.post("/scrape", async (req: Request, res: Response) => {
   }
 });
 
-app.listen(port, () => {
+const server = http.createServer(app);
+const browserLiveWsServer = new WebSocketServer({ noServer: true });
+
+server.on("upgrade", (req, socket, head) => {
+  try {
+    const requestUrl = new URL(req.url ?? "", "http://localhost");
+    const match = requestUrl.pathname.match(
+      /^\/browsers\/([^/]+)\/view\/ws$/,
+    );
+    if (!match) {
+      socket.destroy();
+      return;
+    }
+
+    const sessionId = decodeURIComponent(match[1]);
+    browserLiveWsServer.handleUpgrade(req, socket, head, (ws: any) => {
+      const session = browserSessions.get(sessionId);
+      if (!session) {
+        ws.close();
+        return;
+      }
+      attachBrowserSessionClient(session, ws);
+    });
+  } catch {
+    socket.destroy();
+  }
+});
+
+server.listen(port, () => {
   initializeBrowser().then(() => {
     console.log(`Server is running on port ${port}`);
   });

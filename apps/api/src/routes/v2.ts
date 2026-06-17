@@ -4,6 +4,7 @@ import { config } from "../config";
 import { RateLimiterMode } from "../types";
 import { SEARCH_CREDITS_FEATURE_ID } from "../services/autumn/autumn.service";
 import expressWs from "express-ws";
+import WSWebSocket from "ws";
 import { makeResponder } from "../controllers/v2/response-enveloper";
 import { RequestError } from "../lib/error-codes";
 import { searchController } from "../controllers/v2/search";
@@ -69,6 +70,7 @@ import {
   scrapeInteractController,
   scrapeStopInteractiveBrowserController,
 } from "../controllers/v2/scrape-browser";
+import { getBrowserSession } from "../lib/browser-sessions";
 import {
   resolveContentFreePrivacy,
   resolveScrapePrivacy,
@@ -120,6 +122,34 @@ const parseUploadMiddleware: express.RequestHandler = (req, res, next) => {
     );
   });
 };
+
+async function proxyTextResponse(url: string) {
+  const response = await fetch(url);
+  return {
+    status: response.status,
+    contentType:
+      response.headers.get("content-type") ?? "text/plain; charset=utf-8",
+    body: await response.text(),
+  };
+}
+
+async function proxyBinaryResponse(url: string) {
+  const response = await fetch(url);
+  return {
+    status: response.status,
+    contentType:
+      response.headers.get("content-type") ?? "application/octet-stream",
+    body: Buffer.from(await response.arrayBuffer()),
+  };
+}
+
+function browserServiceWsUrl(pathname: string): string | null {
+  if (!config.BROWSER_SERVICE_URL) return null;
+  const upstream = new URL(config.BROWSER_SERVICE_URL);
+  upstream.protocol = upstream.protocol === "https:" ? "wss:" : "ws:";
+  upstream.pathname = pathname;
+  return upstream.toString();
+}
 
 // Add timing middleware to all v2 routes
 v2Router.use(requestTimingMiddleware("v2"));
@@ -578,6 +608,98 @@ v2Router.post(
   blocklistMiddleware,
   wrap(runMonitorController),
 );
+
+v2Router.get("/live/browser/:sessionId/view", async (req, res) => {
+  if (!config.BROWSER_SERVICE_URL) {
+    return res.status(503).send("Browser service is not configured");
+  }
+
+  const session = await getBrowserSession(req.params.sessionId);
+
+  const upstreamUrl = new URL(
+    `/browsers/${encodeURIComponent(session?.browser_id ?? req.params.sessionId)}/view`,
+    config.BROWSER_SERVICE_URL,
+  ).toString();
+  const upstream = await proxyTextResponse(upstreamUrl);
+  res.status(upstream.status).type(upstream.contentType).send(upstream.body);
+});
+
+v2Router.get("/live/browser/:sessionId/artifacts/:name", async (req, res) => {
+  if (!config.BROWSER_SERVICE_URL) {
+    return res.status(503).json({ error: "Browser service is not configured" });
+  }
+
+  const session = await getBrowserSession(req.params.sessionId);
+
+  const upstreamUrl = new URL(
+    `/browsers/${encodeURIComponent(session?.browser_id ?? req.params.sessionId)}/artifacts/${encodeURIComponent(req.params.name)}`,
+    config.BROWSER_SERVICE_URL,
+  ).toString();
+  const upstream = await proxyBinaryResponse(upstreamUrl);
+  res.status(upstream.status).type(upstream.contentType).send(upstream.body);
+});
+
+v2Router.get("/live/scrape/:scrapeId/artifacts/:name", async (req, res) => {
+  if (!config.BROWSER_SERVICE_URL) {
+    return res.status(503).json({ error: "Browser service is not configured" });
+  }
+
+  const upstreamUrl = new URL(
+    `/scrapes/${encodeURIComponent(req.params.scrapeId)}/artifacts/${encodeURIComponent(req.params.name)}`,
+    config.BROWSER_SERVICE_URL,
+  ).toString();
+  const upstream = await proxyBinaryResponse(upstreamUrl);
+  res.status(upstream.status).type(upstream.contentType).send(upstream.body);
+});
+
+v2Router.ws("/live/browser/:sessionId/ws", (clientWs: WSWebSocket, req) => {
+  (async () => {
+    if (!config.BROWSER_SERVICE_URL) {
+      clientWs.close(1011, "Browser service is not configured");
+      return;
+    }
+
+    const session = await getBrowserSession(req.params.sessionId);
+    const upstreamUrl = browserServiceWsUrl(
+      `/browsers/${encodeURIComponent(session?.browser_id ?? req.params.sessionId)}/view/ws`,
+    );
+    if (!upstreamUrl) {
+      clientWs.close(1011, "Browser service is not configured");
+      return;
+    }
+
+    const upstreamWs = new WSWebSocket(upstreamUrl);
+
+    upstreamWs.on("open", () => {
+      clientWs.on("message", data => {
+        if (upstreamWs.readyState === WSWebSocket.OPEN) {
+          upstreamWs.send(data);
+        }
+      });
+
+      upstreamWs.on("message", data => {
+        if (clientWs.readyState === WSWebSocket.OPEN) {
+          clientWs.send(data.toString());
+        }
+      });
+
+      clientWs.on("close", () => upstreamWs.close());
+      upstreamWs.on("close", () => clientWs.close());
+    });
+
+    upstreamWs.on("error", err => {
+      clientWs.close(
+        1011,
+        err instanceof Error ? err.message : "Live view proxy failed",
+      );
+    });
+  })().catch(error => {
+    clientWs.close(
+      1011,
+      error instanceof Error ? error.message : "Live view proxy failed",
+    );
+  });
+});
 
 v2Router.get(
   "/monitor/:monitorId/checks",

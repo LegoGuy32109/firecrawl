@@ -16,9 +16,11 @@ import {
   AgentError,
   BillingError,
   CommonError,
+  LiveWarning,
   RequestError,
   ScrapeError,
 } from "../../lib/error-codes";
+import { makeWarning } from "../../lib/error-catalog";
 import { errorCodeToHttpStatus } from "../../lib/error-catalog";
 import { NuQJob } from "../../services/worker/nuq";
 import { checkPermissions } from "../../lib/permissions";
@@ -440,6 +442,23 @@ export async function scrapeController(
 
       const formats: string[] =
         req.body.formats?.map((f: FormatObject) => f?.type) ?? [];
+      const live = (doc as any)?.metadata?.live as
+        | import("./types").LiveMetadata
+        | undefined;
+      const liveWarnings =
+        req.body.__playgroundLive && !live
+          ? [
+              makeWarning(
+                LiveWarning.CAPTURE_UNAVAILABLE,
+                "Live capture is unavailable for this request.",
+                {
+                  dependency: "browser-service",
+                },
+              ),
+            ]
+          : live?.warnings?.length
+            ? live.warnings
+            : [];
 
       logger.info("Request metrics", {
         version: "v2",
@@ -469,6 +488,8 @@ export async function scrapeController(
           },
         },
         scrape_id: origin?.includes("website") ? jobId : undefined,
+        ...(live ? { live } : {}),
+        ...(liveWarnings.length > 0 ? { warnings: liveWarnings } : {}),
       });
     },
     {

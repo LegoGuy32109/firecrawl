@@ -160,6 +160,13 @@ export enum ScrapeWarning {
   ENGINE_PARTIAL_FEATURES = "SCRAPE_ENGINE_PARTIAL_FEATURES",
 }
 
+export enum LiveWarning {
+  CAPTURE_UNAVAILABLE = "LIVE_CAPTURE_UNAVAILABLE",
+  RECORDING_FAILED = "LIVE_RECORDING_FAILED",
+  SCREENSHOT_FAILED = "LIVE_SCREENSHOT_FAILED",
+  WS_PROXY_FAILED = "LIVE_WS_PROXY_FAILED",
+}
+
 export enum ExtractWarning {
   CONTENT_TRIMMED_CHARS = "EXTRACT_CONTENT_TRIMMED_CHARS",
   CONTENT_TRIMMED_TOKENS = "EXTRACT_CONTENT_TRIMMED_TOKENS",
@@ -197,6 +204,7 @@ export enum CrawlWarning {
 
 export type WarningCodes =
   | ScrapeWarning
+  | LiveWarning
   | ExtractWarning
   | QueryWarning
   | ChangeTrackingWarning

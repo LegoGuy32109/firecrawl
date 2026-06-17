@@ -16,6 +16,7 @@ import {
   LocalError,
   MapError,
   MapWarning,
+  LiveWarning,
   MediaWarning,
   MonitorError,
   ProxyError,
@@ -133,6 +134,22 @@ export interface WarningDetailsMap {
   [ScrapeWarning.ENGINE_PARTIAL_FEATURES]: {
     unsupportedFeatures: string[];
     engine?: string;
+  };
+  [LiveWarning.CAPTURE_UNAVAILABLE]: {
+    dependency?: "browser-service";
+    reason?: string;
+  };
+  [LiveWarning.RECORDING_FAILED]: {
+    path?: string;
+    reason?: string;
+  };
+  [LiveWarning.SCREENSHOT_FAILED]: {
+    path?: string;
+    reason?: string;
+  };
+  [LiveWarning.WS_PROXY_FAILED]: {
+    sessionId?: string;
+    reason?: string;
   };
   [ExtractWarning.CONTENT_TRIMMED_CHARS]: { maxChars: number };
   [ExtractWarning.CONTENT_TRIMMED_TOKENS]: {
