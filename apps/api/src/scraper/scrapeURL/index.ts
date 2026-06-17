@@ -85,6 +85,22 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
+import { ScrapeWarning } from "../../lib/error-codes";
+import type { WarningEntry } from "../../controllers/v2/types";
+
+type WarnableDocument = Document & {
+  warning?: string;
+  warnings?: WarningEntry[];
+};
+
+function appendWarning(
+  document: WarnableDocument,
+  warning: WarningEntry,
+  message: string,
+) {
+  document.warning = message + (document.warning ? " " + document.warning : "");
+  document.warnings = [...(document.warnings ?? []), warning];
+}
 
 export type ScrapeUrlResponse =
   | {
@@ -1021,10 +1037,18 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
         engine: result.engine,
         unsupportedFeatures: result.unsupportedFeatures,
       });
-      document.warning =
-        document.warning !== undefined
-          ? document.warning + " " + warning
-          : warning;
+      appendWarning(
+        document as WarnableDocument,
+        {
+          code: ScrapeWarning.ENGINE_PARTIAL_FEATURES,
+          message: warning,
+          details: {
+            unsupportedFeatures: [...result.unsupportedFeatures],
+            engine: result.engine,
+          },
+        },
+        warning,
+      );
     }
 
     // NOTE: for sitemap, we don't need all the transformers, need to skip unused ones

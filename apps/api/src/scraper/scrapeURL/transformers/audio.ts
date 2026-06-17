@@ -3,6 +3,22 @@ import { Document } from "../../../controllers/v2/types";
 import { config } from "../../../config";
 import { hasFormatOfType } from "../../../lib/format-utils";
 import { AudioUnsupportedUrlError } from "../error";
+import { MediaWarning } from "../../../lib/error-codes";
+import type { WarningEntry } from "../../../controllers/v2/types";
+
+type WarnableDocument = Document & {
+  warning?: string;
+  warnings?: WarningEntry[];
+};
+
+function pushWarning(
+  document: WarnableDocument,
+  warning: WarningEntry,
+  message: string,
+) {
+  document.warning = message + (document.warning ? " " + document.warning : "");
+  document.warnings = [...(document.warnings ?? []), warning];
+}
 
 let cachedUrlRegex: RegExp | null = null;
 let cacheTimestamp = 0;
@@ -50,9 +66,15 @@ export async function fetchAudio(
 
   if (!config.AVGRAB_SERVICE_URL) {
     meta.logger.warn("AVGRAB_SERVICE_URL is not configured");
-    document.warning =
-      "Audio format is not available (service not configured)." +
-      (document.warning ? " " + document.warning : "");
+    pushWarning(
+      document as WarnableDocument,
+      {
+        code: MediaWarning.AUDIO_UNAVAILABLE,
+        message: "Audio format is not available (service not configured).",
+        details: { reason: "not_configured" },
+      },
+      "Audio format is not available (service not configured).",
+    );
     return document;
   }
 

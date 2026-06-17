@@ -5,6 +5,7 @@ import { logger as _logger } from "../../lib/logger";
 import { generateCrawlerOptionsFromPrompt } from "../../scraper/scrapeURL/transformers/llmExtract";
 import { CostTracking } from "../../lib/cost-tracking";
 import { buildPromptWithWebsiteStructure } from "../../lib/map-utils";
+import { RequestError } from "../../lib/error-codes";
 
 // Define the request schema for params preview
 // Only url and prompt are required/relevant for preview
@@ -114,7 +115,7 @@ export async function crawlParamsPreviewController(
     if (error instanceof z.ZodError) {
       return res.status(400).json({
         success: false,
-        code: "BAD_REQUEST",
+        code: RequestError.BAD_REQUEST,
         error:
           "Invalid request parameters: " +
           error.issues.map(e => e.message).join(", "),

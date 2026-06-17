@@ -8,6 +8,7 @@ import {
 } from "../scraper/scrapeURL/error";
 import { AbortManagerThrownError } from "../scraper/scrapeURL/lib/abortManager";
 import { JobCancelledError } from "../lib/error";
+import { CrawlError, MapError, ScrapeError } from "../lib/error-codes";
 import { isQueueFullError } from "../lib/queue-full-error";
 
 type CaptureContext = {
@@ -27,26 +28,25 @@ type CaptureContext = {
 };
 
 const transportableErrorCodes = [
-  "SCRAPE_ALL_ENGINES_FAILED",
-  "SCRAPE_DNS_RESOLUTION_ERROR",
-  "SCRAPE_SITE_ERROR",
-  "SCRAPE_SSL_ERROR",
-  "SCRAPE_PROXY_SELECTION_ERROR",
-  "SCRAPE_ZDR_VIOLATION_ERROR",
-  "SCRAPE_UNSUPPORTED_FILE_ERROR",
-  "SCRAPE_PDF_ANTIBOT_ERROR",
-  "SCRAPE_ACTION_ERROR",
-  "SCRAPE_PDF_INSUFFICIENT_TIME_ERROR",
-  "SCRAPE_PDF_PREFETCH_FAILED",
-  "SCRAPE_DOCUMENT_ANTIBOT_ERROR",
-  "SCRAPE_DOCUMENT_PREFETCH_FAILED",
-  "SCRAPE_ACTIONS_NOT_SUPPORTED",
-  "SCRAPE_TIMEOUT",
-  "MAP_TIMEOUT",
-  "SCRAPE_UNKNOWN_ERROR",
-  "SCRAPE_RACED_REDIRECT_ERROR",
-  "SCRAPE_SITEMAP_ERROR",
-  "CRAWL_DENIAL",
+  ScrapeError.ALL_ENGINES_FAILED,
+  ScrapeError.DNS,
+  ScrapeError.SITE,
+  ScrapeError.SSL,
+  ScrapeError.PROXY_SELECTION,
+  ScrapeError.ZDR_VIOLATION,
+  ScrapeError.UNSUPPORTED_FILE,
+  ScrapeError.PDF_ANTIBOT,
+  ScrapeError.ACTION,
+  ScrapeError.PDF_INSUFFICIENT_TIME,
+  ScrapeError.PDF_PREFETCH_FAILED,
+  ScrapeError.DOCUMENT_ANTIBOT,
+  ScrapeError.DOCUMENT_PREFETCH_FAILED,
+  ScrapeError.ACTIONS_NOT_SUPPORTED,
+  ScrapeError.TIMEOUT,
+  MapError.TIMEOUT,
+  ScrapeError.RACED_REDIRECT,
+  ScrapeError.SITEMAP,
+  CrawlError.DENIAL,
 ];
 
 function getStringField(
@@ -119,7 +119,9 @@ export function shouldIgnoreSentryException(error: unknown): boolean {
     (errorMessage.includes("|") ? errorMessage.split("|", 1)[0] : "");
   const errorCode = errorCodeFromMessage;
 
-  return transportableErrorCodes.includes(errorCode);
+  return transportableErrorCodes.includes(
+    errorCode as (typeof transportableErrorCodes)[number],
+  );
 }
 
 if (config.SENTRY_DSN) {

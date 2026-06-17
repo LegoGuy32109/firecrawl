@@ -14,6 +14,7 @@ import * as schema from "../../db/schema";
 import { logger as _logger } from "../../lib/logger";
 import { deserializeTransportableError } from "../../lib/error-serde";
 import { TransportableError } from "../../lib/error";
+import { ScrapeError } from "../../lib/error-codes";
 import { scrapeQueue } from "../../services/worker/nuq-router";
 configDotenv();
 
@@ -50,7 +51,7 @@ export async function crawlErrorsController(
           const error = deserializeTransportableError(
             x.failedReason!,
           ) as TransportableError | null;
-          if (error?.code === "SCRAPE_RACED_REDIRECT_ERROR") {
+          if (error?.code === ScrapeError.RACED_REDIRECT) {
             return null;
           }
           return {

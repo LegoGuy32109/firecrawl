@@ -35,45 +35,53 @@ import {
   VideoUnsupportedUrlError,
   XTwitterConfigurationError,
 } from "../scraper/scrapeURL/error";
+import {
+  AgentError,
+  CommonError,
+  CrawlError,
+  MapError,
+  RequestError,
+  ScrapeError,
+} from "./error-codes";
 
 // TODO: figure out correct typing for this
-const errorMap: Record<ErrorCodes, any> = {
-  SCRAPE_TIMEOUT: ScrapeJobTimeoutError,
-  MAP_TIMEOUT: MapTimeoutError,
-  UNKNOWN_ERROR: UnknownError,
-  SCRAPE_ALL_ENGINES_FAILED: NoEnginesLeftError,
-  SCRAPE_SSL_ERROR: SSLError,
-  SCRAPE_SITE_ERROR: SiteError,
-  SCRAPE_PROXY_SELECTION_ERROR: ProxySelectionError,
-  SCRAPE_PDF_PREFETCH_FAILED: PDFPrefetchFailed,
-  SCRAPE_DOCUMENT_PREFETCH_FAILED: DocumentPrefetchFailed,
-  SCRAPE_JOB_CANCELLED: ScrapeJobCancelledError,
-  SCRAPE_RETRY_LIMIT: ScrapeRetryLimitError,
-  SCRAPE_ZDR_VIOLATION_ERROR: ZDRViolationError,
-  SCRAPE_DNS_RESOLUTION_ERROR: DNSResolutionError,
-  SCRAPE_PDF_INSUFFICIENT_TIME_ERROR: PDFInsufficientTimeError,
-  SCRAPE_PDF_ANTIBOT_ERROR: PDFAntibotError,
-  SCRAPE_PDF_OCR_REQUIRED: PDFOCRRequiredError,
-  SCRAPE_DOCUMENT_ANTIBOT_ERROR: DocumentAntibotError,
-  SCRAPE_UNSUPPORTED_FILE_ERROR: UnsupportedFileError,
-  SCRAPE_NO_CACHED_DATA: NoCachedDataError,
-  SCRAPE_LOCKDOWN_CACHE_MISS: LockdownMissError,
-  SCRAPE_ACTION_ERROR: ActionError,
-  SCRAPE_ACTIONS_NOT_SUPPORTED: ActionsNotSupportedError,
-  SCRAPE_BRANDING_NOT_SUPPORTED: BrandingNotSupportedError,
-  AGENT_INDEX_ONLY: AgentIndexOnlyError,
-  SCRAPE_RACED_REDIRECT_ERROR: RacedRedirectError,
-  SCRAPE_SITEMAP_ERROR: SitemapError,
-  CRAWL_DENIAL: CrawlDenialError,
-  SCRAPE_AUDIO_UNSUPPORTED_URL: AudioUnsupportedUrlError,
-  SCRAPE_VIDEO_UNSUPPORTED_URL: VideoUnsupportedUrlError,
-  SCRAPE_X_TWITTER_CONFIGURATION_ERROR: XTwitterConfigurationError,
-  MAP_FAILED: MapFailedError,
+const errorMap: Partial<Record<ErrorCodes, any>> = {
+  [ScrapeError.TIMEOUT]: ScrapeJobTimeoutError,
+  [MapError.TIMEOUT]: MapTimeoutError,
+  [CommonError.UNKNOWN]: UnknownError,
+  [ScrapeError.ALL_ENGINES_FAILED]: NoEnginesLeftError,
+  [ScrapeError.SSL]: SSLError,
+  [ScrapeError.SITE]: SiteError,
+  [ScrapeError.PROXY_SELECTION]: ProxySelectionError,
+  [ScrapeError.PDF_PREFETCH_FAILED]: PDFPrefetchFailed,
+  [ScrapeError.DOCUMENT_PREFETCH_FAILED]: DocumentPrefetchFailed,
+  [ScrapeError.JOB_CANCELLED]: ScrapeJobCancelledError,
+  [ScrapeError.RETRY_LIMIT]: ScrapeRetryLimitError,
+  [ScrapeError.ZDR_VIOLATION]: ZDRViolationError,
+  [ScrapeError.DNS]: DNSResolutionError,
+  [ScrapeError.PDF_INSUFFICIENT_TIME]: PDFInsufficientTimeError,
+  [ScrapeError.PDF_ANTIBOT]: PDFAntibotError,
+  [ScrapeError.PDF_OCR_REQUIRED]: PDFOCRRequiredError,
+  [ScrapeError.DOCUMENT_ANTIBOT]: DocumentAntibotError,
+  [ScrapeError.UNSUPPORTED_FILE]: UnsupportedFileError,
+  [ScrapeError.NO_CACHED_DATA]: NoCachedDataError,
+  [ScrapeError.LOCKDOWN_CACHE_MISS]: LockdownMissError,
+  [ScrapeError.ACTION]: ActionError,
+  [ScrapeError.ACTIONS_NOT_SUPPORTED]: ActionsNotSupportedError,
+  [ScrapeError.BRANDING_NOT_SUPPORTED]: BrandingNotSupportedError,
+  [AgentError.INDEX_ONLY]: AgentIndexOnlyError,
+  [ScrapeError.RACED_REDIRECT]: RacedRedirectError,
+  [ScrapeError.SITEMAP]: SitemapError,
+  [CrawlError.DENIAL]: CrawlDenialError,
+  [ScrapeError.AUDIO_UNSUPPORTED_URL]: AudioUnsupportedUrlError,
+  [ScrapeError.VIDEO_UNSUPPORTED_URL]: VideoUnsupportedUrlError,
+  [ScrapeError.X_TWITTER_CONFIGURATION]: XTwitterConfigurationError,
+  [MapError.FAILED]: MapFailedError,
 
   // Zod errors
-  BAD_REQUEST: null,
-  BAD_REQUEST_INVALID_JSON: null,
-  PARSE_UNSUPPORTED_OPTIONS: null,
+  [RequestError.BAD_REQUEST]: null,
+  [RequestError.BAD_REQUEST_INVALID_JSON]: null,
+  [RequestError.PARSE_UNSUPPORTED_OPTIONS]: null,
 };
 
 export function serializeTransportableError(error: TransportableError) {
@@ -84,7 +92,7 @@ export function deserializeTransportableError(
   data: string,
 ): InstanceType<(typeof errorMap)[keyof typeof errorMap]> | null {
   const [code, ...serialized] = data.split("|");
-  const x = errorMap[code];
+  const x = errorMap[code as ErrorCodes];
   if (!x) {
     return null;
   }

@@ -16,6 +16,8 @@ import {
 } from "../v1/types";
 import type { InternalOptions } from "../../scraper/scrapeURL";
 import { ErrorCodes } from "../../lib/error";
+import type { ErrorDetails, WarningDetails } from "../../lib/error-details";
+import type { WarningCodes } from "../../lib/error-codes";
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { integrationSchema } from "../../utils/integration";
@@ -1199,6 +1201,7 @@ export type Document = {
   highlights?: string;
   branding?: BrandingProfile;
   warning?: string;
+  warnings?: WarningEntry[];
   attributes?: {
     selector: string;
     attribute: string;
@@ -1311,13 +1314,90 @@ export type VideoItem = {
   metadata?: Record<string, unknown>;
 };
 
-export type ErrorResponse = {
+export type ResponseStatus = "ok" | "warning" | "processing" | "failed";
+
+export type JobState = "processing" | "completed" | "cancelled" | "failed";
+
+export type DiagnosticStatus =
+  | "ok"
+  | "warning"
+  | "failed"
+  | "skipped"
+  | "timed_out";
+
+export type DiagnosticStep = {
+  name: string;
+  status: DiagnosticStatus;
+  code?: ErrorCodes | WarningCodes;
+  message?: string;
+  durationMs?: number;
+  startedAt?: string;
+  endedAt?: string;
+  details?: Record<string, unknown>;
+};
+
+export type Diagnostics = {
+  privacy: {
+    zeroDataRetention: boolean;
+    mode: "disabled" | "allowed" | "forced" | "request" | "not_applicable";
+    reduced: boolean;
+  };
+  traceId?: string;
+  durationMs?: number;
+  steps?: DiagnosticStep[];
+  sources?: Record<string, DiagnosticStep>;
+  actions?: DiagnosticStep[];
+};
+
+export type WarningEntry = {
+  code: WarningCodes;
+  message: string;
+  details?: WarningDetails;
+};
+
+export type ResponseCore = {
+  success: boolean;
+  status: ResponseStatus;
+  diagnostics: Diagnostics;
+  warning?: string;
+  warnings?: WarningEntry[];
+};
+
+export type ErrorCore = ResponseCore & {
+  success: false;
+  status: "failed";
+  code: ErrorCodes;
+  error: string;
+  errorId?: string;
+  details?: ErrorDetails;
+};
+
+export type StrictErrorResponse = ErrorCore & {
+  sponsor_status?: string;
+  login_url?: string;
+};
+
+export type LegacyErrorResponse = {
   success: false;
   code?: ErrorCodes;
   error: string;
   details?: any;
   sponsor_status?: string;
   login_url?: string;
+};
+
+export type ErrorResponse = StrictErrorResponse | LegacyErrorResponse;
+
+export type AsyncJobFailureResponse<TData = unknown> = ErrorCore & {
+  jobState: "failed";
+  failureCount?: number;
+  failuresByCode?: Partial<Record<ErrorCodes, number>>;
+  data?: TData;
+  creditsUsed?: number;
+  expiresAt?: string;
+  createdAt?: string;
+  completedAt?: string;
+  duration?: number;
 };
 
 export type ScrapeResponse =

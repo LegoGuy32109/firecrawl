@@ -1,4 +1,9 @@
-import { ErrorCodes, TransportableError } from "../../lib/error";
+import {
+  ErrorCodes,
+  TransportableError,
+  restoreTransportableError,
+} from "../../lib/error";
+import { AgentError, ScrapeError } from "../../lib/error-codes";
 import { Meta } from ".";
 import { Engine, FeatureFlag } from "./engines";
 import { isSelfHosted } from "../../lib/deployment";
@@ -12,7 +17,7 @@ export class EngineError extends Error {
 export class XTwitterConfigurationError extends TransportableError {
   constructor() {
     super(
-      "SCRAPE_X_TWITTER_CONFIGURATION_ERROR",
+      ScrapeError.X_TWITTER_CONFIGURATION,
       "X/Twitter scraping requires XAI_API_KEY to be configured.",
     );
   }
@@ -26,8 +31,7 @@ export class XTwitterConfigurationError extends TransportableError {
     data: ReturnType<typeof this.prototype.serialize>,
   ) {
     const x = new XTwitterConfigurationError();
-    x.stack = data.stack;
-    return x;
+    return restoreTransportableError(x, data);
   }
 }
 
@@ -40,7 +44,9 @@ export class NoEnginesLeftError extends TransportableError {
       ? `All scraping engines failed to retrieve content from this URL. Engines tried: [${enginesTriedStr}]. This usually happens when: (1) The URL is invalid or the page doesn't exist (404), (2) The website is blocking automated access, (3) The website is down or unreachable, (4) The page requires authentication. Double check the URL is correct and accessible in a browser. Check your server logs for more detailed error information from each engine.`
       : `All scraping engines failed to retrieve content from this URL. Engines tried: [${enginesTriedStr}]. This usually happens when: (1) The URL is invalid or the page doesn't exist (404), (2) The website is blocking automated access, (3) The website is down or unreachable, (4) The page requires authentication. Double check the URL is correct and accessible in a browser. If the issue persists, contact us at help@firecrawl.com with your request ID for investigation.`;
 
-    super("SCRAPE_ALL_ENGINES_FAILED", message);
+    super(ScrapeError.ALL_ENGINES_FAILED, message, {
+      details: { enginesTried: fallbackList },
+    });
     this.fallbackList = fallbackList;
   }
 
@@ -93,11 +99,12 @@ export class RemoveFeatureError extends Error {
 export class SSLError extends TransportableError {
   constructor(public skipTlsVerification: boolean) {
     super(
-      "SCRAPE_SSL_ERROR",
+      ScrapeError.SSL,
       "An SSL/TLS certificate error occurred while trying to establish a secure connection to this website. " +
         (skipTlsVerification
           ? "You already have `skipTlsVerification: true` enabled, which means the website's TLS configuration is severely broken (not just an expired or self-signed certificate). Possible solutions: (1) Try the plain HTTP version of the URL (http:// instead of https://), (2) The website may be completely down, or (3) Contact the website administrator about their broken SSL configuration."
           : "This usually happens when a website has an expired, self-signed, or misconfigured SSL certificate. If you trust this website and are not submitting sensitive data, you can bypass this error by setting `skipTlsVerification: true` in your scrape request. Note: Only do this for trusted sites as it disables certificate validation."),
+      { details: { skipTlsVerification } },
     );
   }
 
@@ -113,8 +120,7 @@ export class SSLError extends TransportableError {
     data: ReturnType<typeof this.prototype.serialize>,
   ) {
     const x = new SSLError(data.skipTlsVerification);
-    x.stack = data.stack;
-    return x;
+    return restoreTransportableError(x, data);
   }
 }
 
@@ -154,8 +160,9 @@ export class SiteError extends TransportableError {
       : "Please verify the URL is correct and the website is accessible.";
 
     super(
-      "SCRAPE_SITE_ERROR",
+      ScrapeError.SITE,
       `The URL failed to load in the browser with error code "${errorCode}". ${explanation} ${followUp}`,
+      { details: { errorCode } },
     );
   }
 
@@ -171,15 +178,14 @@ export class SiteError extends TransportableError {
     data: ReturnType<typeof this.prototype.serialize>,
   ) {
     const x = new SiteError(data.errorCode);
-    x.stack = data.stack;
-    return x;
+    return restoreTransportableError(x, data);
   }
 }
 
 export class ProxySelectionError extends TransportableError {
   constructor() {
     super(
-      "SCRAPE_PROXY_SELECTION_ERROR",
+      ScrapeError.PROXY_SELECTION,
       "The specified proxy location could not be selected for this scrape request. This happens when the requested geographic location or proxy type is not available or is incompatible with other options in your request. To fix this: (1) Try a different location value (e.g., 'US', 'GB', 'DE'), (2) Remove the location parameter to use the default, or (3) Check that your proxy settings are compatible with other scrape options you've specified.",
     );
   }
@@ -195,16 +201,16 @@ export class ProxySelectionError extends TransportableError {
     data: ReturnType<typeof this.prototype.serialize>,
   ) {
     const x = new ProxySelectionError();
-    x.stack = data.stack;
-    return x;
+    return restoreTransportableError(x, data);
   }
 }
 
 export class ActionError extends TransportableError {
   constructor(public errorCode: string) {
     super(
-      "SCRAPE_ACTION_ERROR",
+      ScrapeError.ACTION,
       "Action(s) failed to complete. Error code: " + errorCode,
+      { details: { errorCode } },
     );
   }
 
@@ -220,16 +226,16 @@ export class ActionError extends TransportableError {
     data: ReturnType<typeof this.prototype.serialize>,
   ) {
     const x = new ActionError(data.errorCode);
-    x.stack = data.stack;
-    return x;
+    return restoreTransportableError(x, data);
   }
 }
 
 export class UnsupportedFileError extends TransportableError {
   constructor(public reason: string) {
     super(
-      "SCRAPE_UNSUPPORTED_FILE_ERROR",
+      ScrapeError.UNSUPPORTED_FILE,
       `The URL returned a file type that Firecrawl cannot process: ${reason}. Firecrawl supports HTML web pages, PDFs, and common document formats. Binary files like images, videos, executables, and archives are not supported. If you expected this URL to return a web page, the server may be misconfigured or returning the wrong content type.`,
+      { details: { reason } },
     );
   }
 
@@ -252,7 +258,7 @@ export class UnsupportedFileError extends TransportableError {
 
 export class PDFAntibotError extends TransportableError {
   constructor() {
-    super("SCRAPE_PDF_ANTIBOT_ERROR", "PDF scrape was prevented by anti-bot");
+    super(ScrapeError.PDF_ANTIBOT, "PDF scrape was prevented by anti-bot");
   }
 
   serialize() {
@@ -275,8 +281,9 @@ export class PDFInsufficientTimeError extends TransportableError {
     public minTimeout: number,
   ) {
     super(
-      "SCRAPE_PDF_INSUFFICIENT_TIME_ERROR",
+      ScrapeError.PDF_INSUFFICIENT_TIME,
       `The PDF has ${pageCount} pages, which requires more processing time than your current timeout allows. PDF processing time scales with page count - larger PDFs need longer timeouts. To successfully scrape this PDF, increase the timeout parameter in your scrape request to at least ${minTimeout}ms (${Math.ceil(minTimeout / 1000)} seconds). For very large PDFs, consider using a timeout of ${Math.ceil((minTimeout * 1.5) / 1000)} seconds or more to account for network variability.`,
+      { details: { pageCount, minTimeout } },
     );
   }
 
@@ -301,8 +308,9 @@ export class PDFInsufficientTimeError extends TransportableError {
 export class DNSResolutionError extends TransportableError {
   constructor(public hostname: string) {
     super(
-      "SCRAPE_DNS_RESOLUTION_ERROR",
+      ScrapeError.DNS,
       `DNS resolution failed for hostname "${hostname}". This means the domain name could not be translated to an IP address. Possible causes: (1) The domain name is misspelled (check for typos), (2) The domain does not exist or has expired, (3) The DNS servers are temporarily unavailable, or (4) The domain was recently registered and DNS has not propagated yet. Please verify the URL is correct and the website exists.`,
+      { details: { hostname } },
     );
   }
 
@@ -332,7 +340,7 @@ export class IndexMissError extends Error {
 export class NoCachedDataError extends TransportableError {
   constructor() {
     super(
-      "SCRAPE_NO_CACHED_DATA",
+      ScrapeError.NO_CACHED_DATA,
       "No cached data is available for this URL that meets your specified age requirements. This error occurs when you use the minAge parameter to request only cached data, but Firecrawl has no cached version of this URL (or no version within the specified age range). To resolve this, either remove the minAge parameter to allow a fresh scrape, or try again later after the URL has been scraped and cached.",
     );
   }
@@ -354,7 +362,7 @@ export class NoCachedDataError extends TransportableError {
 export class LockdownMissError extends TransportableError {
   constructor() {
     super(
-      "SCRAPE_LOCKDOWN_CACHE_MISS",
+      ScrapeError.LOCKDOWN_CACHE_MISS,
       "No cached data is available for this request in lockdown mode. Lockdown mode only serves previously cached responses and never makes outbound requests. To resolve this, either disable lockdown mode to allow a fresh scrape, or try again after the URL has been scraped and cached.",
     );
   }
@@ -376,8 +384,9 @@ export class LockdownMissError extends TransportableError {
 export class ZDRViolationError extends TransportableError {
   constructor(public feature: string) {
     super(
-      "SCRAPE_ZDR_VIOLATION_ERROR",
+      ScrapeError.ZDR_VIOLATION,
       `The feature "${feature}" is not available when using Zero Data Retention (ZDR) mode. ZDR mode ensures that no scraped content is stored on Firecrawl servers, but this limits certain features that require data storage (such as the index engine, certain proxy modes, or advanced processing). To use this feature, you need to disable ZDR mode. Contact support@firecrawl.com if you need help.`,
+      { details: { feature } },
     );
   }
 
@@ -401,8 +410,9 @@ export class ZDRViolationError extends TransportableError {
 export class PDFOCRRequiredError extends TransportableError {
   constructor(public pdfType: string) {
     super(
-      "SCRAPE_PDF_OCR_REQUIRED",
+      ScrapeError.PDF_OCR_REQUIRED,
       `This PDF is ${pdfType === "Scanned" ? "scanned" : "image-based"} and requires OCR for text extraction, but the requested PDF mode is "fast" which only supports text-based PDFs. To process this PDF, use mode "auto" (which falls back to OCR automatically) or mode "ocr" (which forces OCR processing). Example: parsers: [{ type: "pdf", mode: "auto" }]`,
+      { details: { pdfType } },
     );
   }
 
@@ -429,7 +439,7 @@ export class PDFPrefetchFailed extends TransportableError {
       ? "Failed to prefetch the PDF file because the website's anti-bot protection blocked the initial download attempt. This typically happens when the PDF is protected by a CAPTCHA, login wall, or aggressive bot detection. Firecrawl tried to bypass the protection but was unsuccessful. Check your server logs for more details about the specific protection mechanism encountered."
       : "Failed to prefetch the PDF file because the website's anti-bot protection blocked the initial download attempt. This typically happens when the PDF is protected by a CAPTCHA, login wall, or aggressive bot detection. Firecrawl tried to bypass the protection but was unsuccessful. If this is a business-critical URL, please contact help@firecrawl.com with the URL and we can investigate adding specific support for this site.";
 
-    super("SCRAPE_PDF_PREFETCH_FAILED", message);
+    super(ScrapeError.PDF_PREFETCH_FAILED, message);
   }
 
   serialize() {
@@ -449,7 +459,7 @@ export class PDFPrefetchFailed extends TransportableError {
 export class DocumentAntibotError extends TransportableError {
   constructor() {
     super(
-      "SCRAPE_DOCUMENT_ANTIBOT_ERROR",
+      ScrapeError.DOCUMENT_ANTIBOT,
       "Document scrape was prevented by anti-bot",
     );
   }
@@ -474,7 +484,7 @@ export class DocumentPrefetchFailed extends TransportableError {
       ? "Failed to prefetch the document file because the website's anti-bot protection blocked the initial download attempt. This typically happens when the document (DOCX, XLSX, etc.) is protected by a CAPTCHA, login wall, or aggressive bot detection. Firecrawl tried to bypass the protection but was unsuccessful. Check your server logs for more details about the specific protection mechanism encountered."
       : "Failed to prefetch the document file because the website's anti-bot protection blocked the initial download attempt. This typically happens when the document (DOCX, XLSX, etc.) is protected by a CAPTCHA, login wall, or aggressive bot detection. Firecrawl tried to bypass the protection but was unsuccessful. If this is a business-critical URL, please contact help@firecrawl.com with the URL and we can investigate adding specific support for this site.";
 
-    super("SCRAPE_DOCUMENT_PREFETCH_FAILED", message);
+    super(ScrapeError.DOCUMENT_PREFETCH_FAILED, message);
   }
 
   serialize() {
@@ -494,7 +504,7 @@ export class DocumentPrefetchFailed extends TransportableError {
 export class AgentIndexOnlyError extends TransportableError {
   constructor() {
     super(
-      "AGENT_INDEX_ONLY",
+      AgentError.INDEX_ONLY,
       "This page is not available in Firecrawl's index. Your API key was provisioned by an agent and the account has not yet been confirmed by the account holder. Until the account is confirmed, only pages already in Firecrawl's index can be served. Please ask the account holder to check their email and confirm the account to unlock full scraping capabilities, or visit https://firecrawl.dev/signin to claim the account.",
     );
   }
@@ -516,7 +526,7 @@ export class AgentIndexOnlyError extends TransportableError {
 export class AudioUnsupportedUrlError extends TransportableError {
   constructor(message?: string) {
     super(
-      "SCRAPE_AUDIO_UNSUPPORTED_URL",
+      ScrapeError.AUDIO_UNSUPPORTED_URL,
       message ?? "The audio format does not support the provided URL",
     );
   }
@@ -538,7 +548,7 @@ export class AudioUnsupportedUrlError extends TransportableError {
 export class VideoUnsupportedUrlError extends TransportableError {
   constructor(message?: string) {
     super(
-      "SCRAPE_VIDEO_UNSUPPORTED_URL",
+      ScrapeError.VIDEO_UNSUPPORTED_URL,
       message ?? "The video format does not support the provided URL",
     );
   }
@@ -559,7 +569,7 @@ export class VideoUnsupportedUrlError extends TransportableError {
 
 export class BrandingNotSupportedError extends TransportableError {
   constructor(message: string) {
-    super("SCRAPE_BRANDING_NOT_SUPPORTED", message);
+    super(ScrapeError.BRANDING_NOT_SUPPORTED, message);
   }
 
   serialize() {
@@ -611,7 +621,7 @@ export class WaterfallNextEngineSignal extends Error {
 export class ScrapeJobCancelledError extends TransportableError {
   constructor() {
     super(
-      "SCRAPE_JOB_CANCELLED",
+      ScrapeError.JOB_CANCELLED,
       "Scrape job was cancelled before completion.",
     );
   }
@@ -651,8 +661,9 @@ export class ScrapeRetryLimitError extends TransportableError {
     public stats: ScrapeRetryStats,
   ) {
     super(
-      "SCRAPE_RETRY_LIMIT",
+      ScrapeError.RETRY_LIMIT,
       `Scrape aborted after exceeding retry limit (${reason}).`,
+      { details: { reason, stats } },
     );
   }
 

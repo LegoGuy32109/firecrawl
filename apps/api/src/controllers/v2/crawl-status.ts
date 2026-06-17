@@ -29,6 +29,8 @@ import {
 import { ScrapeJobSingleUrls } from "../../types";
 import { redisEvictConnection } from "../../../src/services/redis";
 import { isBaseDomain, extractBaseDomain } from "../../lib/url-utils";
+import { CrawlWarning } from "../../lib/error-codes";
+import type { WarningEntry } from "./types";
 configDotenv();
 
 export type PseudoJob<T> = {
@@ -328,6 +330,7 @@ export async function crawlStatusController(
 
   // Check for robots.txt blocked URLs and add warning if found
   let warning: string | undefined;
+  const warnings: WarningEntry[] = [];
   try {
     const robotsBlocked = await redisEvictConnection.smembers(
       "crawl:" + req.params.jobId + ":robots_blocked",
@@ -362,6 +365,14 @@ export async function crawlStatusController(
         const baseDomain = extractBaseDomain(crawl.originUrl);
         if (baseDomain) {
           warning = `Only ${resultCount} result(s) found. For broader coverage, try crawling with crawlEntireDomain=true or start from a higher-level path like ${baseDomain}`;
+          warnings.push({
+            code: CrawlWarning.FEW_RESULTS,
+            message: warning,
+            details: {
+              resultCount,
+              baseDomain,
+            },
+          });
         }
       }
     }
@@ -383,7 +394,7 @@ export async function crawlStatusController(
 
   return res.status(200).json({
     success: true,
-    status,
+    status: (warning || warnings.length > 0 ? "warning" : status) as any,
     completed: outputBulkA.completed ?? 0,
     total: outputBulkA.total ?? 0,
     creditsUsed: outputBulkA.creditsUsed ?? 0,
@@ -396,5 +407,6 @@ export async function crawlStatusController(
     }),
     ...(durationSeconds !== undefined && { duration: durationSeconds }),
     ...(warning && { warning }),
+    ...(warnings.length > 0 && { warnings }),
   });
 }

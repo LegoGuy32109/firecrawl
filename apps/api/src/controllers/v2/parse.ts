@@ -14,6 +14,13 @@ import {
 import { v7 as uuidv7 } from "uuid";
 import { hasFormatOfType } from "../../lib/format-utils";
 import { TransportableError } from "../../lib/error";
+import {
+  AgentError,
+  CommonError,
+  RequestError,
+  ScrapeError,
+} from "../../lib/error-codes";
+import { errorCodeToHttpStatus } from "../../lib/error-catalog";
 import { NuQJob } from "../../services/worker/nuq";
 import { checkPermissions } from "../../lib/permissions";
 import { withSpan, setSpanAttributes, SpanKind } from "../../lib/otel-tracer";
@@ -39,6 +46,43 @@ import path from "node:path";
 const AGENT_INTEROP_CONCURRENCY_BOOST = 3;
 const SUPPORTED_PARSE_FILE_TYPES =
   ".html, .htm, .pdf, .docx, .doc, .odt, .rtf, .xlsx, .xls";
+
+type PrivacyMode = "disabled" | "allowed" | "forced" | "request";
+
+function buildDiagnostics(
+  traceId: string | undefined,
+  zeroDataRetention: boolean,
+  mode: PrivacyMode,
+) {
+  return {
+    privacy: {
+      zeroDataRetention,
+      mode,
+      reduced: false,
+    },
+    ...(traceId ? { traceId } : {}),
+  };
+}
+
+function getPrivacyMode(
+  zeroDataRetention: boolean,
+  requestZeroDataRetention: boolean,
+  forcedByTeam: boolean,
+): PrivacyMode {
+  if (forcedByTeam) {
+    return "forced";
+  }
+
+  if (requestZeroDataRetention) {
+    return "request";
+  }
+
+  return zeroDataRetention ? "allowed" : "disabled";
+}
+
+function jsonResponse(res: Response, statusCode: number, body: unknown) {
+  return res.status(statusCode).json(body as any);
+}
 
 const DOCUMENT_EXTENSIONS = new Set([
   ".docx",
@@ -194,9 +238,11 @@ export function parseMultipartPayloadMiddleware(
 ): void {
   const file = (req as Request & { file?: Express.Multer.File }).file;
   if (!file) {
-    res.status(400).json({
+    jsonResponse(res, 400, {
       success: false,
-      code: "BAD_REQUEST",
+      status: "failed",
+      code: RequestError.BAD_REQUEST,
+      diagnostics: buildDiagnostics(undefined, false, "disabled"),
       error:
         "Missing file upload. Send multipart/form-data with a 'file' field and optional 'options' JSON string.",
     });
@@ -208,9 +254,11 @@ export function parseMultipartPayloadMiddleware(
 
   if (rawOptions !== undefined) {
     if (typeof rawOptions !== "string") {
-      res.status(400).json({
+      jsonResponse(res, 400, {
         success: false,
-        code: "BAD_REQUEST",
+        status: "failed",
+        code: RequestError.BAD_REQUEST,
+        diagnostics: buildDiagnostics(undefined, false, "disabled"),
         error: "The 'options' field must be a JSON string.",
       });
       return;
@@ -219,18 +267,22 @@ export function parseMultipartPayloadMiddleware(
     try {
       const parsed = JSON.parse(rawOptions);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        res.status(400).json({
+        jsonResponse(res, 400, {
           success: false,
-          code: "BAD_REQUEST",
+          status: "failed",
+          code: RequestError.BAD_REQUEST_INVALID_JSON,
+          diagnostics: buildDiagnostics(undefined, false, "disabled"),
           error: "The 'options' field must parse to a JSON object.",
         });
         return;
       }
       optionsPayload = parsed as Record<string, unknown>;
     } catch (error) {
-      res.status(400).json({
+      jsonResponse(res, 400, {
         success: false,
-        code: "BAD_REQUEST",
+        status: "failed",
+        code: RequestError.BAD_REQUEST_INVALID_JSON,
+        diagnostics: buildDiagnostics(undefined, false, "disabled"),
         error:
           "Invalid JSON in the 'options' field. Provide a valid JSON string.",
       });
@@ -240,9 +292,11 @@ export function parseMultipartPayloadMiddleware(
 
   const kind = detectUploadedFileKind(file.originalname || "", file.mimetype);
   if (!kind) {
-    res.status(400).json({
+    jsonResponse(res, 400, {
       success: false,
-      code: "UNSUPPORTED_FILE_TYPE",
+      status: "failed",
+      code: RequestError.BAD_REQUEST,
+      diagnostics: buildDiagnostics(undefined, false, "disabled"),
       error: `Unsupported upload type. Supported file extensions: ${SUPPORTED_PARSE_FILE_TYPES}`,
     });
     return;
@@ -273,7 +327,19 @@ export async function parseController(
       const controllerStartTime = new Date().getTime();
 
       const jobId = uuidv7();
+      const forcedByTeam = getScrapeZDR(req.acuc?.flags) === "forced";
       const preNormalizedBody = sanitizeParseRequestForLogs(req.body);
+      const zeroDataRetention =
+        forcedByTeam || (req.body.zeroDataRetention ?? false);
+      const diagnostics = buildDiagnostics(
+        jobId,
+        zeroDataRetention,
+        getPrivacyMode(
+          zeroDataRetention,
+          req.body.zeroDataRetention ?? false,
+          forcedByTeam,
+        ),
+      );
 
       setSpanAttributes(span, {
         "parse.job_id": jobId,
@@ -299,9 +365,11 @@ export async function parseController(
           "parse.status_code": 400,
           "parse.error": unsupportedOptionError,
         });
-        return res.status(400).json({
+        return jsonResponse(res, 400, {
           success: false,
-          code: "PARSE_UNSUPPORTED_OPTIONS",
+          status: "failed",
+          code: RequestError.PARSE_UNSUPPORTED_OPTIONS,
+          diagnostics,
           error: unsupportedOptionError,
         });
       }
@@ -323,15 +391,14 @@ export async function parseController(
           "parse.error": permissions.error,
           "parse.status_code": 403,
         });
-        return res.status(403).json({
+        return jsonResponse(res, 403, {
           success: false,
+          status: "failed",
+          diagnostics,
           error: permissions.error,
         });
       }
 
-      const zeroDataRetention =
-        getScrapeZDR(req.acuc?.flags) === "forced" ||
-        (req.body.zeroDataRetention ?? false);
       const billing: BillingMetadata = req.body.__agentInterop
         ? { endpoint: "agent" as const, jobId }
         : { endpoint: "parse" as const, jobId };
@@ -341,13 +408,17 @@ export async function parseController(
         config.AGENT_INTEROP_SECRET &&
         req.body.__agentInterop.auth !== config.AGENT_INTEROP_SECRET
       ) {
-        return res.status(403).json({
+        return jsonResponse(res, 403, {
           success: false,
+          status: "failed",
+          diagnostics,
           error: "Invalid agent interop.",
         });
       } else if (req.body.__agentInterop && !config.AGENT_INTEROP_SECRET) {
-        return res.status(403).json({
+        return jsonResponse(res, 403, {
           success: false,
+          status: "failed",
+          diagnostics,
           error: "Agent interop is not enabled.",
         });
       }
@@ -377,8 +448,10 @@ export async function parseController(
         );
         if (!reservation.ok) {
           applyAgentAuthDiscoveryHeader(res);
-          return res.status(429).json({
+          return jsonResponse(res, 429, {
             success: false,
+            status: "failed",
+            diagnostics,
             error: KEYLESS_CREDITS_MESSAGE,
           });
         }
@@ -552,7 +625,7 @@ export async function parseController(
         }
 
         const timeoutErr =
-          e instanceof TransportableError && e.code === "SCRAPE_TIMEOUT";
+          e instanceof TransportableError && e.code === ScrapeError.TIMEOUT;
 
         setSpanAttributes(span, {
           "parse.error": e instanceof Error ? e.message : String(e),
@@ -568,48 +641,56 @@ export async function parseController(
             });
           }
 
-          if (e.code === "SCRAPE_NO_CACHED_DATA") {
+          if (e.code === ScrapeError.NO_CACHED_DATA) {
             setSpanAttributes(span, {
               "parse.status_code": 404,
             });
-            return res.status(404).json({
+            return jsonResponse(res, 404, {
               success: false,
+              status: "failed",
               code: e.code,
+              diagnostics,
               error: e.message,
             });
           }
 
-          if (e.code === "AGENT_INDEX_ONLY") {
+          if (e.code === AgentError.INDEX_ONLY) {
             setSpanAttributes(span, {
               "parse.status_code": 403,
             });
-            return res.status(403).json({
+            return jsonResponse(res, 403, {
               success: false,
+              status: "failed",
               code: e.code,
+              diagnostics,
               error: e.message,
               sponsor_status: "pending",
               login_url: "https://firecrawl.dev/signin",
             });
           }
 
-          if (e.code === "SCRAPE_ACTIONS_NOT_SUPPORTED") {
+          if (e.code === ScrapeError.ACTIONS_NOT_SUPPORTED) {
             setSpanAttributes(span, {
               "parse.status_code": 400,
             });
-            return res.status(400).json({
+            return jsonResponse(res, 400, {
               success: false,
+              status: "failed",
               code: e.code,
+              diagnostics,
               error: e.message,
             });
           }
 
-          const statusCode = e.code === "SCRAPE_TIMEOUT" ? 408 : 500;
+          const statusCode = errorCodeToHttpStatus(e.code);
           setSpanAttributes(span, {
             "parse.status_code": statusCode,
           });
-          return res.status(statusCode).json({
+          return jsonResponse(res, statusCode, {
             success: false,
+            status: "failed",
             code: e.code,
+            diagnostics,
             error: e.message,
           });
         } else {
@@ -637,10 +718,13 @@ export async function parseController(
             "parse.status_code": 500,
             "parse.error_id": id,
           });
-          return res.status(500).json({
+          return jsonResponse(res, 500, {
             success: false,
-            code: "UNKNOWN_ERROR",
+            status: "failed",
+            diagnostics,
+            code: CommonError.UNKNOWN,
             error: getErrorContactMessage(id),
+            errorId: id,
           });
         }
       } finally {
@@ -714,8 +798,10 @@ export async function parseController(
         concurrencyQueueDurationMs: lockTime || undefined,
       });
 
-      return res.status(200).json({
+      return jsonResponse(res, 200, {
         success: true,
+        status: "ok",
+        diagnostics,
         data: {
           ...doc!,
           metadata: {

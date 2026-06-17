@@ -22,6 +22,22 @@ import { extractData } from "../lib/extractSmartScrape";
 import { CostTracking } from "../../../lib/cost-tracking";
 import { isAgentExtractModelValid } from "../../../controllers/v1/types";
 import { hasFormatOfType } from "../../../lib/format-utils";
+import { ExtractWarning } from "../../../lib/error-codes";
+import type { WarningEntry } from "../../../controllers/v2/types";
+
+type WarnableDocument = Document & {
+  warning?: string;
+  warnings?: WarningEntry[];
+};
+
+function pushWarning(
+  document: WarnableDocument,
+  warning: WarningEntry,
+  message: string,
+) {
+  document.warning = message + (document.warning ? " " + document.warning : "");
+  document.warnings = [...(document.warnings ?? []), warning];
+}
 
 // Smart model selection based on schema
 function detectRecursiveSchema(schema: any): boolean {
@@ -154,6 +170,7 @@ interface TrimResult {
   text: string;
   numTokens: number;
   warning?: string;
+  warnings?: WarningEntry[];
 }
 
 // Generous upper bound on the number of characters a single token can represent.
@@ -194,6 +211,13 @@ export function trimToTokenLimit(
           text: candidate,
           numTokens,
           warning: previousWarning ? `${warning} ${previousWarning}` : warning,
+          warnings: [
+            {
+              code: ExtractWarning.CONTENT_TRIMMED_CHARS,
+              message: warning,
+              details: { maxChars },
+            },
+          ],
         };
       }
 
@@ -212,6 +236,17 @@ export function trimToTokenLimit(
         text: trimmedText,
         numTokens: maxTokens,
         warning: previousWarning ? `${warning} ${previousWarning}` : warning,
+        warnings: [
+          {
+            code: ExtractWarning.CONTENT_TRIMMED_TOKENS,
+            message: warning,
+            details: {
+              numTokens,
+              maxTokens,
+              preTrimmed: preTrimmed || undefined,
+            },
+          },
+        ],
       };
     } finally {
       encoder.free();
@@ -228,6 +263,13 @@ export function trimToTokenLimit(
       text: trimmedText,
       numTokens: maxTokens, // We assume we hit the max in this fallback case
       warning: previousWarning ? `${warning} ${previousWarning}` : warning,
+      warnings: [
+        {
+          code: ExtractWarning.TOKEN_COUNT_FAILED,
+          message: warning,
+          details: { maxTokens },
+        },
+      ],
     };
   }
 }
@@ -1152,13 +1194,30 @@ export async function performCleanContent(
     document.warning,
   );
 
+  const warnableDocument = document as WarnableDocument;
   document.warning = trimOutput.warning;
+  if (trimOutput.warnings?.length) {
+    warnableDocument.warnings = [
+      ...(warnableDocument.warnings ?? []),
+      ...trimOutput.warnings,
+    ];
+  }
 
   const modelLimits = getModelLimits("gpt-4o-mini");
   if (trimOutput.numTokens > modelLimits.maxOutputTokens) {
     const skipWarning = `Content cleaning was skipped because the content is too long (${trimOutput.numTokens} tokens) for the model to return in full (max output: ${modelLimits.maxOutputTokens} tokens). The original markdown has been preserved.`;
-    document.warning =
-      skipWarning + (document.warning ? " " + document.warning : "");
+    pushWarning(
+      document as WarnableDocument,
+      {
+        code: ExtractWarning.CLEANING_SKIPPED_TOO_LONG,
+        message: skipWarning,
+        details: {
+          numTokens: trimOutput.numTokens,
+          maxOutputTokens: modelLimits.maxOutputTokens,
+        },
+      },
+      skipWarning,
+    );
     meta.logger.info(
       "Skipping onlyCleanContent: input tokens exceed model output limit",
       {
@@ -1298,7 +1357,14 @@ export async function performSummary(
       document.warning,
     );
 
+    const warnableDocument = document as WarnableDocument;
     document.warning = trimOutput.warning;
+    if (trimOutput.warnings?.length) {
+      warnableDocument.warnings = [
+        ...(warnableDocument.warnings ?? []),
+        ...trimOutput.warnings,
+      ];
+    }
 
     if (!trimOutput.text || trimOutput.text.trim() === "") {
       document.warning =
