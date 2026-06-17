@@ -12,7 +12,3 @@ export function browserLiveArtifactPath(
 ): string {
   return `/v2/live/browser/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(name)}`;
 }
-
-export function scrapeLiveArtifactPath(scrapeId: string, name: string): string {
-  return `/v2/live/scrape/${encodeURIComponent(scrapeId)}/artifacts/${encodeURIComponent(name)}`;
-}

@@ -24,6 +24,7 @@
       "x402-express": ["./src/types/x402"]
     }
   },
+  "exclude": ["src/admin/playground/client"],
   "include": [
     "src/",
     "src/**/*",

@@ -13,6 +13,7 @@ import { metricsController, nuqMetricsController } from "../admin/metrics";
 import { realtimeSearchController } from "../controllers/v2/f-search";
 import { concurrencyQueueBackfillController } from "../admin/concurrency-queue-backfill";
 import { crawlMonitorController } from "../admin/crawl-monitor";
+import { playgroundController } from "../admin/playground/controller";
 import {
   handleIntegrationAdminCreateUserProxy,
   handleIntegrationAdminRotateProxy,
@@ -23,6 +24,11 @@ import { RateLimiterMode } from "../types";
 export const adminRouter = express.Router();
 
 adminRouter.get(`/admin/${config.BULL_AUTH_KEY}`, adminIndexController);
+
+adminRouter.get(
+  `/admin/${config.BULL_AUTH_KEY}/playground`,
+  playgroundController,
+);
 
 adminRouter.get(
   `/admin/${config.BULL_AUTH_KEY}/redis-health`,

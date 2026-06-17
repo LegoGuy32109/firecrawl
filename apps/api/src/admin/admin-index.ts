@@ -27,6 +27,13 @@ const keyedRoutes: AdminRoute[] = [
   },
   {
     method: "GET",
+    path: "/playground",
+    label: "Playground",
+    description: "Interactive API playground with live error diagnostics.",
+    linked: true,
+  },
+  {
+    method: "GET",
     path: "/queues",
     label: "Bull Board",
     description: "Inspect BullMQ queues registered by the API process.",
