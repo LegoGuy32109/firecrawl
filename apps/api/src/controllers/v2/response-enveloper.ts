@@ -372,6 +372,8 @@ export type Responder = {
     body: TBody,
     warnings: Warning[],
   ): Response;
+  // In-flight async job: status:"processing" (pair with jobState:"processing" in the body).
+  processing<TBody extends Record<string, unknown>>(body: TBody): Response;
   fail(code: ErrorCodes, error: string | Error, opts?: FailOpts): Response;
   asyncFail<TData = unknown>(
     code: ErrorCodes,
@@ -438,6 +440,14 @@ export function makeResponder(req: Request, res: Response): Responder {
         success: true,
         status: "warning",
         warnings,
+        diagnostics,
+      });
+    },
+    processing(body) {
+      return res.status(200).json({
+        ...body,
+        success: true,
+        status: "processing",
         diagnostics,
       });
     },

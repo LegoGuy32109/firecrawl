@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { ErrorResponse, RequestWithAuth } from "./types";
 import { getTeamBalance } from "../../services/autumn/usage";
-import { errorResponse, okResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import { BillingError } from "../../lib/error-codes";
 
 interface CreditUsageResponse {
@@ -18,32 +18,27 @@ export async function creditUsageController(
   req: RequestWithAuth,
   res: Response<CreditUsageResponse | ErrorResponse>,
 ): Promise<void> {
+  const r = makeResponder(req, res);
+
   const balance = await getTeamBalance(req.auth.team_id);
 
   if (!balance) {
-    const response = errorResponse(
+    r.fail(
       BillingError.UNAVAILABLE,
       "Could not find credit usage information",
-      req,
       {
         details: { dependency: "autumn" },
       },
     );
-    res.status(response.httpStatus).json(response.body);
     return;
   }
 
-  const response = okResponse(
-    {
-      data: {
-        remainingCredits: balance.remaining,
-        planCredits: balance.planCredits,
-        billingPeriodStart: balance.periodStart,
-        billingPeriodEnd: balance.periodEnd,
-      },
+  r.ok({
+    data: {
+      remainingCredits: balance.remaining,
+      planCredits: balance.planCredits,
+      billingPeriodStart: balance.periodStart,
+      billingPeriodEnd: balance.periodEnd,
     },
-    req,
-  );
-
-  res.status(response.httpStatus).json(response.body);
+  });
 }

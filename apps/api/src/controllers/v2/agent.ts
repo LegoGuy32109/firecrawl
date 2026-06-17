@@ -11,7 +11,7 @@ import { logRequest } from "../../services/logging/log_job";
 import { config } from "../../config";
 import { agentConsumeFreeRequestIfLeft } from "../../db/rpc";
 import { getScrapeZDR } from "../../lib/zdr-helpers";
-import { errorResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import {
   AgentError,
   DependencyError,
@@ -22,6 +22,7 @@ export async function agentController(
   req: RequestWithAuth<{}, AgentResponse, AgentRequest>,
   res: Response<AgentResponse>,
 ) {
+  const r = makeResponder(req, res);
   const agentId = uuidv7();
   const logger = _logger.child({
     agentId,
@@ -38,13 +39,10 @@ export async function agentController(
   req.body = agentRequestSchema.parse(req.body);
 
   if (getScrapeZDR(req.acuc?.flags) === "forced") {
-    const envelope = errorResponse(
+    return r.fail(
       LifecycleError.ZDR_NOT_SUPPORTED,
       "Your team has zero data retention enabled. This is not supported on agent. Please contact support@firecrawl.com to unblock this feature.",
-      req,
-      { httpStatus: 422 },
     );
-    return res.status(envelope.httpStatus).json(envelope.body);
   }
 
   _logger.info("Agent starting...", {
@@ -55,13 +53,7 @@ export async function agentController(
   });
 
   if (!config.EXTRACT_V3_BETA_URL) {
-    const envelope = errorResponse(
-      DependencyError.UNAVAILABLE,
-      "Agent beta is not enabled.",
-      req,
-      { httpStatus: 503 },
-    );
-    return res.status(envelope.httpStatus).json(envelope.body);
+    return r.fail(DependencyError.UNAVAILABLE, "Agent beta is not enabled.");
   }
 
   // If maxCredits > 2500, skip free request consumption — this is always a paid request
@@ -124,23 +116,15 @@ export async function agentController(
       status: passthrough.status,
       text,
     });
-    const envelope = errorResponse(
-      AgentError.UPSTREAM,
-      "Failed to passthrough agent request.",
-      req,
-      {
-        httpStatus: 502,
-        details: {
-          status: passthrough.status,
-          body: text,
-        },
+    return r.fail(AgentError.UPSTREAM, "Failed to passthrough agent request.", {
+      details: {
+        status: passthrough.status,
+        body: text,
       },
-    );
-    return res.status(envelope.httpStatus).json(envelope.body);
+    });
   }
 
-  return res.status(200).json({
-    success: true,
+  return r.ok({
     id: agentId,
   });
 }

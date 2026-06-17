@@ -1,4 +1,4 @@
-import { Response } from "express";
+import { Request, Response } from "express";
 import { z } from "zod";
 import { logger as _logger } from "../../lib/logger";
 import { RequestWithAuth } from "./types";
@@ -44,15 +44,13 @@ import {
   unsubscribeRecipientByToken,
 } from "../../services/monitoring/email_recipients";
 import { syncMonitorEmailRecipients } from "../../services/monitoring/email_recipients_sync";
-import { errorResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import {
   CommonError,
   LifecycleError,
   MonitorError,
   RequestError,
 } from "../../lib/error-codes";
-import type { ErrorDetails } from "../../lib/error-details";
-import type { StrictErrorResponse } from "./types";
 
 const logger = _logger.child({ module: "monitor-controller" });
 
@@ -64,30 +62,12 @@ const monitorCheckParamsSchema = monitorParamsSchema.extend({
   checkId: z.uuid(),
 });
 
-function sendMonitorError(
-  req: RequestWithAuth<any, any, any>,
-  res: Response,
-  status: number,
-  code: MonitorError | RequestError | CommonError | LifecycleError,
-  error: string | Error,
-  details?: ErrorDetails,
-) {
-  const envelope = errorResponse(code, error, req, {
-    httpStatus: status,
-    ...(details ? { details } : {}),
-  });
-  return res.status(envelope.httpStatus).json(envelope.body);
-}
-
 function rejectZdr(
   req: RequestWithAuth<any, any, any>,
-  res: Response,
+  r: ReturnType<typeof makeResponder>,
 ): boolean {
   if (getScrapeZDR(req.acuc?.flags) === "forced") {
-    sendMonitorError(
-      req,
-      res,
-      400,
+    r.fail(
       LifecycleError.ZDR_NOT_SUPPORTED,
       "Monitoring requires retained snapshots and diffs, and is not supported for zero data retention teams.",
     );
@@ -209,7 +189,8 @@ export async function createMonitorController(
   req: RequestWithAuth<{}, any, unknown>,
   res: Response,
 ) {
-  if (rejectZdr(req, res)) return;
+  const r = makeResponder(req, res);
+  if (rejectZdr(req, r)) return;
 
   const input = createMonitorSchema.parse(req.body);
   let schedule;
@@ -219,10 +200,7 @@ export async function createMonitorController(
       input.schedule.timezone,
     );
   } catch (error) {
-    return sendMonitorError(
-      req,
-      res,
-      400,
+    return r.fail(
       RequestError.BAD_REQUEST,
       error instanceof Error ? error.message : String(error),
     );
@@ -253,8 +231,7 @@ export async function createMonitorController(
     return { recipients: [] };
   });
 
-  res.status(200).json({
-    success: true,
+  return r.ok({
     data: serializeMonitor(monitor, {
       emailRecipientSubscriptions: sync.recipients,
     }),
@@ -265,6 +242,7 @@ export async function listMonitorsController(
   req: RequestWithAuth<{}, any, unknown>,
   res: Response,
 ) {
+  const r = makeResponder(req, res);
   const query = listMonitorsQuerySchema.parse(req.query);
   const monitors = await listMonitors({
     teamId: req.auth.team_id,
@@ -272,8 +250,7 @@ export async function listMonitorsController(
     offset: query.offset,
   });
 
-  res.status(200).json({
-    success: true,
+  return r.ok({
     data: monitors.map(monitor => serializeMonitor(monitor)),
   });
 }
@@ -282,16 +259,11 @@ export async function getMonitorController(
   req: RequestWithAuth<{ monitorId: string }, any, unknown>,
   res: Response,
 ) {
+  const r = makeResponder(req, res);
   const { monitorId } = monitorParamsSchema.parse(req.params);
   const monitor = await getMonitor(req.auth.team_id, monitorId);
   if (!monitor) {
-    return sendMonitorError(
-      req,
-      res,
-      404,
-      MonitorError.MONITOR_NOT_FOUND,
-      "Monitor not found",
-    );
+    return r.fail(MonitorError.MONITOR_NOT_FOUND, "Monitor not found");
   }
 
   const subscriptions = await loadEmailRecipientSubscriptions(monitorId).catch(
@@ -304,8 +276,7 @@ export async function getMonitorController(
     },
   );
 
-  res.status(200).json({
-    success: true,
+  return r.ok({
     data: serializeMonitor(monitor, {
       emailRecipientSubscriptions: subscriptions,
     }),
@@ -316,18 +287,13 @@ export async function updateMonitorController(
   req: RequestWithAuth<{ monitorId: string }, any, unknown>,
   res: Response,
 ) {
-  if (rejectZdr(req, res)) return;
+  const r = makeResponder(req, res);
+  if (rejectZdr(req, r)) return;
 
   const { monitorId } = monitorParamsSchema.parse(req.params);
   const existing = await getMonitorForUpdate(req.auth.team_id, monitorId);
   if (!existing) {
-    return sendMonitorError(
-      req,
-      res,
-      404,
-      MonitorError.MONITOR_NOT_FOUND,
-      "Monitor not found",
-    );
+    return r.fail(MonitorError.MONITOR_NOT_FOUND, "Monitor not found");
   }
 
   const input = updateMonitorSchema.parse(req.body);
@@ -337,10 +303,7 @@ export async function updateMonitorController(
   try {
     schedule = validateMonitorCron(cron, timezone);
   } catch (error) {
-    return sendMonitorError(
-      req,
-      res,
-      400,
+    return r.fail(
       RequestError.BAD_REQUEST,
       error instanceof Error ? error.message : String(error),
     );
@@ -354,13 +317,7 @@ export async function updateMonitorController(
       input.schedule || input.targets ? schedule.intervalMs : undefined,
   });
   if (!monitor) {
-    return sendMonitorError(
-      req,
-      res,
-      404,
-      MonitorError.MONITOR_NOT_FOUND,
-      "Monitor not found",
-    );
+    return r.fail(MonitorError.MONITOR_NOT_FOUND, "Monitor not found");
   }
 
   const interestTracking: Promise<void>[] = [];
@@ -418,8 +375,7 @@ export async function updateMonitorController(
     subscriptions = await loadEmailRecipientSubscriptions(monitor.id);
   }
 
-  res.status(200).json({
-    success: true,
+  return r.ok({
     data: serializeMonitor(monitor, {
       emailRecipientSubscriptions: subscriptions,
     }),
@@ -430,16 +386,11 @@ export async function deleteMonitorController(
   req: RequestWithAuth<{ monitorId: string }, any, unknown>,
   res: Response,
 ) {
+  const r = makeResponder(req, res);
   const { monitorId } = monitorParamsSchema.parse(req.params);
   const existing = await getMonitorForUpdate(req.auth.team_id, monitorId);
   if (!existing) {
-    return sendMonitorError(
-      req,
-      res,
-      404,
-      MonitorError.MONITOR_NOT_FOUND,
-      "Monitor not found",
-    );
+    return r.fail(MonitorError.MONITOR_NOT_FOUND, "Monitor not found");
   }
 
   const deleted = await deleteMonitor({
@@ -447,13 +398,7 @@ export async function deleteMonitorController(
     monitorId,
   });
   if (!deleted) {
-    return sendMonitorError(
-      req,
-      res,
-      404,
-      MonitorError.MONITOR_NOT_FOUND,
-      "Monitor not found",
-    );
+    return r.fail(MonitorError.MONITOR_NOT_FOUND, "Monitor not found");
   }
 
   trackMonitorDeactivatedInterest({
@@ -466,35 +411,27 @@ export async function deleteMonitorController(
     }),
   );
 
-  res.status(200).json({ success: true });
+  return r.ok({});
 }
 
 export async function runMonitorController(
   req: RequestWithAuth<{ monitorId: string }, any, unknown>,
   res: Response,
 ) {
-  if (rejectZdr(req, res)) return;
+  const r = makeResponder(req, res);
+  if (rejectZdr(req, r)) return;
 
   const { monitorId } = monitorParamsSchema.parse(req.params);
   const monitor = await getMonitorForUpdate(req.auth.team_id, monitorId);
   if (!monitor) {
-    return sendMonitorError(
-      req,
-      res,
-      404,
-      MonitorError.MONITOR_NOT_FOUND,
-      "Monitor not found",
-    );
+    return r.fail(MonitorError.MONITOR_NOT_FOUND, "Monitor not found");
   }
   if (monitor.current_check_id) {
-    return sendMonitorError(
-      req,
-      res,
-      409,
-      MonitorError.CONFLICT,
-      "Monitor check is already running.",
-      { reason: `Check ${monitor.current_check_id} is already running.` },
-    );
+    return r.fail(MonitorError.CONFLICT, "Monitor check is already running.", {
+      details: {
+        reason: `Check ${monitor.current_check_id} is already running.`,
+      },
+    });
   }
 
   const check = await createMonitorCheck({
@@ -507,8 +444,7 @@ export async function runMonitorController(
     teamId: monitor.team_id,
   });
 
-  res.status(200).json({
-    success: true,
+  return r.ok({
     id: check.id,
     data: serializeCheck(check),
   });
@@ -518,16 +454,11 @@ export async function listMonitorChecksController(
   req: RequestWithAuth<{ monitorId: string }, any, unknown>,
   res: Response,
 ) {
+  const r = makeResponder(req, res);
   const { monitorId } = monitorParamsSchema.parse(req.params);
   const monitor = await getMonitor(req.auth.team_id, monitorId);
   if (!monitor) {
-    return sendMonitorError(
-      req,
-      res,
-      404,
-      MonitorError.MONITOR_NOT_FOUND,
-      "Monitor not found",
-    );
+    return r.fail(MonitorError.MONITOR_NOT_FOUND, "Monitor not found");
   }
 
   const query = listMonitorChecksQuerySchema.parse(req.query);
@@ -544,8 +475,7 @@ export async function listMonitorChecksController(
     event: WebhookEvent.MONITOR_CHECK_COMPLETED,
   });
 
-  res.status(200).json({
-    success: true,
+  return r.ok({
     data: checks.map(check =>
       overlayWebhookLog(
         serializeCheck(check),
@@ -559,18 +489,13 @@ export async function getMonitorCheckController(
   req: RequestWithAuth<{ monitorId: string; checkId: string }, any, unknown>,
   res: Response,
 ) {
+  const r = makeResponder(req, res);
   const { monitorId, checkId } = monitorCheckParamsSchema.parse(req.params);
   const query = monitorCheckDetailQuerySchema.parse(req.query);
   const skip = query.skip;
   const check = await getMonitorCheck(req.auth.team_id, monitorId, checkId);
   if (!check) {
-    return sendMonitorError(
-      req,
-      res,
-      404,
-      MonitorError.CHECK_NOT_FOUND,
-      "Check not found",
-    );
+    return r.fail(MonitorError.CHECK_NOT_FOUND, "Check not found");
   }
 
   const [pages, totalPagesForFilter, webhookLog] = await Promise.all([
@@ -640,8 +565,7 @@ export async function getMonitorCheckController(
     return url.toString();
   })();
 
-  res.status(200).json({
-    success: true,
+  return r.ok({
     next,
     data: {
       ...overlayWebhookLog(serializeCheck(check), webhookLog),
@@ -660,19 +584,6 @@ const emailActionBodySchema = z.object({
   token: z.string().min(16).max(64),
 });
 
-type EmailActionResponse =
-  | {
-      success: true;
-      result:
-        | "confirmed"
-        | "already_confirmed"
-        | "unsubscribed"
-        | "already_unsubscribed";
-      email: string;
-      monitorName: string | null;
-    }
-  | StrictErrorResponse;
-
 function parseTokenFromRequest(req: { body?: unknown }): string | null {
   const candidate =
     req.body && typeof req.body === "object"
@@ -683,32 +594,22 @@ function parseTokenFromRequest(req: { body?: unknown }): string | null {
 }
 
 export async function confirmMonitorEmailController(
-  req: { body?: unknown },
+  req: Request,
   res: Response,
 ) {
+  const r = makeResponder(req, res);
   const token = parseTokenFromRequest(req);
   if (!token) {
-    const envelope = errorResponse(
+    return r.fail(
       MonitorError.EMAIL_TOKEN_INVALID,
       "Invalid monitor email token.",
-      {},
-      { httpStatus: 400 },
     );
-    const body = envelope.body as StrictErrorResponse;
-    return res.status(envelope.httpStatus).json(body);
   }
 
   try {
     const row = await confirmRecipientByToken(token);
     if (!row) {
-      const envelope = errorResponse(
-        MonitorError.MONITOR_NOT_FOUND,
-        "Monitor not found.",
-        {},
-        { httpStatus: 404 },
-      );
-      const body = envelope.body as StrictErrorResponse;
-      return res.status(envelope.httpStatus).json(body);
+      return r.fail(MonitorError.MONITOR_NOT_FOUND, "Monitor not found.");
     }
 
     const monitorName = await getMonitorNameById(row.monitor_id);
@@ -727,53 +628,37 @@ export async function confirmMonitorEmailController(
       result = "confirmed";
     }
 
-    const body: EmailActionResponse = {
-      success: true,
+    return r.ok({
       result,
       email: row.email,
       monitorName,
-    };
-    return res.status(200).json(body);
+    });
   } catch (error) {
     logger.error("Failed to confirm monitor email recipient", { error });
-    const envelope = errorResponse(
+    return r.fail(
       CommonError.UNKNOWN,
       "Failed to confirm monitor email recipient.",
-      {},
-      { httpStatus: 500 },
     );
-    const body = envelope.body as StrictErrorResponse;
-    return res.status(envelope.httpStatus).json(body);
   }
 }
 
 export async function unsubscribeMonitorEmailController(
-  req: { body?: unknown },
+  req: Request,
   res: Response,
 ) {
+  const r = makeResponder(req, res);
   const token = parseTokenFromRequest(req);
   if (!token) {
-    const envelope = errorResponse(
+    return r.fail(
       MonitorError.EMAIL_TOKEN_INVALID,
       "Invalid monitor email token.",
-      {},
-      { httpStatus: 400 },
     );
-    const body = envelope.body as StrictErrorResponse;
-    return res.status(envelope.httpStatus).json(body);
   }
 
   try {
     const row = await unsubscribeRecipientByToken(token);
     if (!row) {
-      const envelope = errorResponse(
-        MonitorError.MONITOR_NOT_FOUND,
-        "Monitor not found.",
-        {},
-        { httpStatus: 404 },
-      );
-      const body = envelope.body as StrictErrorResponse;
-      return res.status(envelope.httpStatus).json(body);
+      return r.fail(MonitorError.MONITOR_NOT_FOUND, "Monitor not found.");
     }
 
     const monitorName = await getMonitorNameById(row.monitor_id);
@@ -784,22 +669,16 @@ export async function unsubscribeMonitorEmailController(
         ? "already_unsubscribed"
         : "unsubscribed";
 
-    const body: EmailActionResponse = {
-      success: true,
+    return r.ok({
       result,
       email: row.email,
       monitorName,
-    };
-    return res.status(200).json(body);
+    });
   } catch (error) {
     logger.error("Failed to unsubscribe monitor email recipient", { error });
-    const envelope = errorResponse(
+    return r.fail(
       CommonError.UNKNOWN,
       "Failed to unsubscribe monitor email recipient.",
-      {},
-      { httpStatus: 500 },
     );
-    const body = envelope.body as StrictErrorResponse;
-    return res.status(envelope.httpStatus).json(body);
   }
 }

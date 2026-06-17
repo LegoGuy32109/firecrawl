@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { config } from "../../config";
 import { logger } from "../../lib/logger";
-import { errorResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import { ProxyError } from "../../lib/error-codes";
 
 const SUPPORT_AGENT_BASE = config.SUPPORT_AGENT_URL;
@@ -14,13 +14,9 @@ export async function supportProxyController(
   req: Request,
   res: Response,
 ): Promise<void> {
+  const r = makeResponder(req, res);
   if (!SUPPORT_AGENT_BASE) {
-    const response = errorResponse(
-      ProxyError.NOT_CONFIGURED,
-      "Support agent proxy is not configured.",
-      req,
-    );
-    res.status(response.httpStatus).json(response.body);
+    r.fail(ProxyError.NOT_CONFIGURED, "Support agent proxy is not configured.");
     return;
   }
 
@@ -59,26 +55,23 @@ export async function supportProxyController(
 
     res.status(upstream.status);
     const body = await upstream.text();
+    // raw-response: streaming upstream proxy body
     res.send(body);
   } catch (err: unknown) {
     if (err instanceof DOMException && err.name === "TimeoutError") {
       logger.error("Support agent proxy timeout");
-      const response = errorResponse(
-        ProxyError.UPSTREAM_TIMEOUT,
-        "Support agent proxy timed out.",
-        req,
-        { details: { upstream: "support", timeoutMs: PROXY_TIMEOUT_MS } },
-      );
-      res.status(response.httpStatus).json(response.body);
+      r.fail(ProxyError.UPSTREAM_TIMEOUT, "Support agent proxy timed out.", {
+        details: { upstream: "support", timeoutMs: PROXY_TIMEOUT_MS },
+      });
       return;
     }
     logger.error("Support agent proxy error", { error: err });
-    const response = errorResponse(
+    r.fail(
       ProxyError.UPSTREAM_UNAVAILABLE,
       "Support agent proxy is unreachable.",
-      req,
-      { details: { upstream: "support" } },
+      {
+        details: { upstream: "support" },
+      },
     );
-    res.status(response.httpStatus).json(response.body);
   }
 }

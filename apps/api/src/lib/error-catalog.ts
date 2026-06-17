@@ -364,7 +364,7 @@ export const ERROR_CATALOG = {
     "Close sessions or wait.",
   ),
   [BrowserError.EXECUTION_FAILED]: entry(
-    502,
+    422,
     "Browser execution failed.",
     "Retry or simplify the browser operation.",
   ),

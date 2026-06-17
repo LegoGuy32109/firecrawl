@@ -5,7 +5,7 @@ import { logger as _logger } from "../../lib/logger";
 import { generateCrawlerOptionsFromPrompt } from "../../scraper/scrapeURL/transformers/llmExtract";
 import { CostTracking } from "../../lib/cost-tracking";
 import { buildPromptWithWebsiteStructure } from "../../lib/map-utils";
-import { errorResponse, okResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import { RequestError } from "../../lib/error-codes";
 
 // Define the request schema for params preview
@@ -50,6 +50,7 @@ export async function crawlParamsPreviewController(
   >,
   res: Response<CrawlParamsPreviewResponse>,
 ) {
+  const r = makeResponder(req, res);
   const logger = _logger.child({
     module: "api/v2",
     method: "crawlParamsPreviewController",
@@ -110,20 +111,14 @@ export async function crawlParamsPreviewController(
       }
     });
 
-    const response = okResponse({ data: responseData }, req);
-    return res.status(response.httpStatus).json({
-      ...response.body,
-      status: "ok",
-    });
+    return r.ok({ data: responseData });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      const response = errorResponse(
+      return r.fail(
         RequestError.BAD_REQUEST,
         "Invalid request parameters: " +
           error.issues.map(e => e.message).join(", "),
-        req,
       );
-      return res.status(response.httpStatus).json(response.body);
     }
 
     logger.error("Failed to generate crawler params preview", {
@@ -131,11 +126,9 @@ export async function crawlParamsPreviewController(
       prompt: req.body.prompt,
     });
 
-    const response = errorResponse(
+    return r.fail(
       RequestError.BAD_REQUEST,
       "Failed to process natural language prompt. Please try rephrasing.",
-      req,
     );
-    return res.status(response.httpStatus).json(response.body);
   }
 }

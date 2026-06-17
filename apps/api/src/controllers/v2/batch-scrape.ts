@@ -33,7 +33,7 @@ import {
 import { logRequest } from "../../services/logging/log_job";
 import type { BillingMetadata } from "../../services/billing/types";
 import { getScrapeZDR } from "../../lib/zdr-helpers";
-import { errorResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import {
   AuthError,
   GatingError,
@@ -45,6 +45,7 @@ export async function batchScrapeController(
   req: RequestWithAuth<{}, BatchScrapeResponse, BatchScrapeRequest>,
   res: Response<BatchScrapeResponse>,
 ) {
+  const r = makeResponder(req, res);
   const preNormalizedBody = { ...req.body };
   if (req.body?.ignoreInvalidURLs === true) {
     req.body = batchScrapeRequestSchemaNoURLValidation.parse(req.body);
@@ -54,15 +55,13 @@ export async function batchScrapeController(
 
   const permissions = checkPermissions(req.body, req.acuc?.flags);
   if (permissions.error) {
-    const response = errorResponse(
+    // NOTE: ZDR_NOT_SUPPORTED is 400 in the catalog (was 403); URL_BLOCKED is 403.
+    return r.fail(
       permissions.error.toLowerCase().includes("zero data retention")
         ? LifecycleError.ZDR_NOT_SUPPORTED
         : GatingError.URL_BLOCKED,
       permissions.error,
-      req,
-      { httpStatus: 403 },
     );
-    return res.status(response.httpStatus).json(response.body as any);
   }
 
   const zeroDataRetention =
@@ -74,21 +73,11 @@ export async function batchScrapeController(
     config.AGENT_INTEROP_SECRET &&
     req.body.__agentInterop.auth !== config.AGENT_INTEROP_SECRET
   ) {
-    const response = errorResponse(
-      AuthError.INVALID_API_KEY,
-      "Invalid agent interop.",
-      req,
-      { httpStatus: 403 },
-    );
-    return res.status(response.httpStatus).json(response.body as any);
+    // NOTE: INVALID_API_KEY is 401 in the catalog (was 403).
+    return r.fail(AuthError.INVALID_API_KEY, "Invalid agent interop.");
   } else if (req.body.__agentInterop && !config.AGENT_INTEROP_SECRET) {
-    const response = errorResponse(
-      AuthError.MISSING_API_KEY,
-      "Agent interop is not enabled.",
-      req,
-      { httpStatus: 403 },
-    );
-    return res.status(response.httpStatus).json(response.body as any);
+    // NOTE: MISSING_API_KEY is 401 in the catalog (was 403).
+    return r.fail(AuthError.MISSING_API_KEY, "Agent interop is not enabled.");
   }
 
   const id = req.body.appendToId ?? uuidv7();
@@ -142,24 +131,13 @@ export async function batchScrapeController(
       )
     ) {
       if (!res.headersSent) {
-        const response = errorResponse(
-          GatingError.URL_BLOCKED,
-          UNSUPPORTED_SITE_MESSAGE,
-          req,
-          { httpStatus: 403 },
-        );
-        return res.status(response.httpStatus).json(response.body as any);
+        return r.fail(GatingError.URL_BLOCKED, UNSUPPORTED_SITE_MESSAGE);
       }
     }
   }
 
   if (urls.length === 0) {
-    const response = errorResponse(
-      RequestError.BAD_REQUEST,
-      "No valid URLs provided",
-      req,
-    );
-    return res.status(response.httpStatus).json(response.body as any);
+    return r.fail(RequestError.BAD_REQUEST, "No valid URLs provided");
   }
 
   logger.debug("Batch scrape " + id + " starting", {
@@ -208,12 +186,7 @@ export async function batchScrapeController(
 
   if (req.body.appendToId) {
     if (!sc || sc.team_id !== req.auth.team_id) {
-      const response = errorResponse(
-        LifecycleError.JOB_NOT_FOUND,
-        "Job not found",
-        req,
-      );
-      return res.status(response.httpStatus).json(response.body as any);
+      return r.fail(LifecycleError.JOB_NOT_FOUND, "Job not found");
     }
   }
 
@@ -307,8 +280,7 @@ export async function batchScrapeController(
 
   const protocol = req.protocol;
 
-  return res.status(200).json({
-    success: true,
+  return r.ok({
     id,
     url: `${protocol}://${req.get("host")}/v2/batch/scrape/${id}`,
     invalidURLs,

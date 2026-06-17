@@ -13,7 +13,7 @@ import { isUrlBlocked } from "../../scraper/WebScraper/utils/blocklist";
 import { logger as _logger } from "../../lib/logger";
 import { logRequest } from "../../services/logging/log_job";
 import { getScrapeZDR } from "../../lib/zdr-helpers";
-import { errorResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import { ExtractError, RequestError } from "../../lib/error-codes";
 
 /**
@@ -27,17 +27,15 @@ export async function extractController(
   req: RequestWithAuth<{}, ExtractResponse, ExtractRequest>,
   res: Response<ExtractResponse>,
 ) {
+  const r = makeResponder(req, res);
   const originalRequest = { ...req.body };
   req.body = extractRequestSchema.parse(req.body);
 
   if (getScrapeZDR(req.acuc?.flags) === "forced") {
-    const envelope = errorResponse(
+    return r.fail(
       RequestError.BAD_REQUEST,
       "Your team has zero data retention enabled. This is not supported on extract. Please contact support@firecrawl.com to unblock this feature.",
-      req,
-      { httpStatus: 400 },
     );
-    return res.status(envelope.httpStatus).json(envelope.body);
   }
 
   const extractId = uuidv7();
@@ -53,13 +51,10 @@ export async function extractController(
   });
 
   if (req.body.agent?.model === "v3-beta") {
-    const envelope = errorResponse(
+    return r.fail(
       RequestError.BAD_REQUEST,
       "Use the new /agent endpoint instead of passing agent.model=v3-beta into /extract.",
-      req,
-      { httpStatus: 400 },
     );
-    return res.status(envelope.httpStatus).json(envelope.body);
   }
 
   const invalidURLs: string[] =
@@ -72,13 +67,7 @@ export async function extractController(
 
   if (invalidURLs.length > 0 && !req.body.ignoreInvalidURLs) {
     if (!res.headersSent) {
-      const envelope = errorResponse(
-        ExtractError.NO_VALID_URLS,
-        UNSUPPORTED_SITE_MESSAGE,
-        req,
-        { httpStatus: 403 },
-      );
-      return res.status(envelope.httpStatus).json(envelope.body);
+      return r.fail(ExtractError.NO_VALID_URLS, UNSUPPORTED_SITE_MESSAGE);
     }
   }
 
@@ -120,8 +109,7 @@ export async function extractController(
     apiKeyId: req.acuc?.api_key_id ?? undefined,
   });
 
-  return res.status(200).json({
-    success: true,
+  return r.ok({
     id: extractId,
     urlTrace: [],
     ...(invalidURLs.length > 0 && req.body.ignoreInvalidURLs

@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { ErrorResponse, RequestWithAuth } from "./types";
 import { getTeamBalance } from "../../services/autumn/usage";
-import { errorResponse, okResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import { BillingError } from "../../lib/error-codes";
 
 const TOKENS_PER_CREDIT = 15;
@@ -20,32 +20,23 @@ export async function tokenUsageController(
   req: RequestWithAuth,
   res: Response<TokenUsageResponse | ErrorResponse>,
 ): Promise<void> {
+  const r = makeResponder(req, res);
+
   const balance = await getTeamBalance(req.auth.team_id);
 
   if (!balance) {
-    const response = errorResponse(
-      BillingError.UNAVAILABLE,
-      "Could not find token usage information",
-      req,
-      {
-        details: { dependency: "autumn" },
-      },
-    );
-    res.status(response.httpStatus).json(response.body);
+    r.fail(BillingError.UNAVAILABLE, "Could not find token usage information", {
+      details: { dependency: "autumn" },
+    });
     return;
   }
 
-  const response = okResponse(
-    {
-      data: {
-        remainingTokens: balance.remaining * TOKENS_PER_CREDIT,
-        planTokens: balance.planCredits * TOKENS_PER_CREDIT,
-        billingPeriodStart: balance.periodStart,
-        billingPeriodEnd: balance.periodEnd,
-      },
+  r.ok({
+    data: {
+      remainingTokens: balance.remaining * TOKENS_PER_CREDIT,
+      planTokens: balance.planCredits * TOKENS_PER_CREDIT,
+      billingPeriodStart: balance.periodStart,
+      billingPeriodEnd: balance.periodEnd,
     },
-    req,
-  );
-
-  res.status(response.httpStatus).json(response.body);
+  });
 }

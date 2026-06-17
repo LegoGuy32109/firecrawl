@@ -26,7 +26,7 @@ import {
 } from "../../services/worker/nuq-router";
 import { logRequest } from "../../services/logging/log_job";
 import { getScrapeZDR } from "../../lib/zdr-helpers";
-import { errorResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import {
   GatingError,
   LifecycleError,
@@ -37,6 +37,7 @@ export async function crawlController(
   req: RequestWithAuth<{}, CrawlResponse, CrawlRequest>,
   res: Response<CrawlResponse>,
 ) {
+  const r = makeResponder(req, res);
   const preNormalizedBody = req.body;
   req.body = crawlRequestSchema.parse(req.body);
 
@@ -45,15 +46,13 @@ export async function crawlController(
     req.acuc?.flags,
   );
   if (permissions.error) {
-    const response = errorResponse(
+    // NOTE: ZDR_NOT_SUPPORTED is 400 in the catalog (was 403); URL_BLOCKED is 403.
+    return r.fail(
       permissions.error.toLowerCase().includes("zero data retention")
         ? LifecycleError.ZDR_NOT_SUPPORTED
         : GatingError.URL_BLOCKED,
       permissions.error,
-      req,
-      { httpStatus: 403 },
     );
-    return res.status(response.httpStatus).json(response.body as any);
   }
 
   const zeroDataRetention =
@@ -134,12 +133,10 @@ export async function crawlController(
         error: error.message,
         prompt: req.body.prompt,
       });
-      const response = errorResponse(
+      return r.fail(
         RequestError.BAD_REQUEST,
         "Failed to process natural language prompt. Please try rephrasing or use explicit crawler options.",
-        req,
       );
-      return res.status(response.httpStatus).json(response.body as any);
     }
   }
 
@@ -168,12 +165,7 @@ export async function crawlController(
       try {
         new RegExp(x);
       } catch (e) {
-        const response = errorResponse(
-          RequestError.BAD_REQUEST,
-          e.message,
-          req,
-        );
-        return res.status(response.httpStatus).json(response.body as any);
+        return r.fail(RequestError.BAD_REQUEST, e.message);
       }
     }
   }
@@ -183,12 +175,7 @@ export async function crawlController(
       try {
         new RegExp(x);
       } catch (e) {
-        const response = errorResponse(
-          RequestError.BAD_REQUEST,
-          e.message,
-          req,
-        );
-        return res.status(response.httpStatus).json(response.body as any);
+        return r.fail(RequestError.BAD_REQUEST, e.message);
       }
     }
   }
@@ -280,8 +267,7 @@ export async function crawlController(
 
   const protocol = req.protocol;
 
-  return res.status(200).json({
-    success: true,
+  return r.ok({
     id,
     url: `${protocol}://${req.get("host")}/v2/crawl/${id}`,
     ...(req.body.prompt && {

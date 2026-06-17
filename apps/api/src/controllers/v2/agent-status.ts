@@ -8,30 +8,25 @@ import { logger as _logger, logger } from "../../lib/logger";
 import { getJobFromGCS } from "../../lib/gcs-jobs";
 import { config } from "../../config";
 import { CommonError, LifecycleError } from "../../lib/error-codes";
-import {
-  asyncJobFailureResponse,
-  errorResponse,
-  okResponse,
-} from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import { deserializeTransportableError } from "../../lib/error-serde";
 
 export async function agentStatusController(
   req: RequestWithAuth<{ jobId: string }, AgentStatusResponse, any>,
   res: Response<AgentStatusResponse>,
 ) {
+  const r = makeResponder(req, res);
   const agentRequest = await supabaseGetAgentRequestByIdDirect(
     req.params.jobId,
   );
 
   if (!agentRequest || agentRequest.team_id !== req.auth.team_id) {
-    const response = errorResponse(
+    return r.fail(
       !agentRequest
         ? LifecycleError.JOB_NOT_FOUND
         : LifecycleError.JOB_WRONG_TEAM,
       "Agent job not found",
-      req,
     );
-    return res.status(response.httpStatus).json(response.body as any);
   }
 
   const agent = await supabaseGetAgentByIdDirect(req.params.jobId);
@@ -86,10 +81,9 @@ export async function agentStatusController(
 
   if (agent && !agent.is_successful) {
     const failedError = deserializeTransportableError(agent.error ?? "");
-    const response = asyncJobFailureResponse(
+    return r.asyncFail(
       failedError?.code ?? CommonError.UNKNOWN,
       failedError?.message ?? agent.error ?? "Agent job failed",
-      req,
       {
         expiresAt: new Date(
           new Date(agent.created_at ?? agentRequest.created_at).getTime() +
@@ -98,28 +92,18 @@ export async function agentStatusController(
         creditsUsed: agent?.credits_cost,
       },
     );
-    return res.status(response.httpStatus).json(response.body as any);
   }
 
   const successStatus = !agent ? "processing" : "completed";
-  const response = okResponse(
-    {
-      data,
-      model,
-      expiresAt: new Date(
-        new Date(agent?.created_at ?? agentRequest.created_at).getTime() +
-          1000 * 60 * 60 * 24,
-      ).toISOString(),
-      creditsUsed: agent?.credits_cost,
-    },
-    req,
-  );
-
-  return res.status(200).json({
-    ...response.body,
-    success: true,
-    status:
-      successStatus === "processing" ? "processing" : response.body.status,
+  const body = {
+    data,
+    model,
+    expiresAt: new Date(
+      new Date(agent?.created_at ?? agentRequest.created_at).getTime() +
+        1000 * 60 * 60 * 24,
+    ).toISOString(),
+    creditsUsed: agent?.credits_cost,
     jobState: successStatus,
-  } as any);
+  } as any;
+  return successStatus === "processing" ? r.processing(body) : r.ok(body);
 }

@@ -7,7 +7,7 @@ import {
   SearchFeedbackResponse,
   searchFeedbackSchema,
 } from "./types";
-import { errorResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import { RequestError } from "../../lib/error-codes";
 import { recordEndpointFeedback } from "./feedback/record";
 import { searchFeedbackRecordOptions } from "./feedback/record-options";
@@ -21,6 +21,7 @@ export async function searchFeedbackController(
   >,
   res: Response<SearchFeedbackResponse>,
 ) {
+  const r = makeResponder(req, res);
   const searchId = req.params.jobId;
   const logger = _logger.child({
     module: "api/v2",
@@ -35,15 +36,9 @@ export async function searchFeedbackController(
   } catch (error) {
     if (error instanceof z.ZodError) {
       logger.warn("Invalid feedback body", { error: error.issues });
-      const envelope = errorResponse(
-        RequestError.BAD_REQUEST,
-        "Invalid request body",
-        req,
-        {
-          details: error.issues,
-        },
-      );
-      return res.status(envelope.httpStatus).json(envelope.body);
+      return r.fail(RequestError.BAD_REQUEST, "Invalid request body", {
+        details: error.issues,
+      });
     }
     throw error;
   }

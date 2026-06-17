@@ -17,7 +17,7 @@ import type {
 } from "../../services/logging/log_job";
 import type { RequestWithAuth } from "../v1/types";
 import { wrap } from "../../routes/shared";
-import { errorResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import { ProxyError, RequestError } from "../../lib/error-codes";
 import type { ErrorDetails } from "../../lib/error-details";
 
@@ -195,15 +195,13 @@ function creditsFor(
 }
 
 function researchError(
-  res: Response,
-  req: RequestWithAuth<any, any, any>,
+  r: ReturnType<typeof makeResponder>,
   error: string,
   details?: ErrorDetails,
 ) {
-  const response = errorResponse(RequestError.BAD_REQUEST, error, req, {
+  return r.fail(RequestError.BAD_REQUEST, error, {
     ...(details !== undefined ? { details } : {}),
   });
-  return res.status(response.httpStatus).json(response.body);
 }
 
 async function fetchResearchUpstream(
@@ -241,6 +239,7 @@ function createResearchController(
 ): ResearchController {
   return async (req, res: Response) => {
     const authedReq = req as RequestWithAuth<any, any, any>;
+    const r = makeResponder(req, res);
     const started = Date.now();
     const jobId = uuidv7();
     const logger = rootLogger.child({
@@ -253,12 +252,7 @@ function createResearchController(
     const parsed = schema.safeParse(req.query);
     if (!parsed.success) {
       logger.warn("Invalid research query", { error: parsed.error.issues });
-      return researchError(
-        res,
-        authedReq,
-        "Invalid query parameters",
-        parsed.error.issues,
-      );
+      return researchError(r, "Invalid query parameters", parsed.error.issues);
     }
 
     const params = parsed.data as ResearchQueryParams;
@@ -290,13 +284,9 @@ function createResearchController(
       if (!upstream) {
         statusCode = 503;
         error = "Research service is not configured";
-        const response = errorResponse(
-          ProxyError.NOT_CONFIGURED,
-          error,
-          authedReq,
-          { details: { upstream: "research" } },
-        );
-        return res.status(response.httpStatus).json(response.body);
+        return r.fail(ProxyError.NOT_CONFIGURED, error, {
+          details: { upstream: "research" },
+        });
       }
 
       statusCode = upstream.status;
@@ -340,35 +330,29 @@ function createResearchController(
       }
 
       if (responseBody === null || typeof responseBody === "string") {
+        // raw-response: streaming upstream proxy body
         return res.status(statusCode).send(responseBody ?? "");
       }
       const response =
         options.legacy && upstream.ok
           ? addLegacySnakeCaseAliases(responseBody)
           : responseBody;
+      // raw-response: relays the upstream research body verbatim
       return res.status(statusCode).json(response);
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === "TimeoutError") {
         statusCode = 504;
         error = "Research service timed out";
-        const response = errorResponse(
-          ProxyError.UPSTREAM_TIMEOUT,
-          error,
-          authedReq,
-          { details: { upstream: "research", timeoutMs: TIMEOUT_MS } },
-        );
-        return res.status(response.httpStatus).json(response.body);
+        return r.fail(ProxyError.UPSTREAM_TIMEOUT, error, {
+          details: { upstream: "research", timeoutMs: TIMEOUT_MS },
+        });
       }
       statusCode = 502;
       error = "Research proxy error";
       logger.error("Research proxy error", { error: err });
-      const response = errorResponse(
-        ProxyError.UPSTREAM_UNAVAILABLE,
-        error,
-        authedReq,
-        { details: { upstream: "research" } },
-      );
-      return res.status(response.httpStatus).json(response.body);
+      return r.fail(ProxyError.UPSTREAM_UNAVAILABLE, error, {
+        details: { upstream: "research" },
+      });
     } finally {
       const timeTaken = (Date.now() - started) / 1000;
       logResearchEndpoint({

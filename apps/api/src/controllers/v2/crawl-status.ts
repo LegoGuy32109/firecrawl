@@ -20,11 +20,7 @@ import { configDotenv } from "dotenv";
 import { logger } from "../../lib/logger";
 import { creditsBilledByCrawlId } from "../../db/rpc";
 import { getJobFromGCS } from "../../lib/gcs-jobs";
-import {
-  asyncJobFailureResponse,
-  errorResponse,
-  okResponse,
-} from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import {
   scrapeQueue,
   NuQJob,
@@ -43,19 +39,6 @@ import {
 import { deserializeTransportableError } from "../../lib/error-serde";
 import type { Warning } from "./types";
 configDotenv();
-
-function buildAsyncStatusBody(
-  req: any,
-  body: Record<string, unknown>,
-  jobState: "processing" | "completed" | "cancelled",
-) {
-  const response = okResponse(body, req).body as any;
-  return {
-    ...response,
-    status: jobState === "processing" ? "processing" : response.status,
-    jobState,
-  };
-}
 
 export type PseudoJob<T> = {
   id: string;
@@ -203,15 +186,11 @@ export async function crawlStatusController(
   res: Response<CrawlStatusResponse>,
   isBatch = false,
 ) {
+  const r = makeResponder(req, res);
   const uuidReg =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (!req.params.jobId || !uuidReg.test(req.params.jobId)) {
-    const response = errorResponse(
-      RequestError.BAD_REQUEST,
-      "Invalid job ID",
-      req,
-    );
-    return res.status(response.httpStatus).json(response.body as any);
+    return r.fail(RequestError.BAD_REQUEST, "Invalid job ID");
   }
 
   const start =
@@ -229,21 +208,14 @@ export async function crawlStatusController(
   const sc = await getCrawl(req.params.jobId);
 
   if (sc && sc.team_id !== req.auth.team_id) {
-    const response = errorResponse(
-      LifecycleError.JOB_WRONG_TEAM,
-      "Job not found",
-      req,
-    );
-    return res.status(response.httpStatus).json(response.body as any);
+    return r.fail(LifecycleError.JOB_WRONG_TEAM, "Job not found");
   }
 
   if (!group || !groupAnyJob) {
-    const response = errorResponse(
+    return r.fail(
       sc ? LifecycleError.JOB_EXPIRED : LifecycleError.JOB_NOT_FOUND,
       "Job not found",
-      req,
     );
-    return res.status(response.httpStatus).json(response.body as any);
   }
 
   const zeroDataRetention = !!(
@@ -295,10 +267,9 @@ export async function crawlStatusController(
   if (outputBulkA.status === "failed" && crawlError) {
     const createdAtMs = sc?.createdAt;
     const failedError = deserializeTransportableError(crawlError);
-    const response = asyncJobFailureResponse(
+    return r.asyncFail(
       failedError?.code ?? CommonError.UNKNOWN,
       failedError?.message ?? crawlError,
-      req,
       {
         data: [],
         failureCount: 1,
@@ -314,7 +285,6 @@ export async function crawlStatusController(
         }),
       },
     );
-    return res.status(response.httpStatus).json(response.body as any);
   }
 
   let outputBulkB: {
@@ -444,10 +414,9 @@ export async function crawlStatusController(
 
   if (jobState === "failed") {
     const failedError = deserializeTransportableError(crawlError ?? "");
-    const response = asyncJobFailureResponse(
+    return r.asyncFail(
       failedError?.code ?? CommonError.UNKNOWN,
       failedError?.message ?? crawlError ?? "Crawl failed",
-      req,
       {
         data: outputBulkB.data,
         failureCount: 1,
@@ -463,7 +432,6 @@ export async function crawlStatusController(
         ...(durationSeconds !== undefined && { duration: durationSeconds }),
       },
     );
-    return res.status(response.httpStatus).json(response.body as any);
   }
 
   const terminalJobState =
@@ -471,25 +439,25 @@ export async function crawlStatusController(
       ? "processing"
       : (jobState as "completed" | "cancelled");
 
-  return res.status(200).json(
-    buildAsyncStatusBody(
-      req,
-      {
-        completed: outputBulkA.completed ?? 0,
-        total: outputBulkA.total ?? 0,
-        creditsUsed: outputBulkA.creditsUsed ?? 0,
-        expiresAt: (await getCrawlExpiry(req.params.jobId)).toISOString(),
-        next: outputBulkB.next,
-        data: outputBulkB.data,
-        ...(createdAtMs && { createdAt: new Date(createdAtMs).toISOString() }),
-        ...(completedAtMs && {
-          completedAt: new Date(completedAtMs).toISOString(),
-        }),
-        ...(durationSeconds !== undefined && { duration: durationSeconds }),
-        ...(warning && { warning }),
-        ...(warnings.length > 0 && { warnings }),
-      },
-      terminalJobState,
-    ),
-  );
+  const body = {
+    completed: outputBulkA.completed ?? 0,
+    total: outputBulkA.total ?? 0,
+    creditsUsed: outputBulkA.creditsUsed ?? 0,
+    expiresAt: (await getCrawlExpiry(req.params.jobId)).toISOString(),
+    next: outputBulkB.next,
+    data: outputBulkB.data,
+    ...(createdAtMs && { createdAt: new Date(createdAtMs).toISOString() }),
+    ...(completedAtMs && {
+      completedAt: new Date(completedAtMs).toISOString(),
+    }),
+    ...(durationSeconds !== undefined && { duration: durationSeconds }),
+    ...(warning && { warning }),
+    jobState: terminalJobState,
+  };
+
+  // In-flight → status:"processing"; terminal completed/cancelled → ok, or warning if "few results".
+  if (terminalJobState === "processing") {
+    return r.processing(body);
+  }
+  return warnings.length > 0 ? r.warn(body, warnings) : r.ok(body);
 }

@@ -16,23 +16,19 @@ import { deserializeTransportableError } from "../../lib/error-serde";
 import { TransportableError } from "../../lib/error";
 import { LifecycleError, ScrapeError } from "../../lib/error-codes";
 import { scrapeQueue } from "../../services/worker/nuq-router";
-import { errorResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 configDotenv();
 
 export async function crawlErrorsController(
   req: RequestWithAuth<CrawlStatusParams, undefined, CrawlErrorsResponse>,
   res: Response<CrawlErrorsResponse>,
 ) {
+  const r = makeResponder(req, res);
   const sc = await getCrawl(req.params.jobId);
 
   if (sc) {
     if (sc.team_id !== req.auth.team_id) {
-      const response = errorResponse(
-        LifecycleError.JOB_WRONG_TEAM,
-        "Forbidden",
-        req,
-      );
-      return res.status(response.httpStatus).json(response.body as any);
+      return r.fail(LifecycleError.JOB_WRONG_TEAM, "Forbidden");
     }
 
     const logger = _logger.child({
@@ -48,7 +44,7 @@ export async function crawlErrorsController(
       )
     ).filter(x => x.failedReason);
 
-    res.status(200).json({
+    return r.ok({
       errors: failedJobs
         .map(x => {
           if (x.data.mode !== "single_urls") {
@@ -99,12 +95,7 @@ export async function crawlErrorsController(
     const requestData = request?.[0];
 
     if (requestData && requestData.team_id !== req.auth.team_id) {
-      const response = errorResponse(
-        LifecycleError.JOB_WRONG_TEAM,
-        "Forbidden",
-        req,
-      );
-      return res.status(response.httpStatus).json(response.body as any);
+      return r.fail(LifecycleError.JOB_WRONG_TEAM, "Forbidden");
     }
 
     const crawlTtlHours = req.acuc?.flags?.crawlTtlHours ?? 24;
@@ -115,21 +106,11 @@ export async function crawlErrorsController(
       new Date().valueOf() - new Date(requestData.created_at!).valueOf() >
         crawlTtlMs
     ) {
-      const response = errorResponse(
-        LifecycleError.JOB_EXPIRED,
-        "Job expired",
-        req,
-      );
-      return res.status(response.httpStatus).json(response.body as any);
+      return r.fail(LifecycleError.JOB_EXPIRED, "Job expired");
     }
 
     if (!request || request.length === 0) {
-      const response = errorResponse(
-        LifecycleError.JOB_NOT_FOUND,
-        "Job not found",
-        req,
-      );
-      return res.status(response.httpStatus).json(response.body as any);
+      return r.fail(LifecycleError.JOB_NOT_FOUND, "Job not found");
     }
 
     // Get failed scrapes from the scrapes table
@@ -152,7 +133,7 @@ export async function crawlErrorsController(
       throw failedScrapesError;
     }
 
-    res.status(200).json({
+    return r.ok({
       errors: (failedScrapes || []).map(scrape => {
         const error = scrape.error
           ? (deserializeTransportableError(
@@ -180,11 +161,6 @@ export async function crawlErrorsController(
       ),
     });
   } else {
-    const response = errorResponse(
-      LifecycleError.JOB_NOT_FOUND,
-      "Job not found",
-      req,
-    );
-    return res.status(response.httpStatus).json(response.body as any);
+    return r.fail(LifecycleError.JOB_NOT_FOUND, "Job not found");
   }
 }

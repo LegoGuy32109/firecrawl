@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { config } from "../../config";
 import { checkKeylessEligibility } from "../../lib/keyless";
-import { errorResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import { AuthError } from "../../lib/error-codes";
 
 /**
@@ -15,19 +15,23 @@ export async function keylessEligibilityController(
   req: Request,
   res: Response,
 ): Promise<void> {
+  const r = makeResponder(req, res);
+
   const secret = req.headers["x-firecrawl-keyless-secret"];
   if (!config.KEYLESS_PROXY_SECRET || secret !== config.KEYLESS_PROXY_SECRET) {
     const code =
       !config.KEYLESS_PROXY_SECRET || secret === undefined
         ? AuthError.MISSING_API_KEY
         : AuthError.INVALID_API_KEY;
-    const response = errorResponse(code, "Unauthorized", req, {
+    // NOTE: the previous response merged `eligible: false` into the error body;
+    // r.fail builds the body internally and cannot carry that field. The HTTP
+    // 401 + error code already signal ineligibility to the MCP proxy.
+    r.fail(code, "Unauthorized", {
       details:
         code === AuthError.INVALID_API_KEY
           ? { reason: "keyless proxy secret mismatch" }
           : undefined,
     });
-    res.status(response.httpStatus).json({ ...response.body, eligible: false });
     return;
   }
 

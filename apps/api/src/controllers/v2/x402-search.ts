@@ -35,24 +35,8 @@ import {
   captureExceptionWithZdrCheck,
 } from "../../services/sentry";
 import { getSearchForcedKind, getSearchZDR } from "../../lib/zdr-helpers";
-import { errorResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import { CommonError, RequestError, ScrapeError } from "../../lib/error-codes";
-import type { ErrorDetails } from "../../lib/error-details";
-
-function sendX402SearchError(
-  req: RequestWithAuth<{}, SearchResponse, SearchRequest>,
-  res: Response<SearchResponse>,
-  status: number,
-  code: CommonError | RequestError | ScrapeError,
-  error: string | Error,
-  details?: ErrorDetails,
-) {
-  const envelope = errorResponse(code, error, req, {
-    httpStatus: status,
-    ...(details !== undefined ? { details } : {}),
-  });
-  return res.status(envelope.httpStatus).json(envelope.body);
-}
 
 interface DocumentWithCostTracking {
   document: Document;
@@ -219,6 +203,7 @@ export async function x402SearchController(
   req: RequestWithAuth<{}, SearchResponse, SearchRequest>,
   res: Response<SearchResponse>,
 ) {
+  const r = makeResponder(req, res);
   const jobId = uuidv7();
   const searchZDRMode = getSearchZDR(req.acuc?.flags);
   const teamForcedKind = getSearchForcedKind(req.acuc?.flags);
@@ -267,10 +252,7 @@ export async function x402SearchController(
     const isAnon = req.body.enterprise?.includes("anon");
     if ((isZDR || isAnon) && !teamForcedKind) {
       if (searchZDRMode !== "allowed") {
-        return sendX402SearchError(
-          req,
-          res,
-          403,
+        return r.fail(
           RequestError.BAD_REQUEST,
           "Zero Data Retention (ZDR) search is not enabled for your team. Contact support@firecrawl.com to enable this feature.",
         );
@@ -393,10 +375,7 @@ export async function x402SearchController(
         logger.error(
           "scrapeOptions is undefined despite shouldScrape being true [x402]",
         );
-        return sendX402SearchError(
-          req,
-          res,
-          500,
+        return r.fail(
           CommonError.UNKNOWN,
           "Internal server error: scrapeOptions is missing",
         );
@@ -590,8 +569,7 @@ export async function x402SearchController(
           false,
         );
 
-        return res.status(200).json({
-          success: true,
+        return r.ok({
           data: searchResponse,
           scrapeIds,
           creditsUsed: credits_billed,
@@ -676,8 +654,7 @@ export async function x402SearchController(
     );
 
     // For sync scraping or no scraping, don't include scrapeIds
-    return res.status(200).json({
-      success: true,
+    return r.ok({
       data: searchResponse,
       creditsUsed: credits_billed,
       id: jobId,
@@ -685,36 +662,19 @@ export async function x402SearchController(
   } catch (error) {
     if (error instanceof z.ZodError) {
       logger.warn("Invalid request body [x402]", { error: error.issues });
-      return sendX402SearchError(
-        req,
-        res,
-        400,
-        RequestError.BAD_REQUEST,
-        "Invalid request body",
-        error.issues,
-      );
+      return r.fail(RequestError.BAD_REQUEST, "Invalid request body", {
+        details: error.issues,
+      });
     }
 
     if (error instanceof ScrapeJobTimeoutError) {
-      return sendX402SearchError(
-        req,
-        res,
-        408,
-        ScrapeError.TIMEOUT,
-        error.message,
-      );
+      return r.fail(ScrapeError.TIMEOUT, error.message);
     }
 
     captureExceptionWithZdrCheck(error, {
       extra: { zeroDataRetention },
     });
     logger.error("Unhandled error occurred in search [x402]", { error });
-    return sendX402SearchError(
-      req,
-      res,
-      500,
-      CommonError.UNKNOWN,
-      error as Error,
-    );
+    return r.fail(CommonError.UNKNOWN, error as Error);
   }
 }

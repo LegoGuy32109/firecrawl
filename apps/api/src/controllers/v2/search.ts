@@ -28,8 +28,7 @@ import type { BillingMetadata } from "../../services/billing/types";
 import { getSearchForcedKind, getSearchZDR } from "../../lib/zdr-helpers";
 import { projectSearchTotalCredits } from "../../lib/keyless-credit-projection";
 import { applyAgentAuthDiscoveryHeader } from "../../lib/agent-auth-discovery";
-import { errorResponse } from "./response-enveloper";
-import type { ErrorDetails } from "../../lib/error-details";
+import { makeResponder } from "./response-enveloper";
 import {
   BillingError,
   CommonError,
@@ -37,25 +36,11 @@ import {
   ScrapeError,
 } from "../../lib/error-codes";
 
-function sendSearchError(
-  req: RequestWithAuth<{}, SearchResponse, SearchRequest>,
-  res: Response<SearchResponse>,
-  status: number,
-  code: BillingError | CommonError | RequestError | ScrapeError,
-  error: string | Error,
-  details?: ErrorDetails,
-) {
-  const envelope = errorResponse(code, error, req, {
-    httpStatus: status,
-    ...(details !== undefined ? { details } : {}),
-  });
-  return res.status(envelope.httpStatus).json(envelope.body);
-}
-
 export async function searchController(
   req: RequestWithAuth<{}, SearchResponse, SearchRequest>,
   res: Response<SearchResponse>,
 ) {
+  const r = makeResponder(req, res);
   const middlewareStartTime =
     (req as any).requestTiming?.startTime || new Date().getTime();
   const controllerStartTime = new Date().getTime();
@@ -89,21 +74,9 @@ export async function searchController(
       config.AGENT_INTEROP_SECRET &&
       req.body.__agentInterop.auth !== config.AGENT_INTEROP_SECRET
     ) {
-      return sendSearchError(
-        req,
-        res,
-        403,
-        RequestError.BAD_REQUEST,
-        "Invalid agent interop.",
-      );
+      return r.fail(RequestError.BAD_REQUEST, "Invalid agent interop.");
     } else if (req.body.__agentInterop && !config.AGENT_INTEROP_SECRET) {
-      return sendSearchError(
-        req,
-        res,
-        403,
-        RequestError.BAD_REQUEST,
-        "Agent interop is not enabled.",
-      );
+      return r.fail(RequestError.BAD_REQUEST, "Agent interop is not enabled.");
     }
 
     const shouldBill = req.body.__agentInterop?.shouldBill ?? true;
@@ -137,10 +110,7 @@ export async function searchController(
     // Verify the team has searchZDR enabled before allowing enterprise ZDR/anon
     if (isZDROrAnon && !teamForcedKind) {
       if (searchZDRMode !== "allowed") {
-        return sendSearchError(
-          req,
-          res,
-          403,
+        return r.fail(
           RequestError.BAD_REQUEST,
           "Zero Data Retention (ZDR) search is not enabled for your team. Contact support@firecrawl.com to enable this feature.",
         );
@@ -180,10 +150,7 @@ export async function searchController(
       );
       if (!reservation.ok) {
         applyAgentAuthDiscoveryHeader(res);
-        return sendSearchError(
-          req,
-          res,
-          429,
+        return r.fail(
           BillingError.INSUFFICIENT_CREDITS,
           KEYLESS_CREDITS_MESSAGE,
         );
@@ -291,8 +258,7 @@ export async function searchController(
       scrapeful: result.shouldScrape,
     });
 
-    return res.status(200).json({
-      success: true,
+    return r.ok({
       data: result.response,
       creditsUsed: result.totalCredits,
       id: jobId,
@@ -307,18 +273,13 @@ export async function searchController(
 
     if (error instanceof z.ZodError) {
       logger.warn("Invalid request body", { error: error.issues });
-      return sendSearchError(
-        req,
-        res,
-        400,
-        RequestError.BAD_REQUEST,
-        "Invalid request body",
-        error.issues,
-      );
+      return r.fail(RequestError.BAD_REQUEST, "Invalid request body", {
+        details: error.issues,
+      });
     }
 
     if (error instanceof ScrapeJobTimeoutError) {
-      return sendSearchError(req, res, 408, ScrapeError.TIMEOUT, error.message);
+      return r.fail(ScrapeError.TIMEOUT, error.message);
     }
 
     captureExceptionWithZdrCheck(error, {
@@ -328,6 +289,6 @@ export async function searchController(
       version: "v2",
       error,
     });
-    return sendSearchError(req, res, 500, CommonError.UNKNOWN, error as Error);
+    return r.fail(CommonError.UNKNOWN, error as Error);
   }
 }

@@ -17,7 +17,7 @@ import {
   getConcurrencyLimitActiveJobsCount,
   getConcurrencyQueueJobsCount,
 } from "../../lib/concurrency-limit";
-import { okResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 
 type QueueStatusResponse = {
   success: boolean;
@@ -34,6 +34,8 @@ export async function queueStatusController(
   req: RequestWithAuth<{}, undefined, QueueStatusResponse>,
   res: Response<QueueStatusResponse>,
 ) {
+  const r = makeResponder(req, res);
+
   let otherACUC: AuthCreditUsageChunkFromTeam | null = null;
   if (!req.acuc?.is_extract) {
     otherACUC = await getACUCTeam(
@@ -88,21 +90,16 @@ export async function queueStatusController(
     "most-recent-success:" + req.auth.team_id,
   );
 
-  const response = okResponse(
-    {
-      jobsInQueue: activeJobsOfTeam + queuedJobsOfTeam,
-      activeJobsInQueue: activeJobsOfTeam,
-      waitingJobsInQueue: queuedJobsOfTeam,
-      maxConcurrency: Math.max(
-        req.acuc?.concurrency ?? 1,
-        otherACUC?.concurrency ?? 1,
-      ),
-      mostRecentSuccess: mostRecentSuccess
-        ? new Date(mostRecentSuccess).toISOString()
-        : null,
-    },
-    req,
-  );
-
-  return res.status(response.httpStatus).json(response.body);
+  return r.ok({
+    jobsInQueue: activeJobsOfTeam + queuedJobsOfTeam,
+    activeJobsInQueue: activeJobsOfTeam,
+    waitingJobsInQueue: queuedJobsOfTeam,
+    maxConcurrency: Math.max(
+      req.acuc?.concurrency ?? 1,
+      otherACUC?.concurrency ?? 1,
+    ),
+    mostRecentSuccess: mostRecentSuccess
+      ? new Date(mostRecentSuccess).toISOString()
+      : null,
+  });
 }

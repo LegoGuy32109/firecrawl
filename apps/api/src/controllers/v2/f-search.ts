@@ -6,7 +6,7 @@ import {
   getSearchIndexClient,
   type SearchRequest,
 } from "../../lib/search-index-client";
-import { errorResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import {
   CommonError,
   DependencyError,
@@ -38,6 +38,7 @@ export async function realtimeSearchController(
   req: Request,
   res: Response,
 ): Promise<void> {
+  const r = makeResponder(req, res);
   const logger = _logger.child({
     module: "realtime-search-controller",
     method: "POST /admin/search",
@@ -49,15 +50,9 @@ export async function realtimeSearchController(
     const validationResult = searchRequestSchema.safeParse(req.body);
 
     if (!validationResult.success) {
-      const envelope = errorResponse(
-        RequestError.BAD_REQUEST,
-        "Invalid request parameters",
-        req,
-        {
-          details: validationResult.error.issues,
-        },
-      );
-      res.status(envelope.httpStatus).json(envelope.body);
+      r.fail(RequestError.BAD_REQUEST, "Invalid request parameters", {
+        details: validationResult.error.issues,
+      });
       return;
     }
 
@@ -74,12 +69,10 @@ export async function realtimeSearchController(
     const client = getSearchIndexClient();
 
     if (!client) {
-      const envelope = errorResponse(
+      r.fail(
         DependencyError.UNAVAILABLE,
         "Search index service is not configured",
-        req,
       );
-      res.status(envelope.httpStatus).json(envelope.body);
       return;
     }
 
@@ -98,8 +91,7 @@ export async function realtimeSearchController(
     const costTracking = new CostTracking();
     // Add search cost tracking here if needed
 
-    res.status(200).json({
-      success: true,
+    r.ok({
       data: result,
       costTracking: costTracking.toJSON(),
     });
@@ -108,13 +100,10 @@ export async function realtimeSearchController(
       error: (error as Error).message,
     });
 
-    const envelope = errorResponse(
+    r.fail(
       CommonError.UNKNOWN,
       error instanceof Error ? error : "Internal server error",
-      req,
-      { httpStatus: 500 },
     );
-    res.status(envelope.httpStatus).json(envelope.body);
   }
 }
 

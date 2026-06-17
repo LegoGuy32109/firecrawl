@@ -20,7 +20,6 @@ import {
   CommonError,
   RequestError,
   ScrapeError,
-  type ErrorCodes,
 } from "../../lib/error-codes";
 import { errorCodeToHttpStatus } from "../../lib/error-catalog";
 import { NuQJob } from "../../services/worker/nuq";
@@ -44,63 +43,11 @@ import {
 import { projectScrapeCredits } from "../../lib/keyless-credit-projection";
 import { applyAgentAuthDiscoveryHeader } from "../../lib/agent-auth-discovery";
 import path from "node:path";
-import { errorResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 
 const AGENT_INTEROP_CONCURRENCY_BOOST = 3;
 const SUPPORTED_PARSE_FILE_TYPES =
   ".html, .htm, .pdf, .docx, .doc, .odt, .rtf, .xlsx, .xls";
-
-type PrivacyMode = "disabled" | "allowed" | "forced" | "request";
-
-function buildDiagnostics(
-  traceId: string | undefined,
-  zeroDataRetention: boolean,
-  mode: PrivacyMode,
-) {
-  return {
-    privacy: {
-      zeroDataRetention,
-      mode,
-      reduced: false,
-    },
-    ...(traceId ? { traceId } : {}),
-  };
-}
-
-function getPrivacyMode(
-  zeroDataRetention: boolean,
-  requestZeroDataRetention: boolean,
-  forcedByTeam: boolean,
-): PrivacyMode {
-  if (forcedByTeam) {
-    return "forced";
-  }
-
-  if (requestZeroDataRetention) {
-    return "request";
-  }
-
-  return zeroDataRetention ? "allowed" : "disabled";
-}
-
-function jsonResponse(res: Response, statusCode: number, body: unknown) {
-  return res.status(statusCode).json(body as any);
-}
-
-function sendErrorResponse(
-  res: Response,
-  code: ErrorCodes,
-  error: string | Error,
-  ctx: {
-    traceId?: string;
-    zeroDataRetention?: boolean;
-    privacyMode: PrivacyMode;
-  },
-  opts: Parameters<typeof errorResponse>[3] = {},
-) {
-  const envelope = errorResponse(code, error, ctx, opts);
-  return jsonResponse(res, envelope.httpStatus, envelope.body);
-}
 
 const DOCUMENT_EXTENSIONS = new Set([
   ".docx",
@@ -254,17 +201,12 @@ export function parseMultipartPayloadMiddleware(
   res: Response,
   next: NextFunction,
 ): void {
+  const r = makeResponder(req, res);
   const file = (req as Request & { file?: Express.Multer.File }).file;
   if (!file) {
-    sendErrorResponse(
-      res,
+    r.fail(
       RequestError.BAD_REQUEST,
       "Missing file upload. Send multipart/form-data with a 'file' field and optional 'options' JSON string.",
-      {
-        zeroDataRetention: false,
-        privacyMode: "disabled",
-      },
-      { httpStatus: 400 },
     );
     return;
   }
@@ -274,15 +216,9 @@ export function parseMultipartPayloadMiddleware(
 
   if (rawOptions !== undefined) {
     if (typeof rawOptions !== "string") {
-      sendErrorResponse(
-        res,
+      r.fail(
         RequestError.BAD_REQUEST,
         "The 'options' field must be a JSON string.",
-        {
-          zeroDataRetention: false,
-          privacyMode: "disabled",
-        },
-        { httpStatus: 400 },
       );
       return;
     }
@@ -290,29 +226,17 @@ export function parseMultipartPayloadMiddleware(
     try {
       const parsed = JSON.parse(rawOptions);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        sendErrorResponse(
-          res,
+        r.fail(
           RequestError.BAD_REQUEST_INVALID_JSON,
           "The 'options' field must parse to a JSON object.",
-          {
-            zeroDataRetention: false,
-            privacyMode: "disabled",
-          },
-          { httpStatus: 400 },
         );
         return;
       }
       optionsPayload = parsed as Record<string, unknown>;
     } catch (error) {
-      sendErrorResponse(
-        res,
+      r.fail(
         RequestError.BAD_REQUEST_INVALID_JSON,
         "Invalid JSON in the 'options' field. Provide a valid JSON string.",
-        {
-          zeroDataRetention: false,
-          privacyMode: "disabled",
-        },
-        { httpStatus: 400 },
       );
       return;
     }
@@ -320,15 +244,9 @@ export function parseMultipartPayloadMiddleware(
 
   const kind = detectUploadedFileKind(file.originalname || "", file.mimetype);
   if (!kind) {
-    sendErrorResponse(
-      res,
+    r.fail(
       RequestError.BAD_REQUEST,
       `Unsupported upload type. Supported file extensions: ${SUPPORTED_PARSE_FILE_TYPES}`,
-      {
-        zeroDataRetention: false,
-        privacyMode: "disabled",
-      },
-      { httpStatus: 400 },
     );
     return;
   }
@@ -350,6 +268,7 @@ export async function parseController(
   req: RequestWithAuth<{}, ScrapeResponse, ParseRequest>,
   res: Response<ScrapeResponse>,
 ) {
+  const r = makeResponder(req, res);
   return withSpan(
     "api.parse.request",
     async span => {
@@ -362,15 +281,6 @@ export async function parseController(
       const preNormalizedBody = sanitizeParseRequestForLogs(req.body);
       const zeroDataRetention =
         forcedByTeam || (req.body.zeroDataRetention ?? false);
-      const diagnostics = buildDiagnostics(
-        jobId,
-        zeroDataRetention,
-        getPrivacyMode(
-          zeroDataRetention,
-          req.body.zeroDataRetention ?? false,
-          forcedByTeam,
-        ),
-      );
 
       setSpanAttributes(span, {
         "parse.job_id": jobId,
@@ -396,20 +306,9 @@ export async function parseController(
           "parse.status_code": 400,
           "parse.error": unsupportedOptionError,
         });
-        return sendErrorResponse(
-          res,
+        return r.fail(
           RequestError.PARSE_UNSUPPORTED_OPTIONS,
           unsupportedOptionError,
-          {
-            traceId: jobId,
-            zeroDataRetention,
-            privacyMode: getPrivacyMode(
-              zeroDataRetention,
-              req.body.zeroDataRetention ?? false,
-              forcedByTeam,
-            ),
-          },
-          { httpStatus: 400 },
         );
       }
 
@@ -430,21 +329,7 @@ export async function parseController(
           "parse.error": permissions.error,
           "parse.status_code": 403,
         });
-        return sendErrorResponse(
-          res,
-          RequestError.BAD_REQUEST,
-          permissions.error,
-          {
-            traceId: jobId,
-            zeroDataRetention,
-            privacyMode: getPrivacyMode(
-              zeroDataRetention,
-              req.body.zeroDataRetention ?? false,
-              forcedByTeam,
-            ),
-          },
-          { httpStatus: 403 },
-        );
+        return r.fail(RequestError.BAD_REQUEST, permissions.error);
       }
 
       const billing: BillingMetadata = req.body.__agentInterop
@@ -456,36 +341,11 @@ export async function parseController(
         config.AGENT_INTEROP_SECRET &&
         req.body.__agentInterop.auth !== config.AGENT_INTEROP_SECRET
       ) {
-        return sendErrorResponse(
-          res,
-          RequestError.BAD_REQUEST,
-          "Invalid agent interop.",
-          {
-            traceId: jobId,
-            zeroDataRetention,
-            privacyMode: getPrivacyMode(
-              zeroDataRetention,
-              req.body.zeroDataRetention ?? false,
-              forcedByTeam,
-            ),
-          },
-          { httpStatus: 403 },
-        );
+        return r.fail(RequestError.BAD_REQUEST, "Invalid agent interop.");
       } else if (req.body.__agentInterop && !config.AGENT_INTEROP_SECRET) {
-        return sendErrorResponse(
-          res,
+        return r.fail(
           RequestError.BAD_REQUEST,
           "Agent interop is not enabled.",
-          {
-            traceId: jobId,
-            zeroDataRetention,
-            privacyMode: getPrivacyMode(
-              zeroDataRetention,
-              req.body.zeroDataRetention ?? false,
-              forcedByTeam,
-            ),
-          },
-          { httpStatus: 403 },
         );
       }
 
@@ -514,20 +374,9 @@ export async function parseController(
         );
         if (!reservation.ok) {
           applyAgentAuthDiscoveryHeader(res);
-          return sendErrorResponse(
-            res,
+          return r.fail(
             BillingError.INSUFFICIENT_CREDITS,
             KEYLESS_CREDITS_MESSAGE,
-            {
-              traceId: jobId,
-              zeroDataRetention,
-              privacyMode: getPrivacyMode(
-                zeroDataRetention,
-                req.body.zeroDataRetention ?? false,
-                forcedByTeam,
-              ),
-            },
-            { httpStatus: 429 },
           );
         }
         reservedKeylessCredits = projectedKeylessCredits;
@@ -716,92 +565,19 @@ export async function parseController(
             });
           }
 
-          if (e.code === ScrapeError.NO_CACHED_DATA) {
-            setSpanAttributes(span, {
-              "parse.status_code": 404,
-            });
-            return sendErrorResponse(
-              res,
-              e.code,
-              e.message,
-              {
-                traceId: jobId,
-                zeroDataRetention,
-                privacyMode: getPrivacyMode(
-                  zeroDataRetention,
-                  req.body.zeroDataRetention ?? false,
-                  forcedByTeam,
-                ),
-              },
-              { httpStatus: 404 },
-            );
-          }
-
-          if (e.code === AgentError.INDEX_ONLY) {
-            setSpanAttributes(span, {
-              "parse.status_code": 403,
-            });
-            return sendErrorResponse(
-              res,
-              e.code,
-              e.message,
-              {
-                traceId: jobId,
-                zeroDataRetention,
-                privacyMode: getPrivacyMode(
-                  zeroDataRetention,
-                  req.body.zeroDataRetention ?? false,
-                  forcedByTeam,
-                ),
-              },
-              {
-                httpStatus: 403,
-                sponsor_status: "pending",
-                login_url: "https://firecrawl.dev/signin",
-              },
-            );
-          }
-
-          if (e.code === ScrapeError.ACTIONS_NOT_SUPPORTED) {
-            setSpanAttributes(span, {
-              "parse.status_code": 400,
-            });
-            return sendErrorResponse(
-              res,
-              e.code,
-              e.message,
-              {
-                traceId: jobId,
-                zeroDataRetention,
-                privacyMode: getPrivacyMode(
-                  zeroDataRetention,
-                  req.body.zeroDataRetention ?? false,
-                  forcedByTeam,
-                ),
-              },
-              { httpStatus: 400 },
-            );
-          }
-
-          const statusCode = errorCodeToHttpStatus(e.code);
+          // Status is driven by the error catalog; no manual ladder.
           setSpanAttributes(span, {
-            "parse.status_code": statusCode,
+            "parse.status_code": errorCodeToHttpStatus(e.code),
           });
-          return sendErrorResponse(
-            res,
-            e.code,
-            e.message,
-            {
-              traceId: jobId,
-              zeroDataRetention,
-              privacyMode: getPrivacyMode(
-                zeroDataRetention,
-                req.body.zeroDataRetention ?? false,
-                forcedByTeam,
-              ),
-            },
-            { httpStatus: statusCode },
-          );
+          return r.fail(e.code, e.message, {
+            details: e.details,
+            ...(e.code === AgentError.INDEX_ONLY
+              ? {
+                  sponsor_status: "pending",
+                  login_url: "https://firecrawl.dev/signin",
+                }
+              : {}),
+          });
         } else {
           const id = uuidv7();
           logger.error("Error in parseController", {
@@ -827,21 +603,9 @@ export async function parseController(
             "parse.status_code": 500,
             "parse.error_id": id,
           });
-          return sendErrorResponse(
-            res,
-            CommonError.UNKNOWN,
-            getErrorContactMessage(id),
-            {
-              traceId: jobId,
-              zeroDataRetention,
-              privacyMode: getPrivacyMode(
-                zeroDataRetention,
-                req.body.zeroDataRetention ?? false,
-                forcedByTeam,
-              ),
-            },
-            { httpStatus: 500, errorId: id },
-          );
+          return r.fail(CommonError.UNKNOWN, getErrorContactMessage(id), {
+            errorId: id,
+          });
         }
       } finally {
         if (timeoutHandle) {
@@ -914,10 +678,7 @@ export async function parseController(
         concurrencyQueueDurationMs: lockTime || undefined,
       });
 
-      return jsonResponse(res, 200, {
-        success: true,
-        status: "ok",
-        diagnostics,
+      return r.ok({
         data: {
           ...doc!,
           metadata: {

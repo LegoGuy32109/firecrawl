@@ -18,7 +18,6 @@ import {
   CommonError,
   RequestError,
   ScrapeError,
-  type ErrorCodes,
 } from "../../lib/error-codes";
 import { errorCodeToHttpStatus } from "../../lib/error-catalog";
 import { NuQJob } from "../../services/worker/nuq";
@@ -33,7 +32,7 @@ import { getErrorContactMessage } from "../../lib/deployment";
 import { captureExceptionWithZdrCheck } from "../../services/sentry";
 import type { BillingMetadata } from "../../services/billing/types";
 import { getScrapeZDR } from "../../lib/zdr-helpers";
-import { errorResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import {
   KEYLESS_CREDITS_MESSAGE,
   adjustKeylessCredits,
@@ -45,62 +44,11 @@ import { applyAgentAuthDiscoveryHeader } from "../../lib/agent-auth-discovery";
 
 const AGENT_INTEROP_CONCURRENCY_BOOST = 3;
 
-type PrivacyMode = "disabled" | "allowed" | "forced" | "request";
-
-function buildDiagnostics(
-  traceId: string,
-  zeroDataRetention: boolean,
-  mode: PrivacyMode,
-) {
-  return {
-    privacy: {
-      zeroDataRetention,
-      mode,
-      reduced: false,
-    },
-    traceId,
-  };
-}
-
-function getPrivacyMode(
-  zeroDataRetention: boolean,
-  requestZeroDataRetention: boolean,
-  forcedByTeam: boolean,
-): PrivacyMode {
-  if (forcedByTeam) {
-    return "forced";
-  }
-
-  if (requestZeroDataRetention) {
-    return "request";
-  }
-
-  return zeroDataRetention ? "allowed" : "disabled";
-}
-
-function jsonResponse(res: Response, statusCode: number, body: unknown) {
-  return res.status(statusCode).json(body as any);
-}
-
-function sendErrorResponse(
-  res: Response,
-  code: ErrorCodes,
-  error: string | Error,
-  ctx: {
-    traceId?: string;
-    zeroDataRetention?: boolean;
-    privacyMode: PrivacyMode;
-  },
-  opts: Parameters<typeof errorResponse>[3] = {},
-) {
-  const envelope = errorResponse(code, error, ctx, opts);
-  return jsonResponse(res, envelope.httpStatus, envelope.body);
-}
-
 export async function scrapeController(
   req: RequestWithAuth<{}, ScrapeResponse, ScrapeRequest>,
   res: Response<ScrapeResponse>,
 ) {
+  const r = makeResponder(req, res);
   return withSpan(
     "api.scrape.request",
     async span => {
@@ -116,15 +64,6 @@ export async function scrapeController(
         forcedByTeam || (req.body.zeroDataRetention ?? false) || false;
       const effectiveZeroDataRetention =
         zeroDataRetention || (req.body.lockdown ?? false);
-      const diagnostics = buildDiagnostics(
-        jobId,
-        effectiveZeroDataRetention,
-        getPrivacyMode(
-          effectiveZeroDataRetention,
-          req.body.zeroDataRetention ?? false,
-          forcedByTeam,
-        ),
-      );
 
       // Set initial span attributes
       setSpanAttributes(span, {
@@ -161,21 +100,7 @@ export async function scrapeController(
           "scrape.error": permissions.error,
           "scrape.status_code": 403,
         });
-        return sendErrorResponse(
-          res,
-          RequestError.BAD_REQUEST,
-          permissions.error,
-          {
-            traceId: jobId,
-            zeroDataRetention: effectiveZeroDataRetention,
-            privacyMode: getPrivacyMode(
-              effectiveZeroDataRetention,
-              req.body.zeroDataRetention ?? false,
-              forcedByTeam,
-            ),
-          },
-          { httpStatus: 403 },
-        );
+        return r.fail(RequestError.BAD_REQUEST, permissions.error);
       }
 
       const billing: BillingMetadata = req.body.__agentInterop
@@ -187,36 +112,11 @@ export async function scrapeController(
         config.AGENT_INTEROP_SECRET &&
         req.body.__agentInterop.auth !== config.AGENT_INTEROP_SECRET
       ) {
-        return sendErrorResponse(
-          res,
-          RequestError.BAD_REQUEST,
-          "Invalid agent interop.",
-          {
-            traceId: jobId,
-            zeroDataRetention: effectiveZeroDataRetention,
-            privacyMode: getPrivacyMode(
-              effectiveZeroDataRetention,
-              req.body.zeroDataRetention ?? false,
-              forcedByTeam,
-            ),
-          },
-          { httpStatus: 403 },
-        );
+        return r.fail(RequestError.BAD_REQUEST, "Invalid agent interop.");
       } else if (req.body.__agentInterop && !config.AGENT_INTEROP_SECRET) {
-        return sendErrorResponse(
-          res,
+        return r.fail(
           RequestError.BAD_REQUEST,
           "Agent interop is not enabled.",
-          {
-            traceId: jobId,
-            zeroDataRetention: effectiveZeroDataRetention,
-            privacyMode: getPrivacyMode(
-              effectiveZeroDataRetention,
-              req.body.zeroDataRetention ?? false,
-              forcedByTeam,
-            ),
-          },
-          { httpStatus: 403 },
         );
       }
 
@@ -245,20 +145,9 @@ export async function scrapeController(
         );
         if (!reservation.ok) {
           applyAgentAuthDiscoveryHeader(res);
-          return sendErrorResponse(
-            res,
+          return r.fail(
             BillingError.INSUFFICIENT_CREDITS,
             KEYLESS_CREDITS_MESSAGE,
-            {
-              traceId: jobId,
-              zeroDataRetention: effectiveZeroDataRetention,
-              privacyMode: getPrivacyMode(
-                effectiveZeroDataRetention,
-                req.body.zeroDataRetention ?? false,
-                forcedByTeam,
-              ),
-            },
-            { httpStatus: 429 },
           );
         }
         reservedKeylessCredits = projectedKeylessCredits;
@@ -452,53 +341,19 @@ export async function scrapeController(
               error: e,
             });
           }
-          // DNS resolution errors should return 200 with success: false
-          if (e.code === ScrapeError.DNS) {
-            setSpanAttributes(span, {
-              "scrape.status_code": 200,
-            });
-            return sendErrorResponse(
-              res,
-              e.code,
-              e.message,
-              {
-                traceId: jobId,
-                zeroDataRetention: effectiveZeroDataRetention,
-                privacyMode: getPrivacyMode(
-                  effectiveZeroDataRetention,
-                  req.body.zeroDataRetention ?? false,
-                  forcedByTeam,
-                ),
-              },
-              { httpStatus: 200 },
-            );
-          }
-
-          const statusCode = errorCodeToHttpStatus(e.code);
+          // Status (incl. DNS=200) is driven by the error catalog; no manual ladder.
           setSpanAttributes(span, {
-            "scrape.status_code": statusCode,
+            "scrape.status_code": errorCodeToHttpStatus(e.code),
           });
-          return sendErrorResponse(
-            res,
-            e.code,
-            e.message,
-            {
-              traceId: jobId,
-              zeroDataRetention: effectiveZeroDataRetention,
-              privacyMode: getPrivacyMode(
-                effectiveZeroDataRetention,
-                req.body.zeroDataRetention ?? false,
-                forcedByTeam,
-              ),
-            },
-            e.code === AgentError.INDEX_ONLY
+          return r.fail(e.code, e.message, {
+            details: e.details,
+            ...(e.code === AgentError.INDEX_ONLY
               ? {
-                  httpStatus: statusCode,
                   sponsor_status: "pending",
                   login_url: "https://firecrawl.dev/signin",
                 }
-              : { httpStatus: statusCode },
-          );
+              : {}),
+          });
         } else {
           const id = uuidv7();
           logger.error(`Error in scrapeController`, {
@@ -524,21 +379,9 @@ export async function scrapeController(
             "scrape.status_code": 500,
             "scrape.error_id": id,
           });
-          return sendErrorResponse(
-            res,
-            CommonError.UNKNOWN,
-            getErrorContactMessage(id),
-            {
-              traceId: jobId,
-              zeroDataRetention: effectiveZeroDataRetention,
-              privacyMode: getPrivacyMode(
-                effectiveZeroDataRetention,
-                req.body.zeroDataRetention ?? false,
-                forcedByTeam,
-              ),
-            },
-            { httpStatus: 500, errorId: id },
-          );
+          return r.fail(CommonError.UNKNOWN, getErrorContactMessage(id), {
+            errorId: id,
+          });
         }
       } finally {
         if (timeoutHandle) {
@@ -614,10 +457,7 @@ export async function scrapeController(
         concurrencyQueueDurationMs: lockTime || undefined,
       });
 
-      return jsonResponse(res, 200, {
-        success: true,
-        status: "ok",
-        diagnostics,
+      return r.ok({
         data: {
           ...doc!,
           metadata: {

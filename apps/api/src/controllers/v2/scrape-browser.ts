@@ -63,14 +63,16 @@ import {
 } from "../../lib/browser-billing";
 import { autumnService } from "../../services/autumn/autumn.service";
 import { applyAgentAuthDiscoveryHeader } from "../../lib/agent-auth-discovery";
-import { errorResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import {
   BillingError,
   BrowserError,
   CommonError,
+  ErrorCodes,
   GatingError,
   LifecycleError,
 } from "../../lib/error-codes";
+import type { ErrorDetails } from "../../lib/error-details";
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -137,6 +139,7 @@ export async function scrapeInteractController(
   >,
   res: Response<any>,
 ) {
+  const r = makeResponder(req, res);
   req.body = browserExecuteRequestSchema.parse(req.body);
 
   const scrapeId = req.params.jobId;
@@ -155,13 +158,9 @@ export async function scrapeInteractController(
     scrapeId,
   )) as ScrapeContextRow | null;
   if (!scrape) {
-    const response = errorResponse(
-      LifecycleError.JOB_NOT_FOUND,
-      "Job not found.",
-      req,
-      { details: { jobId: scrapeId } },
-    );
-    return res.status(response.httpStatus).json(response.body);
+    return r.fail(LifecycleError.JOB_NOT_FOUND, "Job not found.", {
+      details: { jobId: scrapeId },
+    });
   }
   // Keyless scrapes are persisted under a deterministic per-IP UUID (the
   // `scrapes.team_id` column is a UUID, so the raw `preview_keyless_<ip>` string
@@ -169,26 +168,21 @@ export async function scrapeInteractController(
   const expectedScrapeTeam =
     keylessTeamUuid(req.auth.team_id) ?? req.auth.team_id;
   if (scrape.team_id !== expectedScrapeTeam) {
-    const response = errorResponse(
-      LifecycleError.JOB_WRONG_TEAM,
-      "Forbidden.",
-      req,
-      { details: { jobId: scrapeId, teamId: scrape.team_id } },
-    );
-    return res.status(response.httpStatus).json(response.body);
+    return r.fail(LifecycleError.JOB_WRONG_TEAM, "Forbidden.", {
+      details: { jobId: scrapeId, teamId: scrape.team_id },
+    });
   }
 
   // --- Build replay context from original scrape ---
 
   const replay = buildReplayContextFromScrape(scrape);
   if (!replay.context) {
-    const response = errorResponse(
+    // replay-context-unavailable: unprocessable scrape state, not a dependency failure.
+    return r.fail(
       BrowserError.EXECUTION_FAILED,
       replay.error ??
         "Replay context is unavailable for this scrape job. Please rerun the scrape.",
-      req,
     );
-    return res.status(response.httpStatus).json(response.body);
   }
   const replayContext = replay.context;
 
@@ -229,12 +223,14 @@ export async function scrapeInteractController(
     );
     if ("error" in created) {
       if (
-        created.status === 429 &&
-        created.body.error === KEYLESS_CREDITS_MESSAGE
+        created.code === BillingError.INSUFFICIENT_CREDITS &&
+        created.message === KEYLESS_CREDITS_MESSAGE
       ) {
         applyAgentAuthDiscoveryHeader(res);
       }
-      return res.status(created.status).json(created.body);
+      return r.fail(created.code, created.message, {
+        details: created.details,
+      });
     }
     session = created.session;
 
@@ -250,22 +246,16 @@ export async function scrapeInteractController(
   }
 
   if (session.team_id !== req.auth.team_id) {
-    const response = errorResponse(
-      BrowserError.SESSION_FORBIDDEN,
-      "Forbidden.",
-      req,
-      { details: { key: session.id } },
-    );
-    return res.status(response.httpStatus).json(response.body);
+    return r.fail(BrowserError.SESSION_FORBIDDEN, "Forbidden.", {
+      details: { key: session.id },
+    });
   }
   if (session.status === "destroyed") {
-    const response = errorResponse(
+    return r.fail(
       BrowserError.SESSION_EXPIRED,
       "Browser session has been destroyed.",
-      req,
       { details: { expiredAt: session.updated_at } },
     );
-    return res.status(response.httpStatus).json(response.body);
   }
 
   updateBrowserSessionActivity(session.id).catch(() => {});
@@ -326,12 +316,13 @@ export async function scrapeInteractController(
       );
     } catch (err) {
       logger.error("Agent loop failed", { error: err });
-      const response = errorResponse(
-        BrowserError.EXECUTION_FAILED,
+      // CHANGED: was EXECUTION_FAILED (422); now SERVICE_UNAVAILABLE (503) —
+      // an upstream browser-service failure, not the caller's fault.
+      return r.fail(
+        BrowserError.SERVICE_UNAVAILABLE,
         "Browser agent failed to execute the task.",
-        req,
+        { details: { dependency: "browser-service" } },
       );
-      return res.status(response.httpStatus).json(response.body);
     }
 
     enqueueBrowserSessionActivity({
@@ -363,12 +354,13 @@ export async function scrapeInteractController(
       logger.error("Failed to execute code via browser service", {
         error: err,
       });
-      const response = errorResponse(
-        BrowserError.EXECUTION_FAILED,
+      // CHANGED: was EXECUTION_FAILED (422); now SERVICE_UNAVAILABLE (503) —
+      // an upstream browser-service failure, not the caller's fault.
+      return r.fail(
+        BrowserError.SERVICE_UNAVAILABLE,
         "Failed to execute code in browser session.",
-        req,
+        { details: { dependency: "browser-service" } },
       );
-      return res.status(response.httpStatus).json(response.body);
     }
 
     enqueueBrowserSessionActivity({
@@ -394,17 +386,21 @@ export async function scrapeInteractController(
   const hasError = execResult.exitCode !== 0 || execResult.killed;
   const agentOutput = "output" in execResult ? execResult.output : undefined;
 
-  return res.status(200).json({
-    success: !hasError,
+  if (hasError) {
+    // CHANGED: was 200 + success:false + no code; now 422 + EXECUTION_FAILED.
+    return r.fail(
+      BrowserError.EXECUTION_FAILED,
+      execResult.stderr || "Execution failed",
+      { details: { exitCode: execResult.exitCode, killed: execResult.killed } },
+    );
+  }
+
+  return r.ok({
     liveViewUrl: session.cdp_path,
     interactiveLiveViewUrl: session.cdp_interactive_path,
     ...(agentOutput ? { output: agentOutput } : {}),
     stdout: execResult.stdout,
     result: execResult.result,
-    stderr: execResult.stderr,
-    exitCode: execResult.exitCode,
-    killed: execResult.killed,
-    ...(hasError ? { error: execResult.stderr || "Execution failed" } : {}),
   });
 }
 
@@ -416,6 +412,7 @@ export async function scrapeStopInteractiveBrowserController(
   req: RequestWithAuth<{ jobId: string }, BrowserDeleteResponse>,
   res: Response<any>,
 ) {
+  const r = makeResponder(req, res);
   let logger = _logger.child({
     scrapeId: req.params.jobId,
     teamId: req.auth.team_id,
@@ -426,21 +423,12 @@ export async function scrapeStopInteractiveBrowserController(
   const session = await getBrowserSessionFromScrape(req.params.jobId);
 
   if (!session) {
-    const response = errorResponse(
-      BrowserError.SESSION_NOT_FOUND,
-      "Browser session not found.",
-      req,
-    );
-    return res.status(response.httpStatus).json(response.body);
+    return r.fail(BrowserError.SESSION_NOT_FOUND, "Browser session not found.");
   }
   if (session.team_id !== req.auth.team_id) {
-    const response = errorResponse(
-      BrowserError.SESSION_FORBIDDEN,
-      "Forbidden.",
-      req,
-      { details: { key: session.id } },
-    );
-    return res.status(response.httpStatus).json(response.body);
+    return r.fail(BrowserError.SESSION_FORBIDDEN, "Forbidden.", {
+      details: { key: session.id },
+    });
   }
 
   logger = logger.child({
@@ -481,7 +469,7 @@ export async function scrapeStopInteractiveBrowserController(
     logger.info("Session already destroyed by another path, skipping billing", {
       sessionId: session.id,
     });
-    return res.status(200).json({ success: true });
+    return r.ok({});
   }
 
   const wallClockMs = Date.now() - new Date(session.created_at).getTime();
@@ -536,8 +524,7 @@ export async function scrapeStopInteractiveBrowserController(
     rate,
   });
 
-  return res.status(200).json({
-    success: true,
+  return r.ok({
     sessionDurationMs: durationMs,
     creditsBilled,
   });
@@ -559,7 +546,7 @@ async function createSessionForScrape(
   profile: { name: string; saveChanges: boolean } | undefined,
 ): Promise<
   | { session: Awaited<ReturnType<typeof insertBrowserSession>> }
-  | { status: number; body: any; error: true }
+  | { error: true; code: ErrorCodes; message: string; details?: ErrorDetails }
 > {
   const sessionId = uuidv7();
   const { ttl, activityTtl, streamWebView } = browserCreateRequestSchema.parse(
@@ -568,16 +555,12 @@ async function createSessionForScrape(
   const integration = req.body?.integration ?? null;
 
   if (!config.BROWSER_SERVICE_URL) {
-    const response = errorResponse(
-      BrowserError.SERVICE_UNAVAILABLE,
-      "Browser feature is not configured (BROWSER_SERVICE_URL is missing).",
-      req,
-      { details: { dependency: "browser-service" } },
-    );
     return {
-      status: response.httpStatus,
-      body: response.body,
       error: true,
+      code: BrowserError.SERVICE_UNAVAILABLE,
+      message:
+        "Browser feature is not configured (BROWSER_SERVICE_URL is missing).",
+      details: { dependency: "browser-service" },
     };
   }
 
@@ -594,16 +577,11 @@ async function createSessionForScrape(
     estimatedCredits,
   );
   if (!reservation.ok) {
-    const response = errorResponse(
-      BillingError.INSUFFICIENT_CREDITS,
-      KEYLESS_CREDITS_MESSAGE,
-      req,
-      { details: { required: estimatedCredits } },
-    );
     return {
-      status: response.httpStatus,
-      body: response.body,
       error: true,
+      code: BillingError.INSUFFICIENT_CREDITS,
+      message: KEYLESS_CREDITS_MESSAGE,
+      details: { required: estimatedCredits },
     };
   }
   const keylessReserved = estimatedCredits;
@@ -616,16 +594,11 @@ async function createSessionForScrape(
 
   if (autumnResult !== null && !autumnResult.allowed) {
     adjustKeylessCredits(req.auth.team_id, -keylessReserved).catch(() => {});
-    const response = errorResponse(
-      BillingError.INSUFFICIENT_CREDITS,
-      `Insufficient credits for a ${ttl}s browser session (requires ~${estimatedCredits} credits). For more credits, you can upgrade your plan at https://firecrawl.dev/pricing.`,
-      req,
-      { details: { required: estimatedCredits } },
-    );
     return {
-      status: response.httpStatus,
-      body: response.body,
       error: true,
+      code: BillingError.INSUFFICIENT_CREDITS,
+      message: `Insufficient credits for a ${ttl}s browser session (requires ~${estimatedCredits} credits). For more credits, you can upgrade your plan at https://firecrawl.dev/pricing.`,
+      details: { required: estimatedCredits },
     };
   }
 
@@ -634,16 +607,11 @@ async function createSessionForScrape(
   const activeCount = await getCombinedTeamActiveCount(req.auth.team_id);
   if (activeCount >= concurrencyLimit) {
     adjustKeylessCredits(req.auth.team_id, -keylessReserved).catch(() => {});
-    const response = errorResponse(
-      BrowserError.SESSION_LIMIT_EXCEEDED,
-      `You have reached the maximum number of concurrent jobs (${concurrencyLimit}). Please wait for existing jobs to complete or destroy browser sessions before creating new ones.`,
-      req,
-      { details: { active: activeCount, limit: concurrencyLimit } },
-    );
     return {
-      status: response.httpStatus,
-      body: response.body,
       error: true,
+      code: BrowserError.SESSION_LIMIT_EXCEEDED,
+      message: `You have reached the maximum number of concurrent jobs (${concurrencyLimit}). Please wait for existing jobs to complete or destroy browser sessions before creating new ones.`,
+      details: { active: activeCount, limit: concurrencyLimit },
     };
   }
 
@@ -681,16 +649,12 @@ async function createSessionForScrape(
         adjustKeylessCredits(req.auth.team_id, -keylessReserved).catch(
           () => {},
         );
-        const response = errorResponse(
-          GatingError.IDEMPOTENCY_CONFLICT,
-          "Another session is currently writing to this profile. Only one writer is allowed at a time. You can still access it with saveChanges: false, or try again later.",
-          req,
-          { details: { key: profile?.name } },
-        );
         return {
-          status: response.httpStatus,
-          body: response.body,
           error: true,
+          code: GatingError.IDEMPOTENCY_CONFLICT,
+          message:
+            "Another session is currently writing to this profile. Only one writer is allowed at a time. You can still access it with saveChanges: false, or try again later.",
+          details: { key: profile?.name },
         };
       }
       lastCreateError = err;
@@ -710,16 +674,11 @@ async function createSessionForScrape(
     logger.error("Failed to create browser session after all retries", {
       error: lastCreateError,
     });
-    const response = errorResponse(
-      BrowserError.SERVICE_UNAVAILABLE,
-      "Failed to create browser session.",
-      req,
-      { details: { dependency: "browser-service" } },
-    );
     return {
-      status: response.httpStatus,
-      body: response.body,
       error: true,
+      code: BrowserError.SERVICE_UNAVAILABLE,
+      message: "Failed to create browser session.",
+      details: { dependency: "browser-service" },
     };
   }
 
@@ -806,15 +765,11 @@ async function createSessionForScrape(
       "DELETE",
       `/browsers/${svcResponse.sessionId}`,
     ).catch(() => {});
-    const response = errorResponse(
-      BrowserError.EXECUTION_FAILED,
-      "Failed to initialize browser session from the original scrape context. Please rerun the scrape and try again.",
-      req,
-    );
     return {
-      status: response.httpStatus,
-      body: response.body,
       error: true,
+      code: BrowserError.EXECUTION_FAILED,
+      message:
+        "Failed to initialize browser session from the original scrape context. Please rerun the scrape and try again.",
     };
   }
 
@@ -866,16 +821,11 @@ async function createSessionForScrape(
       "DELETE",
       `/browsers/${svcResponse.sessionId}`,
     ).catch(() => {});
-    const response = errorResponse(
-      CommonError.UNKNOWN,
-      "Failed to persist browser session.",
-      req,
-      { details: { cause: "insertBrowserSession" } },
-    );
     return {
-      status: response.httpStatus,
-      body: response.body,
       error: true,
+      code: CommonError.UNKNOWN,
+      message: "Failed to persist browser session.",
+      details: { cause: "insertBrowserSession" },
     };
   }
 }

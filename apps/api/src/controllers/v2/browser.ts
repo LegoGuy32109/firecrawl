@@ -32,7 +32,7 @@ import {
   calculateBrowserSessionCredits,
 } from "../../lib/browser-billing";
 import { autumnService } from "../../services/autumn/autumn.service";
-import { errorResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import {
   AuthError,
   BillingError,
@@ -168,23 +168,6 @@ async function browserServiceRequest<T>(
   return res.json() as Promise<T>;
 }
 
-function sendError(
-  res: Response<any>,
-  req: Request,
-  code:
-    | AuthError
-    | BillingError
-    | BrowserError
-    | CommonError
-    | GatingError
-    | RequestError,
-  error: string,
-  opts?: Parameters<typeof errorResponse>[3],
-) {
-  const response = errorResponse(code, error, req, opts);
-  return res.status(response.httpStatus).json(response.body);
-}
-
 // ---------------------------------------------------------------------------
 // Browser service response types
 // ---------------------------------------------------------------------------
@@ -227,6 +210,8 @@ export async function browserCreateController(
   //   });
   // }
 
+  const r = makeResponder(req, res);
+
   const sessionId = uuidv7();
   const logger = _logger.child({
     sessionId,
@@ -240,9 +225,7 @@ export async function browserCreateController(
   const { ttl, activityTtl, streamWebView, profile, integration } = req.body;
 
   if (!config.BROWSER_SERVICE_URL) {
-    return sendError(
-      res,
-      req,
+    return r.fail(
       BrowserError.SERVICE_UNAVAILABLE,
       "Browser feature is not configured (BROWSER_SERVICE_URL is missing).",
       { details: { dependency: "browser-service" } },
@@ -264,9 +247,7 @@ export async function browserCreateController(
       estimatedCredits,
       ttl,
     });
-    return sendError(
-      res,
-      req,
+    return r.fail(
       BillingError.INSUFFICIENT_CREDITS,
       `Insufficient credits for a ${ttl}s browser session (requires ~${estimatedCredits} credits). For more credits, you can upgrade your plan at https://firecrawl.dev/pricing.`,
       { details: { required: estimatedCredits } },
@@ -281,9 +262,7 @@ export async function browserCreateController(
       activeCount,
       limit: concurrencyLimit,
     });
-    return sendError(
-      res,
-      req,
+    return r.fail(
       BrowserError.SESSION_LIMIT_EXCEEDED,
       `You have reached the maximum number of concurrent jobs (${concurrencyLimit}). Please wait for existing jobs to complete or destroy browser sessions before creating new ones.`,
       { details: { active: activeCount, limit: concurrencyLimit } },
@@ -327,9 +306,7 @@ export async function browserCreateController(
           profileName: profile?.name,
           error: err,
         });
-        return sendError(
-          res,
-          req,
+        return r.fail(
           GatingError.IDEMPOTENCY_CONFLICT,
           "Another session is currently writing to this profile. Only one writer is allowed at a time. You can still access it with saveChanges: false, or try again later.",
           { details: { key: profile?.name } },
@@ -353,9 +330,7 @@ export async function browserCreateController(
       error: lastCreateError,
       attempts: MAX_CREATE_RETRIES,
     });
-    return sendError(
-      res,
-      req,
+    return r.fail(
       BrowserError.SERVICE_UNAVAILABLE,
       "Failed to create browser session.",
       { details: { dependency: "browser-service" } },
@@ -399,13 +374,9 @@ export async function browserCreateController(
       "DELETE",
       `/browsers/${svcResponse.sessionId}`,
     ).catch(() => {});
-    return sendError(
-      res,
-      req,
-      CommonError.UNKNOWN,
-      "Failed to persist browser session.",
-      { details: { cause: "insertBrowserSession" } },
-    );
+    return r.fail(CommonError.UNKNOWN, "Failed to persist browser session.", {
+      details: { cause: "insertBrowserSession" },
+    });
   }
 
   // Invalidate cached count so next check reflects the new session
@@ -422,8 +393,7 @@ export async function browserCreateController(
     browserId: svcResponse.sessionId,
   });
 
-  return res.status(200).json({
-    success: true,
+  return r.ok({
     id: sessionId,
     cdpUrl: svcResponse.cdpUrl,
     liveViewUrl: svcResponse.iframeUrl,
@@ -448,6 +418,8 @@ export async function browserExecuteController(
   //   });
   // }
 
+  const r = makeResponder(req, res);
+
   req.body = browserExecuteRequestSchema.parse(req.body);
 
   const id = req.params.sessionId;
@@ -464,22 +436,15 @@ export async function browserExecuteController(
   const session = await getBrowserSession(id);
 
   if (!session) {
-    return sendError(
-      res,
-      req,
-      BrowserError.SESSION_NOT_FOUND,
-      "Browser session not found.",
-    );
+    return r.fail(BrowserError.SESSION_NOT_FOUND, "Browser session not found.");
   }
 
   if (session.team_id !== req.auth.team_id) {
-    return sendError(res, req, BrowserError.SESSION_FORBIDDEN, "Forbidden.");
+    return r.fail(BrowserError.SESSION_FORBIDDEN, "Forbidden.");
   }
 
   if (session.status === "destroyed") {
-    return sendError(
-      res,
-      req,
+    return r.fail(
       BrowserError.SESSION_EXPIRED,
       "Browser session has been destroyed.",
       { details: { expiredAt: session.updated_at } },
@@ -501,9 +466,7 @@ export async function browserExecuteController(
     );
   } catch (err) {
     logger.error("Failed to execute code via browser service", { error: err });
-    return sendError(
-      res,
-      req,
+    return r.fail(
       BrowserError.EXECUTION_FAILED,
       "Failed to execute code in browser session.",
     );
@@ -528,8 +491,7 @@ export async function browserExecuteController(
 
   const hasError = execResult.exitCode !== 0 || execResult.killed;
 
-  return res.status(200).json({
-    success: true,
+  return r.ok({
     stdout: execResult.stdout,
     result: execResult.result,
     stderr: execResult.stderr,
@@ -551,6 +513,8 @@ export async function browserDeleteController(
   //   });
   // }
 
+  const r = makeResponder(req, res);
+
   const id = req.params.sessionId;
 
   const logger = _logger.child({
@@ -563,16 +527,11 @@ export async function browserDeleteController(
   const session = await getBrowserSession(id);
 
   if (!session) {
-    return sendError(
-      res,
-      req,
-      BrowserError.SESSION_NOT_FOUND,
-      "Browser session not found.",
-    );
+    return r.fail(BrowserError.SESSION_NOT_FOUND, "Browser session not found.");
   }
 
   if (session.team_id !== req.auth.team_id) {
-    return sendError(res, req, BrowserError.SESSION_FORBIDDEN, "Forbidden.");
+    return r.fail(BrowserError.SESSION_FORBIDDEN, "Forbidden.");
   }
 
   logger.info("Deleting browser session");
@@ -612,9 +571,7 @@ export async function browserDeleteController(
     logger.info("Session already destroyed by another path, skipping billing", {
       sessionId: session.id,
     });
-    return res.status(200).json({
-      success: true,
-    });
+    return r.ok({});
   }
 
   const wallClockMs = Date.now() - new Date(session.created_at).getTime();
@@ -658,9 +615,7 @@ export async function browserDeleteController(
     creditsBilled,
   });
 
-  return res.status(200).json({
-    success: true,
-  });
+  return r.ok({});
 }
 
 export async function browserListController(
@@ -674,6 +629,8 @@ export async function browserListController(
   //       "Browser is currently in beta. Please contact support@firecrawl.com to request access.",
   //   });
   // }
+
+  const r = makeResponder(req, res);
 
   const logger = _logger.child({
     teamId: req.auth.team_id,
@@ -692,17 +649,16 @@ export async function browserListController(
     status: statusFilter,
   });
 
-  return res.status(200).json({
-    success: true,
-    sessions: rows.map(r => ({
-      id: r.id,
-      status: r.status,
-      cdpUrl: r.cdp_url,
-      liveViewUrl: r.cdp_path,
-      interactiveLiveViewUrl: r.cdp_interactive_path,
-      streamWebView: r.stream_web_view,
-      createdAt: r.created_at,
-      lastActivity: r.updated_at,
+  return r.ok({
+    sessions: rows.map(row => ({
+      id: row.id,
+      status: row.status,
+      cdpUrl: row.cdp_url,
+      liveViewUrl: row.cdp_path,
+      interactiveLiveViewUrl: row.cdp_interactive_path,
+      streamWebView: row.stream_web_view,
+      createdAt: row.created_at,
+      lastActivity: row.updated_at,
     })),
   });
 }
@@ -711,6 +667,8 @@ export async function browserWebhookDestroyedController(
   req: Request,
   res: Response,
 ) {
+  const r = makeResponder(req, res);
+
   const logger = _logger.child({
     module: "api/v2",
     method: "browserWebhookDestroyedController",
@@ -723,12 +681,12 @@ export async function browserWebhookDestroyedController(
     !secret ||
     secret !== config.BROWSER_SERVICE_WEBHOOK_SECRET
   ) {
-    return sendError(res, req, AuthError.INVALID_API_KEY, "Unauthorized");
+    return r.fail(AuthError.INVALID_API_KEY, "Unauthorized");
   }
 
   const { sessionId } = req.body as { sessionId?: string };
   if (!sessionId) {
-    return sendError(res, req, RequestError.BAD_REQUEST, "Missing browserId");
+    return r.fail(RequestError.BAD_REQUEST, "Missing browserId");
   }
   let browserId = sessionId;
 

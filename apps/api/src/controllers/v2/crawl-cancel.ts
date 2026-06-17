@@ -13,42 +13,28 @@ import { crawlGroup } from "../../services/worker/nuq-router";
 import { normalizeOwnerId } from "../../lib/owner-id";
 import { removeConcurrencyLimitedJobs } from "../../lib/concurrency-limit";
 import { CommonError, LifecycleError } from "../../lib/error-codes";
-import { errorResponse, okResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 configDotenv();
 
 export async function crawlCancelController(
   req: RequestWithAuth<{ jobId: string }>,
   res: Response,
 ) {
+  const r = makeResponder(req, res);
   try {
     const group = await crawlGroup.getGroup(req.params.jobId);
     if (!group) {
-      const response = errorResponse(
-        LifecycleError.JOB_NOT_FOUND,
-        "Job not found",
-        req,
-      );
-      return res.status(response.httpStatus).json(response.body as any);
+      return r.fail(LifecycleError.JOB_NOT_FOUND, "Job not found");
     }
 
     // group.ownerId is normalized to a UUID in NuQ, so the raw team_id
     // (e.g. "bypass" when self-hosted) must be normalized before comparing
     if (group.ownerId !== normalizeOwnerId(req.auth.team_id)) {
-      const response = errorResponse(
-        LifecycleError.JOB_WRONG_TEAM,
-        "Job not found",
-        req,
-      );
-      return res.status(response.httpStatus).json(response.body as any);
+      return r.fail(LifecycleError.JOB_WRONG_TEAM, "Job not found");
     }
 
     if (group.status === "completed") {
-      const response = errorResponse(
-        LifecycleError.JOB_CANCELLED,
-        "Crawl is already completed",
-        req,
-      );
-      return res.status(response.httpStatus).json(response.body as any);
+      return r.fail(LifecycleError.JOB_CANCELLED, "Crawl is already completed");
     }
 
     const sc: StoredCrawl = (await getCrawl(req.params.jobId)) ?? {
@@ -75,20 +61,14 @@ export async function crawlCancelController(
       await removeConcurrencyLimitedJobs(sc.team_id, jobIds);
     }
 
-    const response = okResponse({}, req);
-    return res.status(response.httpStatus).json({
-      ...response.body,
-      jobState: "cancelled",
-    } as any);
+    // Cancellation is a SUCCESS terminal state, not an error.
+    return r.ok({ jobState: "cancelled" });
   } catch (error) {
     Sentry.captureException(error);
     logger.error(error);
-    const response = errorResponse(
+    return r.fail(
       CommonError.UNKNOWN,
       error instanceof Error ? error.message : "Unknown error",
-      req,
-      { httpStatus: 500 },
     );
-    return res.status(response.httpStatus).json(response.body as any);
   }
 }

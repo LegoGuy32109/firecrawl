@@ -16,7 +16,7 @@ import { v7 as uuidv7 } from "uuid";
 import { isBaseDomain, extractBaseDomain } from "../../lib/url-utils";
 import { getScrapeZDR } from "../../lib/zdr-helpers";
 import { resolveViaAvgrab } from "../../lib/avgrab-resolve";
-import { errorResponse, okResponse } from "./response-enveloper";
+import { makeResponder } from "./response-enveloper";
 import { MapError, RequestError } from "../../lib/error-codes";
 
 configDotenv();
@@ -25,6 +25,7 @@ export async function mapController(
   req: RequestWithAuth<{}, MapResponse, MapRequest>,
   res: Response<MapResponse>,
 ) {
+  const r = makeResponder(req, res);
   const logger = _logger.child({
     jobId: uuidv7(),
     teamId: req.auth.team_id,
@@ -42,13 +43,8 @@ export async function mapController(
 
   const permissions = checkPermissions(req.body, req.acuc?.flags);
   if (permissions.error) {
-    const envelope = errorResponse(
-      RequestError.BAD_REQUEST,
-      permissions.error,
-      req,
-      { httpStatus: 403 },
-    );
-    return res.status(envelope.httpStatus).json(envelope.body);
+    // NOTE: kept RequestError.BAD_REQUEST (catalog 400); old code forced httpStatus 403.
+    return r.fail(RequestError.BAD_REQUEST, permissions.error);
   }
 
   const middlewareTime = controllerStartTime - middlewareStartTime;
@@ -120,22 +116,15 @@ export async function mapController(
         );
       });
 
-      const response = okResponse(
-        {
-          id: mapId,
-          links: avgrabResults,
-        },
-        req,
-      );
-
-      return res.status(response.httpStatus).json(response.body);
+      return r.ok({
+        id: mapId,
+        links: avgrabResults,
+      });
     }
   } catch (error) {
     if (error instanceof MapFailedError) {
-      const envelope = errorResponse(MapError.FAILED, error.message, req, {
-        httpStatus: 500,
-      });
-      return res.status(envelope.httpStatus).json(envelope.body);
+      // NOTE: MapError.FAILED is 502 in the catalog (old code forced 500).
+      return r.fail(MapError.FAILED, error.message);
     }
     logger.warn("avgrab resolve failed, falling back to standard map", {
       error,
@@ -184,10 +173,7 @@ export async function mapController(
     ])) as any;
   } catch (error) {
     if (error instanceof MapTimeoutError) {
-      const envelope = errorResponse(MapError.TIMEOUT, error.message, req, {
-        httpStatus: 408,
-      });
-      return res.status(envelope.httpStatus).json(envelope.body);
+      return r.fail(MapError.TIMEOUT, error.message);
     } else {
       throw error;
     }
@@ -261,14 +247,9 @@ export async function mapController(
     }
   }
 
-  const response = okResponse(
-    {
-      id: result.job_id,
-      links: result.mapResults,
-      ...(warning && { warning }),
-    },
-    req,
-  );
-
-  return res.status(response.httpStatus).json(response.body);
+  return r.ok({
+    id: result.job_id,
+    links: result.mapResults,
+    ...(warning && { warning }),
+  });
 }
