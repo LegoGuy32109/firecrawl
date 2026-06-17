@@ -1,0 +1,63 @@
+---
+import BaseHead from "../components/BaseHead.astro";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <BaseHead
+      title="CDP Engine Fixture"
+      description="Fixture page for local CDP engine tests"
+    />
+    <style>
+      #mobile-state::after {
+        content: "desktop viewport";
+      }
+
+      @media (max-width: 640px) {
+        #mobile-state::after {
+          content: "mobile viewport";
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <Header />
+    <main>
+      <h1>CDP Engine Fixture</h1>
+      <p id="action-state">before click</p>
+      <button id="reveal-action" type="button">Reveal action state</button>
+      <p id="mobile-state"></p>
+      <p id="geo-state">geolocation pending</p>
+    </main>
+    <Footer />
+    <script>
+      document
+        .querySelector("#reveal-action")
+        ?.addEventListener("click", () => {
+          const state = document.querySelector("#action-state");
+          if (state) {
+            state.textContent = "post-click playwright cdp state";
+            state.setAttribute("data-ready", "true");
+          }
+        });
+
+      navigator.geolocation?.getCurrentPosition(
+        position => {
+          const state = document.querySelector("#geo-state");
+          if (state) {
+            state.textContent = `geo ${position.coords.latitude.toFixed(2)} ${position.coords.longitude.toFixed(2)}`;
+          }
+        },
+        () => {
+          const state = document.querySelector("#geo-state");
+          if (state) {
+            state.textContent = "geolocation unavailable";
+          }
+        },
+      );
+    </script>
+  </body>
+</html>

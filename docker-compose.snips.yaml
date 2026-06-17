@@ -1,4 +1,16 @@
 services:
+  playwright-service:
+    environment:
+      ALLOW_LOCAL_WEBHOOKS: "true"
+
+  api:
+    environment:
+      ALLOW_LOCAL_WEBHOOKS: "true"
+      TEST_SUITE_SELF_HOSTED: "true"
+      TEST_SUITE_WEBSITE: http://host.docker.internal:4321
+      FIRE_ENGINE_BETA_URL: ""
+      PLAYWRIGHT_MICROSERVICE_URL: http://playwright-service:3000/scrape
+
   test-site:
     build: apps/test-site
     profiles:
@@ -14,4 +26,3 @@ services:
         max-size: "5m"
         max-file: "2"
         compress: "true"
-

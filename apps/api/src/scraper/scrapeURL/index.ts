@@ -77,6 +77,7 @@ import {
   ScrapeJobTimeoutError,
   CrawlDenialError,
   ActionsNotSupportedError,
+  LocalFeatureUnsupportedError,
 } from "../../lib/error";
 import { htmlTransform } from "./lib/removeUnwantedElements";
 import { postprocessors } from "./postprocessors";
@@ -698,6 +699,16 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
 
     const fallbackList = await buildFallbackList(meta);
 
+    if (fallbackList.length === 0) {
+      const fireEngineOnlyFeature = ["audio", "video", "stealthProxy"].find(
+        feature => meta.featureFlags.has(feature as FeatureFlag),
+      );
+
+      if (fireEngineOnlyFeature !== undefined) {
+        throw new LocalFeatureUnsupportedError(fireEngineOnlyFeature);
+      }
+    }
+
     // Check if actions are requested but no engines support them
     if (meta.featureFlags.has("actions")) {
       if (
@@ -1015,6 +1026,11 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
         contentType: engineResult.contentType,
         timezone: engineResult.timezone,
         proxyUsed: engineResult.proxyUsed ?? "basic",
+        ...(config.TEST_SUITE_SELF_HOSTED
+          ? {
+              engine: result.engine,
+            }
+          : {}),
         ...(fallbackList.find(x =>
           ["index", "index;documents"].includes(x.engine),
         )

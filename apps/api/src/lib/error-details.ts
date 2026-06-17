@@ -78,7 +78,11 @@ export interface ErrorDetailsMap {
     contentType?: string;
     url?: string;
   };
-  [ScrapeError.ACTION]: { errorCode: string };
+  [ScrapeError.ACTION]: {
+    errorCode: string;
+    actionIndex?: number;
+    selector?: string;
+  };
   [ScrapeError.RACED_REDIRECT]: { url?: string };
   [ScrapeError.SITEMAP]: { sitemapUrl?: string; cause?: unknown };
   [ScrapeError.ACTIONS_NOT_SUPPORTED]: { engine?: string };

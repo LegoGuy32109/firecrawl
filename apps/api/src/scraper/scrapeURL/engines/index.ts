@@ -373,7 +373,7 @@ const engineOptions: {
   },
   "playwright;cdp": {
     features: {
-      actions: false,
+      actions: true,
       waitFor: true,
       screenshot: true,
       "screenshot@fullScreen": true,

@@ -206,11 +206,21 @@ export class ProxySelectionError extends TransportableError {
 }
 
 export class ActionError extends TransportableError {
-  constructor(public errorCode: string) {
+  constructor(
+    public errorCode: string,
+    public actionIndex?: number,
+    public selector?: string,
+  ) {
     super(
       ScrapeError.ACTION,
       "Action(s) failed to complete. Error code: " + errorCode,
-      { details: { errorCode } },
+      {
+        details: {
+          errorCode,
+          ...(actionIndex !== undefined ? { actionIndex } : {}),
+          ...(selector !== undefined ? { selector } : {}),
+        },
+      },
     );
   }
 
@@ -218,6 +228,8 @@ export class ActionError extends TransportableError {
     return {
       ...super.serialize(),
       errorCode: this.errorCode,
+      actionIndex: this.actionIndex,
+      selector: this.selector,
     };
   }
 
@@ -225,7 +237,7 @@ export class ActionError extends TransportableError {
     _: ErrorCodes,
     data: ReturnType<typeof this.prototype.serialize>,
   ) {
-    const x = new ActionError(data.errorCode);
+    const x = new ActionError(data.errorCode, data.actionIndex, data.selector);
     return restoreTransportableError(x, data);
   }
 }

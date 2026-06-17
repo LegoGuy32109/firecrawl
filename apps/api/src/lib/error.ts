@@ -1,4 +1,10 @@
-import { CommonError, CrawlError, MapError, ScrapeError } from "./error-codes";
+import {
+  CommonError,
+  CrawlError,
+  LocalError,
+  MapError,
+  ScrapeError,
+} from "./error-codes";
 import type { ErrorCodes } from "./error-codes";
 import type { ErrorDetails } from "./error-details";
 
@@ -94,6 +100,36 @@ export class UnknownError extends TransportableError {
   ) {
     const x = new UnknownError("dummy");
     x.message = data.message;
+    return restoreTransportableError(x, data);
+  }
+}
+
+export class LocalFeatureUnsupportedError extends TransportableError {
+  constructor(public feature: string) {
+    super(
+      LocalError.FEATURE_UNSUPPORTED,
+      `The feature "${feature}" is unsupported in this local environment. Enable fire-engine or disable the feature.`,
+      {
+        details: {
+          feature,
+          requiresEngine: "fire-engine",
+        },
+      },
+    );
+  }
+
+  serialize() {
+    return {
+      ...super.serialize(),
+      feature: this.feature,
+    };
+  }
+
+  static deserialize(
+    _code: ErrorCodes,
+    data: ReturnType<typeof this.prototype.serialize>,
+  ) {
+    const x = new LocalFeatureUnsupportedError(data.feature);
     return restoreTransportableError(x, data);
   }
 }
