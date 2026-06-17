@@ -1,4 +1,5 @@
 import express from "express";
+import expressWs from "express-ws";
 import { config } from "../config";
 import { adminIndexController } from "../admin/admin-index";
 import { redisHealthController } from "../admin/redis-health";
@@ -20,6 +21,13 @@ import {
   handleIntegrationAdminValidateProxy,
 } from "../lib/admin-integration-integrations-proxy";
 import { RateLimiterMode } from "../types";
+import {
+  createPlaygroundSession,
+  deletePlaygroundSession,
+} from "../admin/playground/session";
+import { createLivecastWS } from "../services/sessionLivecastWS";
+
+expressWs(express());
 
 export const adminRouter = express.Router();
 
@@ -102,4 +110,25 @@ adminRouter.post(
 adminRouter.post(
   `/admin/integration/rotate-api-key`,
   wrap(handleIntegrationAdminRotateProxy),
+);
+
+adminRouter.post(
+  `/admin/${config.BULL_AUTH_KEY}/playground/session`,
+  wrap(createPlaygroundSession),
+);
+
+adminRouter.delete(
+  `/admin/${config.BULL_AUTH_KEY}/playground/session/:id`,
+  wrap(deletePlaygroundSession),
+);
+
+(adminRouter as any).ws(
+  `/admin/${config.BULL_AUTH_KEY}/playground/session/:id/view`,
+  createLivecastWS((req) => {
+    if (!config.BROWSER_SERVICE_URL) return null;
+    const upstream = new URL(config.BROWSER_SERVICE_URL);
+    upstream.protocol = upstream.protocol === "https:" ? "wss:" : "ws:";
+    upstream.pathname = `/browsers/${req.params.id}/view`;
+    return upstream.toString();
+  }),
 );
