@@ -26,10 +26,11 @@ Implementation spec for the interactive page (Phases 2–3 of
   `public/`/static dir, no new build tool (consistent with the zero-static admin pattern).
 - Build step: an esbuild entry added to the api build script producing `playground.bundle.js`
   (imported by the controller as a string at build time, or read once at boot).
-- **Shared catalog:** client code imports `ERROR_CATALOG`/`explainError`/`errorCodeToHttpStatus`
-  from `lib/error-catalog.ts` (SPEC-ERRORCODES §4) — the same module the server imports. Keep that
-  module free of node/server-only imports so this bundle stays clean (the StatusPill parity check
-  in §6 also relies on the shared `errorCodeToHttpStatus`).
+- **Shared catalogs:** client code imports both `ERROR_CATALOG`/`explainError`/
+  `errorCodeToHttpStatus` **and** `WARNING_CATALOG`/`explainWarning` from `lib/error-catalog.ts`
+  (SPEC-ERRORCODES §5) — the same module the server imports. Keep that module free of
+  node/server-only imports so this bundle stays clean (the StatusPill parity check in §6 also
+  relies on the shared `errorCodeToHttpStatus`).
 - **Styling:** reuse `admin-index.ts`'s dark theme tokens (`--bg/--panel/--ink/--accent/--get/
 --post`, monospace) verbatim for visual consistency. `escapeHtml` shell stays.
 
@@ -60,6 +61,7 @@ Implementation spec for the interactive page (Phases 2–3 of
   <ResponsePane>
     <StatusPill/>                   // http status + errorCodeToHttpStatus parity
     <SuccessView/> | <ErrorView/>   // ErrorView decodes the envelope (§6)
+    <WarningList/>                   // success/partial: warnings[] via explainWarning
     <DiagnosticsWaterfall/>         // steps: engine waterfall / per-source / per-action
   </ResponsePane>
   // Scrape + Interact only:
@@ -86,12 +88,16 @@ const recordingUrl = signal<string | null>(null);
 
 ## 6. Error / diagnostics renderer (the core value)
 
-`<ErrorView>` decodes the [SPEC-ERRORCODES.md](./SPEC-ERRORCODES.md) envelope:
+`<ErrorView>` decodes the fatal [SPEC-ERRORCODES.md](./SPEC-ERRORCODES.md) envelope; `<WarningList>`
+renders the structured `warnings[]` on success/partial responses:
 
 - **`code` → human explanation + suggested fix**, by importing the **shared `ERROR_CATALOG` /
-  `explainError` from `lib/error-catalog.ts`** (SPEC-ERRORCODES §4) — the _same_ module the API
+  `explainError` from `lib/error-catalog.ts`** (SPEC-ERRORCODES §5) — the _same_ module the API
   uses. The page does **not** ship its own copy; there is one source of truth. esbuild bundles the
   catalog into the client because that module is intentionally dependency-free/browser-safe.
+- **`warnings[]` → per-entry explanation** via `explainWarning(code)` from `WARNING_CATALOG` (same
+  module); each entry shows its `WarningCodes` code, message, and structured `details`. The legacy
+  `warning` string is shown only as a fallback when `warnings[]` is absent.
 - **`errorId`** shown + copyable (correlate with server logs/Sentry).
 - **`details`** rendered structurally per shape (e.g. `INSUFFICIENT_CREDITS` → "needs N, have M,
   short K"; `RATE_LIMIT_EXCEEDED` → limit/remaining/reset; `FEATURE_UNSUPPORTED_LOCALLY` →
