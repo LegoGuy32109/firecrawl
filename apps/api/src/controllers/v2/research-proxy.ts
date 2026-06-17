@@ -19,6 +19,7 @@ import type { RequestWithAuth } from "../v1/types";
 import { wrap } from "../../routes/shared";
 import { errorResponse } from "./response-enveloper";
 import { ProxyError, RequestError } from "../../lib/error-codes";
+import type { ErrorDetails } from "../../lib/error-details";
 
 const TIMEOUT_MS = 120_000;
 const SEARCH_CREDITS_PER_TEN_RESULTS = 2;
@@ -197,8 +198,11 @@ function researchError(
   res: Response,
   req: RequestWithAuth<any, any, any>,
   error: string,
+  details?: ErrorDetails,
 ) {
-  const response = errorResponse(RequestError.BAD_REQUEST, error, req);
+  const response = errorResponse(RequestError.BAD_REQUEST, error, req, {
+    ...(details !== undefined ? { details } : {}),
+  });
   return res.status(response.httpStatus).json(response.body);
 }
 
@@ -249,7 +253,12 @@ function createResearchController(
     const parsed = schema.safeParse(req.query);
     if (!parsed.success) {
       logger.warn("Invalid research query", { error: parsed.error.issues });
-      return researchError(res, authedReq, "Invalid query parameters");
+      return researchError(
+        res,
+        authedReq,
+        "Invalid query parameters",
+        parsed.error.issues,
+      );
     }
 
     const params = parsed.data as ResearchQueryParams;

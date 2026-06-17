@@ -40,7 +40,7 @@ export async function searchFeedbackController(
         "Invalid request body",
         req,
         {
-          details: error.issues as any,
+          details: error.issues,
         },
       );
       return res.status(envelope.httpStatus).json(envelope.body);

@@ -37,6 +37,7 @@ import {
 import { getSearchForcedKind, getSearchZDR } from "../../lib/zdr-helpers";
 import { errorResponse } from "./response-enveloper";
 import { CommonError, RequestError, ScrapeError } from "../../lib/error-codes";
+import type { ErrorDetails } from "../../lib/error-details";
 
 function sendX402SearchError(
   req: RequestWithAuth<{}, SearchResponse, SearchRequest>,
@@ -44,8 +45,12 @@ function sendX402SearchError(
   status: number,
   code: CommonError | RequestError | ScrapeError,
   error: string | Error,
+  details?: ErrorDetails,
 ) {
-  const envelope = errorResponse(code, error, req, { httpStatus: status });
+  const envelope = errorResponse(code, error, req, {
+    httpStatus: status,
+    ...(details !== undefined ? { details } : {}),
+  });
   return res.status(envelope.httpStatus).json(envelope.body);
 }
 
@@ -686,6 +691,7 @@ export async function x402SearchController(
         400,
         RequestError.BAD_REQUEST,
         "Invalid request body",
+        error.issues,
       );
     }
 

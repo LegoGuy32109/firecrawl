@@ -54,7 +54,7 @@ export async function realtimeSearchController(
         "Invalid request parameters",
         req,
         {
-          details: validationResult.error.issues as any,
+          details: validationResult.error.issues,
         },
       );
       res.status(envelope.httpStatus).json(envelope.body);

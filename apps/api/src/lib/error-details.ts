@@ -21,11 +21,13 @@ import {
   ProxyError,
   QueryWarning,
   RateError,
+  RequestError,
   ScrapeError,
   ScrapeWarning,
   WarningCodes,
   ErrorCodes,
 } from "./error-codes";
+import type { ZodIssue } from "zod";
 
 export interface ErrorDetailsMap {
   [AuthError.INVALID_API_KEY]: { reason?: string };
@@ -119,6 +121,7 @@ export interface ErrorDetailsMap {
     feature: string;
     requiresEngine: "fire-engine";
   };
+  [RequestError.BAD_REQUEST]: ZodIssue[];
   [CommonError.UNKNOWN]: { cause?: string };
 }
 

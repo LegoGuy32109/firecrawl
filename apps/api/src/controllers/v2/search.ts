@@ -29,6 +29,7 @@ import { getSearchForcedKind, getSearchZDR } from "../../lib/zdr-helpers";
 import { projectSearchTotalCredits } from "../../lib/keyless-credit-projection";
 import { applyAgentAuthDiscoveryHeader } from "../../lib/agent-auth-discovery";
 import { errorResponse } from "./response-enveloper";
+import type { ErrorDetails } from "../../lib/error-details";
 import {
   BillingError,
   CommonError,
@@ -42,8 +43,12 @@ function sendSearchError(
   status: number,
   code: BillingError | CommonError | RequestError | ScrapeError,
   error: string | Error,
+  details?: ErrorDetails,
 ) {
-  const envelope = errorResponse(code, error, req, { httpStatus: status });
+  const envelope = errorResponse(code, error, req, {
+    httpStatus: status,
+    ...(details !== undefined ? { details } : {}),
+  });
   return res.status(envelope.httpStatus).json(envelope.body);
 }
 
@@ -308,6 +313,7 @@ export async function searchController(
         400,
         RequestError.BAD_REQUEST,
         "Invalid request body",
+        error.issues,
       );
     }
 
