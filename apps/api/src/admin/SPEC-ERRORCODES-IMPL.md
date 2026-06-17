@@ -80,12 +80,17 @@ green (no behavior change). **End state: GREEN.**
 Steps:
 
 1. Create `lib/error-catalog.ts` (browser-safe: only imports from `error-codes.ts`). Use computed
-   enum keys. Fill an `ErrorEntry` for **every** `ErrorCodes` member (incl. `CrawlError.DENIAL`) and
-   a `WarningEntry` for every `WarningCodes` member — the `Record<…>` type makes a miss a compile
-   error.
+   enum keys. Fill an `ErrorCatalogEntry` for **every** `ErrorCodes` member (incl.
+   `CrawlError.DENIAL`) and a `WarningCatalogEntry` for every `WarningCodes` member — the
+   `Record<…>` type makes a miss a compile error.
 2. Use the §5 status table for `httpStatus`. Write a real `explanation` + `fix` per code (this is the
    user-facing transparency text; the playground renders it).
-3. Export `errorCodeToHttpStatus`, `explainError`, `explainWarning`.
+3. Export `errorCodeToHttpStatus`, `explainError`, `explainWarning`, and the wire-boundary
+   validators `parseErrorCode` / `parseWarningCode` (derived from the catalog key sets — §5). Also
+   add `makeWarning` here (or beside the warning enums) — the pure anti-drift helper (§4 warnings).
+4. Add the browser-safety CI guard: an esbuild `platform:"browser"` bundle test over
+   `error-codes.ts` / `error-details.ts` / `error-catalog.ts` that fails on any node/server import
+   (SPEC-ERRORCODES §5 guardrail).
 
 **Verify:** `pnpm exec tsc --noEmit` clean (a missing catalog entry fails here). **End state: GREEN.**
 
@@ -158,12 +163,13 @@ Steps:
 
 1. `controllers/v2/types.ts`:
    - add `ResponseStatus`, `JobState`, `Diagnostics`, `DiagnosticStep`, `ResponseCore`,
-     `ErrorCore`, `ErrorResponse`, `AsyncJobFailureResponse<TData>`, and `WarningEntry`
+     `ErrorCore`, `ErrorResponse`, `AsyncJobFailureResponse<TData>`, and `Warning` (the envelope
+     occurrence type — NOT the catalog's `WarningCatalogEntry`)
    - `ErrorResponse.code` is required
    - `diagnostics` is required on every client-facing v2 JSON response
    - `status` is required on every client-facing v2 JSON response
    - async status responses add `jobState`; terminal failed jobs use `AsyncJobFailureResponse`
-   - `warning?: string` stays; add `warnings?: WarningEntry[]`
+   - `warning?: string` stays; add `warnings?: Warning[]`
 2. Do **not** change v1/v0 response envelopes except mechanical enum comparison fixes from WP1.
 
 **Verify:** `pnpm exec tsc --noEmit` now reports missing `status`/`diagnostics`/`code` at v2
@@ -310,7 +316,7 @@ Steps:
 
 Steps:
 
-1. `apps/api/openapi.json`: model `ResponseStatus`, `Diagnostics`, `WarningEntry`,
+1. `apps/api/openapi.json`: model `ResponseStatus`, `Diagnostics`, `Warning`,
    `ErrorResponse`, and `AsyncJobFailureResponse`; mark `status`, `diagnostics`, and failure `code`
    as required.
 2. `apps/js-sdk/firecrawl/src/v2/*`: update response/error/warning types; keep runtime parsing

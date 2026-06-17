@@ -24,13 +24,23 @@ Implementation spec for the interactive page (Phases 2–3 of
 "preact"`, `format: "iife"`, minified, into a single string.
 - The controller inlines that string: `res.send(html + '<script>' + bundle + '</script>')`. No
   `public/`/static dir, no new build tool (consistent with the zero-static admin pattern).
-- Build step: an esbuild entry added to the api build script producing `playground.bundle.js`
-  (imported by the controller as a string at build time, or read once at boot).
+  Deliberately **not** an `apps/ui`-style standalone Vite app (cf. the legacy React+Vite
+  `apps/ui/ingestion-ui`) — the steer is minimal-bloat, same-origin-as-`/v2`, zero static infra.
+- **Build timing — DECIDED: build-time artifact.** An esbuild entry in the `apps/api` build script
+  emits `playground.bundle.js` into `dist`; the controller reads it once at boot. This keeps esbuild
+  out of the runtime/hot path (no bundling in the server process, no `.tsx` source shipped in the
+  image) and catches bundle errors at build/CI. The one risk — a missing artifact — is one-time
+  build-script + Dockerfile wiring plus a boot smoke-test asserting the bundle string is non-empty.
+  (Rejected: bundle-at-boot / lazy-on-first-request — those put a build tool in the runtime and
+  require shipping client source.)
+- **No data baked into the HTML.** Only the static bundle is inlined into the `<script>`; all
+  runtime data is fetched client-side. Never interpolate JSON into the page string — a `</script>`
+  in interpolated data would break/inject into the inlined script. (Admin-gated, but cheap to avoid.)
 - **Shared catalogs:** client code imports both `ERROR_CATALOG`/`explainError`/
   `errorCodeToHttpStatus` **and** `WARNING_CATALOG`/`explainWarning` from `lib/error-catalog.ts`
-  (SPEC-ERRORCODES §5) — the same module the server imports. Keep that module free of
-  node/server-only imports so this bundle stays clean (the StatusPill parity check in §6 also
-  relies on the shared `errorCodeToHttpStatus`).
+  (SPEC-ERRORCODES §5) — the same module the server imports. That module's node/server-free property
+  is enforced by the **esbuild browser-safety CI guard** (SPEC-ERRORCODES §5 guardrail), not just by
+  convention. The StatusPill parity check in §6 also relies on the shared `errorCodeToHttpStatus`.
 - **Styling:** reuse `admin-index.ts`'s dark theme tokens (`--bg/--panel/--ink/--accent/--get/
 --post`, monospace) verbatim for visual consistency. `escapeHtml` shell stays.
 
@@ -133,7 +143,16 @@ renders the structured `warnings[]` on success/partial responses:
 - **Phase 2 (ship first):** Header, FeatureNav, RequestBuilder, ResponsePane + ErrorView/
   DiagnosticsWaterfall for all 6 features. No browser-driving yet. Delivers the transparency value
   against the Phase-1 envelope.
-- **Phase 3:** LiveView + RecorderPanel + export, wired to the `playwright;cdp` admin session.
+- **Phase 3:** LiveView + RecorderPanel + export. Split across two dedicated backend tracks rather
+  than treated as one UI feature:
+  - **`LiveView` (read-only screencast) ships first** — depends on the live-session track
+    ([SPEC-LIVE-SESSION.md](./SPEC-LIVE-SESSION.md) L1), which reuses the existing
+    `browser-sessions` / Browser Service infra + a CDP screencast viewer ([EMBEDDED-VIEW.md](./EMBEDDED-VIEW.md)).
+  - Interactive input = SPEC-LIVE-SESSION L2; **`RecorderPanel` + export = L3, deferred to last**
+    (selector generation is the hard part).
+  - The `playwright;cdp` engine that widens local feature support is its own track
+    ([SPEC-CDP-ENGINE.md](./SPEC-CDP-ENGINE.md)) and is independent of the UI — Phase 2 needs none
+    of it.
 
 ## 10. Notes
 

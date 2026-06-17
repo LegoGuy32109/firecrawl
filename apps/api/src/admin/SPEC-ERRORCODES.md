@@ -257,7 +257,10 @@ The 16 existing producers (§1) each push **one typed entry** (see §4) instead 
 ## 4. Envelope changes
 
 ```ts
-export type WarningEntry = {
+// Envelope-level warning OCCURRENCE (one per event). Named `Warning` (NOT `WarningEntry`) to keep
+// it distinct from the catalog's per-code metadata type `WarningCatalogEntry` (§5) — the playground
+// client imports both from these modules and the old shared name `WarningEntry` collided.
+export type Warning = {
   code: WarningCodes;
   message: string;
   details?: WarningDetails;
@@ -278,7 +281,8 @@ export type Diagnostics = {
     // "not_applicable" means no customer scrape/search content is processed by this endpoint,
     // but the response still followed the safe non-content path for a forced-ZDR user.
     mode: "disabled" | "allowed" | "forced" | "request" | "not_applicable";
-    // true when diagnostics were intentionally reduced/redacted due to ZDR/privacy rules.
+    // DERIVED from `mode`, never set independently (see "stripping" below): true iff
+    // mode is "forced" | "request". The enveloper computes it; callers cannot disagree.
     reduced: boolean;
   };
   traceId?: string;
@@ -295,15 +299,19 @@ export type DiagnosticStatus =
   | "skipped"
   | "timed_out";
 
+// A step has an ALWAYS-SAFE core plus a GATED sensitive bucket. The enveloper's addStep() is the
+// only writer; when privacy.reduced is true it drops `sensitive` (and any non-templated `message`)
+// structurally — default-deny, not denylist-scrub. There is NO free-form `details: Record<string,
+// unknown>` anymore (that was the leak/contract hole — §"stripping").
 export type DiagnosticStep = {
-  name: string;
+  name: DiagnosticStepName; // controlled vocabulary, not free text
   status: DiagnosticStatus;
-  code?: ErrorCodes | WarningCodes;
-  message?: string;
+  code?: ErrorCodes | WarningCodes; // public codes only
   durationMs?: number;
   startedAt?: string;
   endedAt?: string;
-  details?: Record<string, unknown>;
+  // Gated: emitted ONLY when privacy.reduced === false. Typed per step-kind, no index signature.
+  sensitive?: DiagnosticStepSensitive;
 };
 
 export type ResponseCore = {
@@ -311,7 +319,7 @@ export type ResponseCore = {
   status: ResponseStatus;
   diagnostics: Diagnostics; // REQUIRED on every client-facing v2 JSON response
   warning?: string; // KEPT — existing assigned messages preserved verbatim; NOT derived
-  warnings?: WarningEntry[]; // NEW — structured, built inline by each endpoint
+  warnings?: Warning[]; // NEW — structured, built inline by each endpoint
 };
 
 export type ErrorCore = ResponseCore & {
@@ -381,7 +389,7 @@ uncaught 500s / Sentry-captured exceptions — where the diagnosis lives only in
   branch genuinely has a Sentry/log-correlated id. Normal typed/domain async failures do not set it.
 
 **Warnings (flexible, inline, per-endpoint).** Warnings are an **envelope-level** concept, not a
-scrape-`Document` mirror. Every v2 success/partial response type gets `warnings?: WarningEntry[]`,
+scrape-`Document` mirror. Every v2 success/partial response type gets `warnings?: Warning[]`,
 and **each endpoint builds it inline** — there is **no shared collector class**:
 
 - Scrape-pipeline warnings originate in worker-side transformers; they ride the job result as plain
@@ -391,6 +399,37 @@ and **each endpoint builds it inline** — there is **no shared collector class*
 
 `warning?: string` is kept and each existing producer keeps assigning its message verbatim
 (backward compat); it is **not** derived from `warnings[]`. The two are parallel channels.
+
+**Anti-drift: write the text once.** The two channels drift only if a producer types the message
+twice. They don't need a collector class to stay in sync — they need a single text literal used for
+both. A tiny **pure** helper (browser-safe, no shared state) constructs the structured entry; the
+legacy string reuses `entry.message`:
+
+```ts
+// lib/error-catalog.ts (or alongside the warning enums) — pure, no class, no collector
+export function makeWarning<C extends WarningCodes>(
+  code: C,
+  message: string,
+  details?: WarningDetailsFor<C>,
+): Warning {
+  return { code, message, ...(details ? { details } : {}) };
+}
+
+// at a producer — the message text exists exactly ONCE:
+const w = makeWarning(
+  MediaWarning.AUDIO_UNAVAILABLE,
+  "Audio is not configured on this deployment.",
+  {
+    reason: "not_configured",
+  },
+);
+warnings.push(w);
+document.warning = [document.warning, w.message].filter(Boolean).join(" "); // legacy channel, same text
+```
+
+Each endpoint still decides its own message and how it collects (`push`, or lifting from the worker
+result). There is just no second source of truth for the text — so the §10 "warning string contains
+the verbatim text" assertion holds by construction, with no collector and no derivation.
 
 Warnings are stable summary events. Diagnostics are the execution trace where warning events can
 also appear. A warning entry should generally correspond to a `diagnostics.steps[]` entry with
@@ -432,6 +471,26 @@ specific request/job/endpoint followed the privacy-safe path.
   durations, dependency categories, and feature names are allowed; URL path/query, content, request
   bodies/options, user selectors/actions, prompts/completions, response bodies, and cross-system
   trace ids are not.
+
+**The stripping mechanism (how reduction is enforced, not just flagged).** Setting
+`privacy.reduced` removes nothing by itself — it is a derived fact, and the sensitive data lives in
+the steps. Enforcement is structural, at a single chokepoint:
+
+- **`mode` is caller-supplied** (only the request knows its resolved ZDR posture). **`reduced` is
+  derived** by the enveloper: `reduced = mode === "forced" || mode === "request"`. Callers cannot
+  set `reduced`, so it can never disagree with `mode`.
+- **The enveloper's `addStep()` is the only writer of `diagnostics.steps` / `sources` / `actions`.**
+  Controllers never push steps directly. A step is split into an **always-safe core**
+  (`name` from a controlled `DiagnosticStepName` vocabulary, `status`, public `code`, `durationMs`,
+  timestamps) and a **gated `sensitive` bucket** (hostnames, URLs, selectors, value-bearing counts).
+- When `reduced` is true, `addStep()` **omits `sensitive`** (and any free-text `message` not drawn
+  from a safe template) **by construction** — default-deny. This is an allowlist _projection_, not a
+  denylist _scrub_: you start from the safe core and never copy the gated bucket through, so a new
+  sensitive field added later is safe-by-default (it lives in `sensitive`, which is dropped) rather
+  than a silent leak waiting on someone to remember to scrub it.
+- Because the only path to a step is `addStep()`, a controller **cannot** attach content to a
+  reduced response even by mistake — there is no code path that carries the gated bucket out under
+  ZDR. The flag is the signal; the projection at the chokepoint is the protection.
 - `diagnostics.privacy.mode = "not_applicable"` is used for endpoints that do not process or retain
   customer scrape/search content but still need to reassure forced-ZDR users that the path is
   privacy-safe. It must not be used to bypass redaction on endpoints that do process content.
@@ -630,21 +689,24 @@ import {
   WarningCodes /* + the enums for computed keys */,
 } from "./error-codes";
 
-export interface ErrorEntry {
+// Per-code catalog METADATA (one per code). Named `…CatalogEntry`, distinct from the envelope
+// OCCURRENCE type `Warning` (§4) — the old name `WarningEntry` collided across the two modules the
+// client imports together.
+export interface ErrorCatalogEntry {
   httpStatus: number;
   explanation: string;
   fix: string;
   retriable?: boolean;
 }
-export interface WarningEntry {
+export interface WarningCatalogEntry {
   explanation: string;
   fix: string;
 }
 
-export const ERROR_CATALOG: Record<ErrorCodes, ErrorEntry> = {
+export const ERROR_CATALOG: Record<ErrorCodes, ErrorCatalogEntry> = {
   /* [ScrapeError.TIMEOUT]: … */
 };
-export const WARNING_CATALOG: Record<WarningCodes, WarningEntry> = {
+export const WARNING_CATALOG: Record<WarningCodes, WarningCatalogEntry> = {
   /* [MapWarning.NO_RESULTS]: … */
 };
 
@@ -652,12 +714,36 @@ export const errorCodeToHttpStatus = (c: ErrorCodes): number =>
   ERROR_CATALOG[c]?.httpStatus ?? 500;
 export const explainError = (c: ErrorCodes) => ERROR_CATALOG[c];
 export const explainWarning = (c: WarningCodes) => WARNING_CATALOG[c];
+
+// Wire-boundary validators — replace the unsound `code as ErrorCodes` cast in error-serde (§2).
+// The Record<…> types already make these key sets exhaustive, so deriving from the catalog needs
+// NO separate maintenance and cannot drift from the enums.
+const ERROR_CODE_SET: ReadonlySet<string> = new Set(Object.keys(ERROR_CATALOG));
+const WARNING_CODE_SET: ReadonlySet<string> = new Set(
+  Object.keys(WARNING_CATALOG),
+);
+export const parseErrorCode = (s: string): ErrorCodes | undefined =>
+  ERROR_CODE_SET.has(s) ? (s as ErrorCodes) : undefined;
+export const parseWarningCode = (s: string): WarningCodes | undefined =>
+  WARNING_CODE_SET.has(s) ? (s as WarningCodes) : undefined;
 ```
 
 - **API:** the status-normalization sites (§6) use `errorCodeToHttpStatus` for the final status.
+- **Deserialize boundary (§2):** `error-serde.ts` indexes with `parseErrorCode(code)` instead of
+  `code as ErrorCodes`; a bad/old wire value degrades to `CommonError.UNKNOWN` rather than
+  masquerading as a valid code. (This makes `error-serde.ts` import the catalog, not just
+  `error-codes.ts` — fine, both are browser-safe leaves.)
 - **Client:** `<ErrorView>` / `<WarningList>` import the catalogs from this same module — no copy.
-- **Guardrail:** `Record<ErrorCodes, …>` / `Record<WarningCodes, …>` make a missing entry a
-  **compile error** — neither catalog can fall behind its enums.
+- **Guardrail (completeness):** `Record<ErrorCodes, …>` / `Record<WarningCodes, …>` make a missing
+  entry a **compile error** — neither catalog can fall behind its enums.
+- **Guardrail (browser-safety, CI):** `error-codes.ts` / `error-details.ts` / `error-catalog.ts`
+  MUST stay node/server-free or the playground bundle breaks silently. Enforce with a test that runs
+  **esbuild `platform:"browser", bundle:true`** on each leaf with an `onResolve` plugin that throws
+  on `node:*` and a server-dir denylist — i.e. it tests the literal property (a clean browser
+  bundle), the same way the repo already bundles the playground client with esbuild
+  (SPEC-PLAYGROUND-UI §2). A failing transitive import fails CI. (Optional fast pre-commit layer:
+  `eslint-plugin-import` `no-restricted-paths` zone forbidding these files from importing
+  `services/`/`controllers/`/`scraper/`/`db`/`winston`.)
 
 Status mapping `ERROR_CATALOG` encodes (fixes DNS-as-200, client-caused-500 — RESPONSE-MODEL #2):
 
@@ -700,7 +786,7 @@ responses**. Ignore older v1/v0 behavior except for mechanical compile fallout f
   thread it through the **~30 subclasses** (each has its own `serialize`/static `deserialize` and a
   constructor that doesn't currently accept `details`) — or centralize reconstruction so subclasses
   don't each need editing.
-- **Warnings:** add `warnings?: WarningEntry[]` to each v2 response type; convert the 16 producers
+- **Warnings:** add `warnings?: Warning[]` to each v2 response type; convert the 16 producers
   to also push a typed entry (keeping their `warning` string assignment); build `warnings[]` inline
   per endpoint.
 - **Async job failures:** crawl/batch, scrape status, extract status, and agent status use
@@ -749,7 +835,7 @@ strings. Leave internal control-flow signals plain (`WaterfallNextEngineSignal`,
 
 Warnings are **not** `TransportableError` and need no equivalent. `TransportableError` exists only
 because a thrown exception loses its `code`/class across the worker→API boundary. Warnings are never
-thrown — they're plain `WarningEntry` data that rides the normal JSON result (the existing
+thrown — they're plain `Warning` data that rides the normal JSON result (the existing
 `document.warning` string already proves the result crosses the boundary), or are built directly in
 the controller. So they transport for free.
 
@@ -772,7 +858,7 @@ the controller. So they transport for free.
 7. Assign codes to every ad-hoc request-level and async failure return; route request-level failure
    HTTP status through `errorCodeToHttpStatus` (controllers + ladders + middleware).
 8. `errorId` on the opaque path only (Sentry id, else logged uuid); improve the opaque message.
-9. Add `warnings?: WarningEntry[]` per v2 response; convert the 16 producers to push typed entries
+9. Add `warnings?: Warning[]` per v2 response; convert the 16 producers to push typed entries
    inline (keep `warning` string). Use `status:"warning"` whenever `warnings[]` or legacy `warning`
    is present, including async completed/cancelled responses.
 
@@ -814,7 +900,7 @@ changes are **HTTP status normalization** and **`error` message wording** (real 
 Do not block Phase 1 API implementation on SDK work. After the v2 API envelope is green, update
 public client surfaces in a follow-up phase:
 
-- `apps/api/openapi.json`: add `ResponseStatus`, `Diagnostics`, `WarningEntry`, required `code`,
+- `apps/api/openapi.json`: add `ResponseStatus`, `Diagnostics`, `Warning`, required `code`,
   `status`, and `diagnostics`; model async job failure separately from request-level `ErrorResponse`.
 - `apps/js-sdk/firecrawl/src/v2/*`: type `code`, `status`, `errorId`, `details`, `diagnostics`,
   structured `warnings[]`, and async `jobState`; keep runtime pass-through behavior where possible.
