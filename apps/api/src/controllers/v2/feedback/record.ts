@@ -4,7 +4,6 @@ import { logger as _logger } from "../../../lib/logger";
 import {
   CommonError,
   FeedbackError,
-  RequestError,
   type ErrorCodes,
 } from "../../../lib/error-codes";
 import { errorResponse } from "../response-enveloper";
@@ -52,12 +51,12 @@ function dailyCapFor(options: FeedbackRecordOptions): number {
 }
 
 function feedbackFailure(
-  status: number,
   code: ErrorCodes,
   error: string,
   req: RequestWithAuth<any, any, any>,
 ): FeedbackRecordResult {
-  const envelope = errorResponse(code, error, req, { httpStatus: status });
+  // HTTP status always derives from the code's catalog entry — no override (see SPEC-RESPONDER-IMPL).
+  const envelope = errorResponse(code, error, req);
   return {
     status: envelope.httpStatus,
     body: envelope.body as FeedbackRecordResult["body"],
@@ -86,7 +85,6 @@ function validateAccess(
 ): FeedbackRecordResult | null {
   if (config.USE_DB_AUTHENTICATION !== true) {
     return feedbackFailure(
-      503,
       FeedbackError.DB_UNAVAILABLE,
       options.dbDisabledMessage ??
         "Feedback requires database authentication and is unavailable on this deployment.",
@@ -96,8 +94,7 @@ function validateAccess(
 
   if (isPreviewTeam(req.auth.team_id)) {
     return feedbackFailure(
-      403,
-      RequestError.BAD_REQUEST,
+      FeedbackError.PREVIEW_UNAVAILABLE,
       "Feedback is not available for preview teams.",
       req,
     );
@@ -106,7 +103,6 @@ function validateAccess(
   if (req.acuc?.flags?.searchFeedbackOptOut === true) {
     logger.info("Rejected feedback: team opted out");
     return feedbackFailure(
-      403,
       FeedbackError.TEAM_OPTED_OUT,
       "Feedback is disabled for this team. Contact support@firecrawl.com to re-enable.",
       req,
@@ -135,7 +131,6 @@ async function lookupJobWithRetry(
 
     if (!job) {
       return feedbackFailure(
-        404,
         FeedbackError.TARGET_NOT_FOUND,
         `${options.endpoint} job not found for this team.`,
         req,
@@ -145,12 +140,7 @@ async function lookupJobWithRetry(
     return job;
   } catch (error) {
     logger.error("Failed to look up job for feedback", { error });
-    return feedbackFailure(
-      500,
-      CommonError.UNKNOWN,
-      "Failed to look up job.",
-      req,
-    );
+    return feedbackFailure(CommonError.UNKNOWN, "Failed to look up job.", req);
   }
 }
 
@@ -162,8 +152,7 @@ function validateJob(
 ): FeedbackRecordResult | null {
   if (options.requireSuccessfulJob && job.is_successful === false) {
     return feedbackFailure(
-      409,
-      CommonError.UNKNOWN,
+      FeedbackError.JOB_NOT_SUCCESSFUL,
       `Cannot submit feedback for a ${options.endpoint} job that did not succeed.`,
       req,
     );
@@ -181,7 +170,6 @@ function validateJob(
   if (Date.now() - createdAtMs <= maxAgeSec * 1000) return null;
 
   return feedbackFailure(
-    409,
     FeedbackError.WINDOW_EXPIRED,
     options.windowExpiredMessage ??
       `Feedback must be submitted within ${maxAgeSec} seconds of the job.`,
@@ -304,7 +292,6 @@ export async function recordEndpointFeedback(
 
       logger.error("Failed to insert endpoint feedback", { error: insertErr });
       return feedbackFailure(
-        500,
         CommonError.UNKNOWN,
         "Failed to record feedback.",
         req,
@@ -391,7 +378,6 @@ export async function recordEndpointFeedback(
       error,
     });
     return feedbackFailure(
-      500,
       CommonError.UNKNOWN,
       error instanceof Error ? error.message : "Unknown error",
       req,

@@ -43,6 +43,7 @@ import {
   RequestError,
   ScrapeError,
 } from "./error-codes";
+import { parseErrorCode } from "./error-catalog";
 
 // TODO: figure out correct typing for this
 const errorMap: Partial<Record<ErrorCodes, any>> = {
@@ -92,9 +93,13 @@ export function deserializeTransportableError(
   data: string,
 ): InstanceType<(typeof errorMap)[keyof typeof errorMap]> | null {
   const [code, ...serialized] = data.split("|");
-  const x = errorMap[code as ErrorCodes];
+  const parsed = parseErrorCode(code);
+  if (!parsed) {
+    return null;
+  }
+  const x = errorMap[parsed];
   if (!x) {
     return null;
   }
-  return x.deserialize(code, JSON.parse(serialized.join("|")));
+  return x.deserialize(parsed, JSON.parse(serialized.join("|")));
 }

@@ -438,6 +438,16 @@ export const ERROR_CATALOG = {
     "Feedback storage is unavailable.",
     "Retry shortly.",
   ),
+  [FeedbackError.PREVIEW_UNAVAILABLE]: entry(
+    403,
+    "Feedback is not available for preview teams.",
+    "Use a non-preview team to submit feedback.",
+  ),
+  [FeedbackError.JOB_NOT_SUCCESSFUL]: entry(
+    409,
+    "Feedback cannot be submitted for a job that did not succeed.",
+    "Only submit feedback for jobs that completed successfully.",
+  ),
   [LocalError.FEATURE_UNSUPPORTED]: entry(
     422,
     "The feature is unsupported in this local environment.",

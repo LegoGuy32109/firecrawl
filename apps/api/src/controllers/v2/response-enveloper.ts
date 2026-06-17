@@ -1,4 +1,4 @@
-import type { Request } from "express";
+import type { Request, Response } from "express";
 import { errorCodeToHttpStatus } from "../../lib/error-catalog";
 import type { ErrorCodes } from "../../lib/error-codes";
 import { CommonError } from "../../lib/error-codes";
@@ -8,9 +8,10 @@ import type {
   Diagnostics,
   ErrorResponse,
   DiagnosticStep,
+  RequestPrivacy,
   ResponseCore,
   StrictErrorResponse,
-  WarningEntry,
+  Warning,
 } from "./types";
 
 type PrivacyMode = Diagnostics["privacy"]["mode"];
@@ -216,7 +217,7 @@ export function addStep(
   };
 }
 
-function statusForWarnings(warning?: string, warnings?: WarningEntry[]) {
+function statusForWarnings(warning?: string, warnings?: Warning[]) {
   return warning || (warnings?.length ?? 0) > 0 ? "warning" : "ok";
 }
 
@@ -228,7 +229,7 @@ export function okResponse<TBody extends Record<string, unknown>>(
 > {
   const warning = typeof body.warning === "string" ? body.warning : undefined;
   const warnings = Array.isArray(body.warnings)
-    ? (body.warnings as WarningEntry[])
+    ? (body.warnings as Warning[])
     : undefined;
 
   return {
@@ -244,7 +245,7 @@ export function okResponse<TBody extends Record<string, unknown>>(
 
 export function warningResponse<TBody extends Record<string, unknown>>(
   body: TBody,
-  warnings: WarningEntry[],
+  warnings: Warning[],
   ctx: Request | EnvelopeContext,
 ): EnvelopeResult<TBody & ResponseCore & { success: true; status: "warning" }> {
   return {
@@ -324,6 +325,144 @@ export function asyncJobFailureResponse<TData = unknown>(
       ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
       ...(opts.completedAt ? { completedAt: opts.completedAt } : {}),
       ...(opts.duration !== undefined ? { duration: opts.duration } : {}),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// makeResponder — the single per-request, send-style responder (SPEC-RESPONDER-IMPL RB).
+// Owns `res` and the mutable `diagnostics`; reads req.privacy and applies `reduced` to everything
+// it sends. Status always derives from the catalog — no httpStatus override.
+// ---------------------------------------------------------------------------
+
+const SAFE_DEFAULT_PRIVACY: RequestPrivacy = {
+  zeroDataRetention: false,
+  mode: "disabled",
+  reduced: false,
+};
+
+type FailOpts = {
+  details?: ErrorDetails;
+  errorId?: string;
+  sponsor_status?: string;
+  login_url?: string;
+};
+
+type AsyncFailOpts<TData> = {
+  details?: ErrorDetails;
+  errorId?: string;
+  data?: TData;
+  failureCount?: number;
+  failuresByCode?: Partial<Record<ErrorCodes, number>>;
+  creditsUsed?: number;
+  expiresAt?: string;
+  createdAt?: string;
+  completedAt?: string;
+  duration?: number;
+};
+
+export type Responder = {
+  step(
+    step: DiagnosticStepInput,
+    target?: "steps" | "sources" | "actions",
+    key?: string,
+  ): void;
+  ok<TBody extends Record<string, unknown>>(body: TBody): Response;
+  warn<TBody extends Record<string, unknown>>(
+    body: TBody,
+    warnings: Warning[],
+  ): Response;
+  fail(code: ErrorCodes, error: string | Error, opts?: FailOpts): Response;
+  asyncFail<TData = unknown>(
+    code: ErrorCodes,
+    error: string | Error,
+    opts?: AsyncFailOpts<TData>,
+  ): Response;
+};
+
+export function makeResponder(req: Request, res: Response): Responder {
+  const privacy = req.privacy ?? SAFE_DEFAULT_PRIVACY;
+  const traceId = privacy.reduced ? undefined : requestTraceId(req);
+  const diagnostics: Diagnostics = {
+    privacy,
+    ...(traceId ? { traceId } : {}),
+  };
+
+  const toMessage = (error: string | Error) =>
+    typeof error === "string" ? error : error.message;
+
+  const failBody = (
+    code: ErrorCodes,
+    error: string | Error,
+    opts: FailOpts = {},
+  ): StrictErrorResponse => ({
+    success: false,
+    status: "failed",
+    code,
+    error: toMessage(error),
+    diagnostics,
+    ...(opts.details !== undefined ? { details: opts.details } : {}),
+    ...(opts.errorId ? { errorId: opts.errorId } : {}),
+    ...(opts.sponsor_status ? { sponsor_status: opts.sponsor_status } : {}),
+    ...(opts.login_url ? { login_url: opts.login_url } : {}),
+  });
+
+  return {
+    step(step, target = "steps", key) {
+      const sanitized = buildDiagnosticStep(step, privacy);
+      if (target === "sources") {
+        diagnostics.sources = {
+          ...(diagnostics.sources ?? {}),
+          [key ?? sanitized.name]: sanitized,
+        };
+        return;
+      }
+      diagnostics[target] = [...(diagnostics[target] ?? []), sanitized];
+    },
+    ok(body) {
+      const warning =
+        typeof body.warning === "string" ? body.warning : undefined;
+      const warnings = Array.isArray(body.warnings)
+        ? (body.warnings as Warning[])
+        : undefined;
+      return res.status(200).json({
+        ...body,
+        success: true,
+        status: statusForWarnings(warning, warnings),
+        diagnostics,
+      });
+    },
+    warn(body, warnings) {
+      return res.status(200).json({
+        ...body,
+        success: true,
+        status: "warning",
+        warnings,
+        diagnostics,
+      });
+    },
+    fail(code, error, opts) {
+      return res
+        .status(errorCodeToHttpStatus(code))
+        .json(failBody(code, error, opts));
+    },
+    asyncFail(code, error, opts = {}) {
+      return res.status(200).json({
+        ...failBody(code, error, opts),
+        jobState: "failed",
+        ...(opts.data !== undefined ? { data: opts.data } : {}),
+        ...(opts.failureCount !== undefined
+          ? { failureCount: opts.failureCount }
+          : {}),
+        ...(opts.failuresByCode ? { failuresByCode: opts.failuresByCode } : {}),
+        ...(opts.creditsUsed !== undefined
+          ? { creditsUsed: opts.creditsUsed }
+          : {}),
+        ...(opts.expiresAt ? { expiresAt: opts.expiresAt } : {}),
+        ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
+        ...(opts.completedAt ? { completedAt: opts.completedAt } : {}),
+        ...(opts.duration !== undefined ? { duration: opts.duration } : {}),
+      });
     },
   };
 }

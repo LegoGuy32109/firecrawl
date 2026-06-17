@@ -1201,7 +1201,7 @@ export type Document = {
   highlights?: string;
   branding?: BrandingProfile;
   warning?: string;
-  warnings?: WarningEntry[];
+  warnings?: Warning[];
   attributes?: {
     selector: string;
     attribute: string;
@@ -1320,6 +1320,30 @@ type JobState = "processing" | "completed" | "cancelled" | "failed";
 
 type DiagnosticStatus = "ok" | "warning" | "failed" | "skipped" | "timed_out";
 
+export type PrivacyMode =
+  | "disabled"
+  | "allowed"
+  | "forced"
+  | "request"
+  | "not_applicable";
+
+// Resolved once per request by route-group middleware (see resolve-privacy.ts); the responder
+// reads it and applies `reduced` to every response. Only `reduced` changes behavior; `mode` and
+// `zeroDataRetention` are reported metadata.
+export type RequestPrivacy = {
+  zeroDataRetention: boolean;
+  mode: PrivacyMode;
+  reduced: boolean;
+};
+
+declare global {
+  namespace Express {
+    interface Request {
+      privacy?: RequestPrivacy;
+    }
+  }
+}
+
 export type DiagnosticStep = {
   name: string;
   status: DiagnosticStatus;
@@ -1334,7 +1358,7 @@ export type DiagnosticStep = {
 export type Diagnostics = {
   privacy: {
     zeroDataRetention: boolean;
-    mode: "disabled" | "allowed" | "forced" | "request" | "not_applicable";
+    mode: PrivacyMode;
     reduced: boolean;
   };
   traceId?: string;
@@ -1344,7 +1368,7 @@ export type Diagnostics = {
   actions?: DiagnosticStep[];
 };
 
-export type WarningEntry = {
+export type Warning = {
   code: WarningCodes;
   message: string;
   details?: WarningDetails;
@@ -1355,7 +1379,7 @@ export type ResponseCore = {
   status: ResponseStatus;
   diagnostics: Diagnostics;
   warning?: string;
-  warnings?: WarningEntry[];
+  warnings?: Warning[];
 };
 
 type ErrorCore = ResponseCore & {

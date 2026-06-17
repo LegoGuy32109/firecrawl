@@ -178,6 +178,8 @@ interface UrlModel {
   headers?: { [key: string]: string };
   check_selector?: string;
   skip_tls_verification?: boolean;
+  screenshot?: boolean;
+  full_page_screenshot?: boolean;
 }
 
 let browser: Browser;
@@ -354,7 +356,7 @@ app.get('/health', async (req: Request, res: Response) => {
 });
 
 app.post('/scrape', async (req: Request, res: Response) => {
-  const { url, wait_after_load = 0, timeout = 15000, headers, check_selector, skip_tls_verification = false }: UrlModel = req.body;
+  const { url, wait_after_load = 0, timeout = 15000, headers, check_selector, skip_tls_verification = false, screenshot = false, full_page_screenshot = false }: UrlModel = req.body;
 
   console.log(`================= Scrape Request =================`);
   console.log(`URL: ${url}`);
@@ -363,6 +365,7 @@ app.post('/scrape', async (req: Request, res: Response) => {
   console.log(`Headers: ${headers ? JSON.stringify(headers) : 'None'}`);
   console.log(`Check Selector: ${check_selector ? check_selector : 'None'}`);
   console.log(`Skip TLS Verification: ${skip_tls_verification}`);
+  console.log(`Screenshot: ${screenshot}, Full Page: ${full_page_screenshot}`);
   console.log(`==================================================`);
 
   if (!url) {
@@ -435,6 +438,16 @@ app.post('/scrape', async (req: Request, res: Response) => {
     );
     const pageError = result.status !== 200 ? getError(result.status) : undefined;
 
+    let screenshotData: string | undefined;
+    if (screenshot || full_page_screenshot) {
+      const screenshotBuffer = await page.screenshot({
+        type: 'jpeg',
+        quality: 80,
+        fullPage: full_page_screenshot,
+      });
+      screenshotData = screenshotBuffer.toString('base64');
+    }
+
     if (!pageError) {
       console.log(`✅ Scrape successful!`);
     } else {
@@ -445,7 +458,8 @@ app.post('/scrape', async (req: Request, res: Response) => {
       content: result.content,
       pageStatusCode: result.status,
       contentType: result.contentType,
-      ...(pageError && { pageError })
+      ...(pageError && { pageError }),
+      ...(screenshotData !== undefined && { screenshot: screenshotData }),
     });
 
   } catch (error) {

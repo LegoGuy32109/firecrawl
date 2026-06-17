@@ -23,16 +23,16 @@ import { CostTracking } from "../../../lib/cost-tracking";
 import { isAgentExtractModelValid } from "../../../controllers/v1/types";
 import { hasFormatOfType } from "../../../lib/format-utils";
 import { ExtractWarning } from "../../../lib/error-codes";
-import type { WarningEntry } from "../../../controllers/v2/types";
+import type { Warning } from "../../../controllers/v2/types";
 
 type WarnableDocument = Document & {
   warning?: string;
-  warnings?: WarningEntry[];
+  warnings?: Warning[];
 };
 
 function pushWarning(
   document: WarnableDocument,
-  warning: WarningEntry,
+  warning: Warning,
   message: string,
 ) {
   document.warning = message + (document.warning ? " " + document.warning : "");
@@ -170,7 +170,7 @@ interface TrimResult {
   text: string;
   numTokens: number;
   warning?: string;
-  warnings?: WarningEntry[];
+  warnings?: Warning[];
 }
 
 // Generous upper bound on the number of characters a single token can represent.

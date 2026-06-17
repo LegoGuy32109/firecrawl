@@ -7,16 +7,16 @@ import { generateCompletions } from "./llmExtract";
 import { hasFormatOfType } from "../../../lib/format-utils";
 import { getJobFromGCS } from "../../../lib/gcs-jobs";
 import { ChangeTrackingWarning } from "../../../lib/error-codes";
-import type { WarningEntry } from "../../../controllers/v2/types";
+import type { Warning } from "../../../controllers/v2/types";
 
 type WarnableDocument = Document & {
   warning?: string;
-  warnings?: WarningEntry[];
+  warnings?: Warning[];
 };
 
 function pushWarning(
   document: WarnableDocument,
-  warning: WarningEntry,
+  warning: Warning,
   message: string,
 ) {
   document.warning = message + (document.warning ? " " + document.warning : "");

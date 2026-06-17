@@ -41,7 +41,7 @@ import {
   RequestError,
 } from "../../lib/error-codes";
 import { deserializeTransportableError } from "../../lib/error-serde";
-import type { WarningEntry } from "./types";
+import type { Warning } from "./types";
 configDotenv();
 
 function buildAsyncStatusBody(
@@ -376,7 +376,7 @@ export async function crawlStatusController(
 
   // Check for robots.txt blocked URLs and add warning if found
   let warning: string | undefined;
-  const warnings: WarningEntry[] = [];
+  const warnings: Warning[] = [];
   try {
     const robotsBlocked = await redisEvictConnection.smembers(
       "crawl:" + req.params.jobId + ":robots_blocked",
