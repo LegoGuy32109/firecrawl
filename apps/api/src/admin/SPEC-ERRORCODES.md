@@ -89,6 +89,9 @@ export enum LifecycleError {
   JOB_CANCELLED = "JOB_CANCELLED",
   ZDR_NOT_SUPPORTED = "ZDR_NOT_SUPPORTED",
 }
+export enum CrawlError {
+  DENIAL = "CRAWL_DENIAL",
+}
 export enum ScrapeError {
   // existing SCRAPE_* values preserved
   TIMEOUT = "SCRAPE_TIMEOUT",
@@ -118,6 +121,33 @@ export enum DependencyError {
   UNAVAILABLE = "DEPENDENCY_UNAVAILABLE",
   TIMEOUT = "DEPENDENCY_TIMEOUT",
 }
+export enum BrowserError {
+  SESSION_NOT_FOUND = "BROWSER_SESSION_NOT_FOUND",
+  SESSION_EXPIRED = "BROWSER_SESSION_EXPIRED",
+  SESSION_FORBIDDEN = "BROWSER_SESSION_FORBIDDEN",
+  SESSION_LIMIT_EXCEEDED = "BROWSER_SESSION_LIMIT_EXCEEDED",
+  EXECUTION_FAILED = "BROWSER_EXECUTION_FAILED",
+  SERVICE_UNAVAILABLE = "BROWSER_SERVICE_UNAVAILABLE",
+}
+export enum MonitorError {
+  MONITOR_NOT_FOUND = "MONITOR_NOT_FOUND",
+  CHECK_NOT_FOUND = "MONITOR_CHECK_NOT_FOUND",
+  EMAIL_TOKEN_INVALID = "MONITOR_EMAIL_TOKEN_INVALID",
+  EMAIL_TOKEN_EXPIRED = "MONITOR_EMAIL_TOKEN_EXPIRED",
+  CONFLICT = "MONITOR_CONFLICT",
+}
+export enum ProxyError {
+  UPSTREAM_UNAVAILABLE = "PROXY_UPSTREAM_UNAVAILABLE",
+  UPSTREAM_TIMEOUT = "PROXY_UPSTREAM_TIMEOUT",
+  UPSTREAM_BAD_RESPONSE = "PROXY_UPSTREAM_BAD_RESPONSE",
+  NOT_CONFIGURED = "PROXY_NOT_CONFIGURED",
+}
+export enum FeedbackError {
+  TARGET_NOT_FOUND = "FEEDBACK_TARGET_NOT_FOUND",
+  WINDOW_EXPIRED = "FEEDBACK_WINDOW_EXPIRED",
+  TEAM_OPTED_OUT = "FEEDBACK_TEAM_OPTED_OUT",
+  DB_UNAVAILABLE = "FEEDBACK_DB_UNAVAILABLE",
+}
 export enum LocalError {
   FEATURE_UNSUPPORTED = "FEATURE_UNSUPPORTED_LOCALLY",
 }
@@ -136,17 +166,26 @@ export type ErrorCodes =
   | RateError
   | GatingError
   | LifecycleError
+  | CrawlError
   | ScrapeError
   | ExtractError
   | AgentError
   | MapError
   | DependencyError
+  | BrowserError
+  | MonitorError
+  | ProxyError
+  | FeedbackError
   | LocalError
   | RequestError
   | CommonError;
 ```
 
-Migrate the 35 existing codes by dropping each into the matching enum **keeping its value**.
+Migrate the 35 existing codes by dropping each into the matching enum **keeping its value**. Add
+new categories rather than overloading broad lifecycle/dependency codes when the user-facing
+surface is distinct. Browser sessions, monitors/checks, local proxy failures, and feedback
+submission each get their own category because specificity is the point of the model: users and
+the playground should be able to tell where in the system the failure occurred.
 
 **Consequences of using an enum union (intended):**
 
@@ -218,27 +257,111 @@ The 16 existing producers (§1) each push **one typed entry** (see §4) instead 
 ## 4. Envelope changes
 
 ```ts
-export type ErrorResponse = {
-  success: false;
-  code: ErrorCodes; // REQUIRED (was optional); FATAL space only
-  error: string; // human message — carries real context (see "errorId" below)
-  errorId?: string; // OPAQUE-PATH ONLY (see semantics)
-  details?: ErrorDetails; // NEW typed (was `any`)
-  diagnostics?: Diagnostics; // NEW, default-on (public fork)
-  sponsor_status?: string;
-  login_url?: string; // kept
-};
-
 export type WarningEntry = {
   code: WarningCodes;
   message: string;
   details?: WarningDetails;
 };
 
-// success / partial responses (per-endpoint, flexible — §4 "warnings"):
-//   warning?: string;          // KEPT — existing assigned messages preserved verbatim; NOT derived
-//   warnings?: WarningEntry[]; // NEW — structured, built inline by each endpoint
+export type ResponseStatus =
+  | "ok" // successful terminal state, no structured warnings
+  | "warning" // successful terminal state with warnings/degradation
+  | "processing" // async job still running
+  | "failed"; // request failed or async job failed
+
+export type JobState = "processing" | "completed" | "cancelled" | "failed";
+
+export type Diagnostics = {
+  privacy: {
+    // Effective privacy/ZDR behavior for this specific request/job/endpoint.
+    zeroDataRetention: boolean;
+    // "not_applicable" means no customer scrape/search content is processed by this endpoint,
+    // but the response still followed the safe non-content path for a forced-ZDR user.
+    mode: "disabled" | "allowed" | "forced" | "request" | "not_applicable";
+    // true when diagnostics were intentionally reduced/redacted due to ZDR/privacy rules.
+    reduced: boolean;
+  };
+  traceId?: string;
+  durationMs?: number;
+  steps?: DiagnosticStep[];
+  sources?: Record<string, DiagnosticStep>;
+  actions?: DiagnosticStep[];
+};
+
+export type DiagnosticStatus =
+  | "ok"
+  | "warning"
+  | "failed"
+  | "skipped"
+  | "timed_out";
+
+export type DiagnosticStep = {
+  name: string;
+  status: DiagnosticStatus;
+  code?: ErrorCodes | WarningCodes;
+  message?: string;
+  durationMs?: number;
+  startedAt?: string;
+  endedAt?: string;
+  details?: Record<string, unknown>;
+};
+
+export type ResponseCore = {
+  success: boolean;
+  status: ResponseStatus;
+  diagnostics: Diagnostics; // REQUIRED on every client-facing v2 JSON response
+  warning?: string; // KEPT — existing assigned messages preserved verbatim; NOT derived
+  warnings?: WarningEntry[]; // NEW — structured, built inline by each endpoint
+};
+
+export type ErrorCore = ResponseCore & {
+  success: false;
+  status: "failed";
+  code: ErrorCodes; // REQUIRED; fatal/dominant error space only
+  error: string; // human message — carries real context (see "errorId" below)
+  errorId?: string; // OPAQUE-PATH ONLY (see semantics)
+  details?: ErrorDetails; // typed by ErrorDetailsMap[code] when present
+};
+
+export type ErrorResponse = ErrorCore & {
+  sponsor_status?: string;
+  login_url?: string; // kept for request-level auth/billing remediation
+};
+
+export type AsyncJobFailureResponse<TData = unknown> = ErrorCore & {
+  jobState: "failed";
+  failureCount?: number;
+  failuresByCode?: Partial<Record<ErrorCodes, number>>;
+  data?: TData;
+  creditsUsed?: number;
+  expiresAt?: string;
+  createdAt?: string;
+  completedAt?: string;
+  duration?: number;
+};
 ```
+
+`status` is the universal envelope state. A response with warnings is `status: "warning"` even for
+async jobs that otherwise completed/cancelled, so clients know to inspect `warning`/`warnings[]`.
+Async endpoints that need lifecycle state add `jobState`; they do not encode lifecycle in
+`status`. Examples:
+
+- sync success: `{ success:true, status:"ok", diagnostics, ... }`
+- sync success with warnings: `{ success:true, status:"warning", warnings, diagnostics, ... }`
+- async running: `{ success:true, status:"processing", jobState:"processing", diagnostics, ... }`
+- async completed without warnings: `{ success:true, status:"ok", jobState:"completed", diagnostics, ... }`
+- async cancelled without warnings: `{ success:true, status:"ok", jobState:"cancelled", diagnostics, ... }`
+- async completed/cancelled with warnings: `{ success:true, status:"warning", jobState:"completed"|"cancelled", warnings, diagnostics, ... }`
+- request or async failure: `{ success:false, status:"failed", code, error, diagnostics, ... }`
+
+`ErrorResponse` is for request-level failures. `AsyncJobFailureResponse` is for a successful status
+lookup that reports the referenced job failed. Both share `ErrorCore`, so the playground renders
+`code`/`details`/`diagnostics` consistently, but job metadata (`jobState`, `failureCount`,
+`failuresByCode`, `data`, timings) stays out of request-failure responses.
+
+`AsyncJobFailureResponse.code` is required and represents the dominant/root cause. Use
+`failuresByCode` for mixed crawl/batch failures. Use `CommonError.UNKNOWN` only when the dominant
+cause genuinely cannot be classified.
 
 **`errorId` semantics (scoped to the opaque path).** Do **not** generate a uuid at every error
 site. `errorId` is for errors the server **cannot explain inline** — `CommonError.UNKNOWN` /
@@ -254,6 +377,8 @@ uncaught 500s / Sentry-captured exceptions — where the diagnosis lives only in
   Logging stays explicit (`logger.error` / capture) at the catch site. Any "capture → get id →
   format" bundling for the opaque path is a small _separate_ helper used only there, and its message
   should carry as much safe context as possible (not just "check your logs").
+- `errorId` lives on `ErrorCore`, so async job failures can carry it if an opaque worker/status
+  branch genuinely has a Sentry/log-correlated id. Normal typed/domain async failures do not set it.
 
 **Warnings (flexible, inline, per-endpoint).** Warnings are an **envelope-level** concept, not a
 scrape-`Document` mirror. Every v2 success/partial response type gets `warnings?: WarningEntry[]`,
@@ -267,11 +392,54 @@ and **each endpoint builds it inline** — there is **no shared collector class*
 `warning?: string` is kept and each existing producer keeps assigning its message verbatim
 (backward compat); it is **not** derived from `warnings[]`. The two are parallel channels.
 
+Warnings are stable summary events. Diagnostics are the execution trace where warning events can
+also appear. A warning entry should generally correspond to a `diagnostics.steps[]` entry with
+`status:"warning"` and the same warning `code` when the producer can identify the step.
+
 `details` is typed per code via two maps that **are** the contract (no separate descriptor). A code
 **absent from its map carries no `details`**. See §4a.
 
-> `Diagnostics` remains deferred to [RESPONSE-MODEL.md](./RESPONSE-MODEL.md). `ErrorDetails` /
-> `WarningDetails` are defined in §4a.
+**Diagnostics contract.** `diagnostics` is public, redacted execution trace metadata, not a dumping
+ground. It answers "what major steps happened?" while `details` answers "what structured data
+belongs to this code?"
+
+Diagnostics may include:
+
+- step/source/action names, statuses, public error/warning codes, human messages
+- timings, counts, retry/fallback/skipped reasons
+- engine/source/action labels
+- sanitized hostnames or URLs only when already safe for that response
+
+Diagnostics must not include:
+
+- API keys, auth headers, cookies, secrets, tokens, signed URLs
+- raw HTML/markdown/content, screenshots/base64/file contents, LLM prompts/completions
+- full upstream response bodies, unallowlisted headers, raw customer request bodies
+- selectors/actions/options when ZDR/privacy rules would prohibit retaining or exposing them
+
+**ZDR/privacy semantics.** `diagnostics.privacy` is required so ZDR users can see whether the
+specific request/job/endpoint followed the privacy-safe path.
+
+- Scrape-like endpoints resolve effective ZDR from `getScrapeZDR(req.acuc?.flags) === "forced"`,
+  request `zeroDataRetention`, and lockdown. Search resolves it through `getSearchZDR` /
+  `getSearchForcedKind`.
+- The resolved value flows through request logging, job data, worker Sentry scope, scraper
+  `internalOptions`, downstream services, and async status lookup.
+- Existing behavior redacts request target hints, scrape URLs/options/cost metadata, tracking rows,
+  Sentry events, downstream request IDs, and some features under ZDR. Diagnostics must mirror that
+  behavior.
+- Under ZDR, diagnostics are still present but reduced: step names, statuses, public codes, counts,
+  durations, dependency categories, and feature names are allowed; URL path/query, content, request
+  bodies/options, user selectors/actions, prompts/completions, response bodies, and cross-system
+  trace ids are not.
+- `diagnostics.privacy.mode = "not_applicable"` is used for endpoints that do not process or retain
+  customer scrape/search content but still need to reassure forced-ZDR users that the path is
+  privacy-safe. It must not be used to bypass redaction on endpoints that do process content.
+
+**Response helper.** All v2 controllers should use a v2-local helper module
+`controllers/v2/response-enveloper.ts` to construct responses. This avoids hand-rolled `status` and
+`diagnostics.privacy` drift across ~190 response sites and keeps the contract scoped to v2 rather
+than becoming an accidental global/v3 API.
 
 ---
 
@@ -294,6 +462,10 @@ import {
   AgentError,
   MapError,
   DependencyError,
+  BrowserError,
+  MonitorError,
+  ProxyError,
+  FeedbackError,
   LocalError,
   ScrapeWarning,
   ExtractWarning,
@@ -360,6 +532,27 @@ export interface ErrorDetailsMap {
     upstreamStatus?: number;
   };
   [DependencyError.TIMEOUT]: { dependency: string; timeoutMs?: number };
+  // browser / monitor / proxy / feedback
+  [BrowserError.SESSION_EXPIRED]: { expiredAt: string };
+  [BrowserError.SESSION_LIMIT_EXCEEDED]: { active: number; limit: number };
+  [BrowserError.EXECUTION_FAILED]: {
+    exitCode?: number;
+    killed?: boolean;
+    timedOut?: boolean;
+  };
+  [BrowserError.SERVICE_UNAVAILABLE]: { dependency: "browser-service" };
+  [MonitorError.EMAIL_TOKEN_EXPIRED]: { expiredAt: string };
+  [MonitorError.CONFLICT]: { reason: string };
+  [ProxyError.UPSTREAM_UNAVAILABLE]: { upstream: "support" | "research" };
+  [ProxyError.UPSTREAM_TIMEOUT]: {
+    upstream: "support" | "research";
+    timeoutMs: number;
+  };
+  [ProxyError.UPSTREAM_BAD_RESPONSE]: {
+    upstream: "support" | "research";
+    upstreamStatus?: number;
+  };
+  [FeedbackError.WINDOW_EXPIRED]: { expiredAt?: string };
   [LocalError.FEATURE_UNSUPPORTED]: {
     feature: string;
     requiresEngine: "fire-engine";
@@ -404,8 +597,11 @@ KEY_NOT_KEYLESS_ELIGIBLE, TEAM_SUSPENDED}`; `LifecycleError.{JOB_NOT_FOUND, JOB_
 JOB_CANCELLED}`; all `RequestError.*`; `CommonError.UNKNOWN`; `ExtractError.{NO_VALID_URLS,
 LLM_REFUSAL}`; `AgentError.INDEX_ONLY`; `MapError.TIMEOUT`; every existing `ScrapeError.*` not in
 the map above; and warnings `QueryWarning.{ZDR_UNSUPPORTED, NO_MARKDOWN, EMPTY_MARKDOWN}`,
-`ChangeTrackingWarning.*`, `MapWarning.NO_RESULTS`. For these the `code` + `error` (and the human
-message) convey everything; a structured `details` would add nothing.
+`ChangeTrackingWarning.*`, `MapWarning.NO_RESULTS`; `BrowserError.{SESSION_NOT_FOUND,
+SESSION_FORBIDDEN}`; `MonitorError.{MONITOR_NOT_FOUND, CHECK_NOT_FOUND, EMAIL_TOKEN_INVALID}`;
+`ProxyError.NOT_CONFIGURED`; `FeedbackError.{TARGET_NOT_FOUND, TEAM_OPTED_OUT, DB_UNAVAILABLE}`.
+For these the `code` + `error` (and the human message) convey everything; a structured `details`
+would add nothing.
 
 **Extending mid-implementation (sanctioned).** If an agent finds a case needs more context:
 
@@ -465,34 +661,38 @@ export const explainWarning = (c: WarningCodes) => WARNING_CATALOG[c];
 
 Status mapping `ERROR_CATALOG` encodes (fixes DNS-as-200, client-caused-500 — RESPONSE-MODEL #2):
 
-| Status | Codes (examples)                                                                                                                                        |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 400    | `RequestError.BAD_REQUEST`, `BAD_REQUEST_INVALID_JSON`                                                                                                  |
-| 401    | `AuthError.MISSING_API_KEY`, `INVALID_API_KEY`, `OAUTH_TOKEN_EXPIRED`                                                                                   |
-| 402    | `BillingError.INSUFFICIENT_CREDITS`, `UNVERIFIED_CREDIT_LIMIT`                                                                                          |
-| 403    | `AuthError.TEAM_SUSPENDED`, `GatingError.URL_BLOCKED`, `COUNTRY_RESTRICTED`, `AuthError.KEY_NOT_KEYLESS_ELIGIBLE`                                       |
-| 404    | `LifecycleError.JOB_NOT_FOUND`, `JOB_EXPIRED`, `JOB_WRONG_TEAM`                                                                                         |
-| 408    | `ScrapeError.TIMEOUT`, `MapError.TIMEOUT`, `DependencyError.TIMEOUT`                                                                                    |
-| 409    | `GatingError.IDEMPOTENCY_CONFLICT`, `LifecycleError.JOB_CANCELLED`                                                                                      |
-| 422    | `ScrapeError.ACTIONS_NOT_SUPPORTED`, `BRANDING_NOT_SUPPORTED`, `UNSUPPORTED_FILE`, `LifecycleError.ZDR_NOT_SUPPORTED`, `LocalError.FEATURE_UNSUPPORTED` |
-| 429    | `RateError.RATE_LIMIT_EXCEEDED`, `QUEUE_FULL`                                                                                                           |
-| 502    | `ScrapeError.ALL_ENGINES_FAILED`, `DependencyError.UNAVAILABLE`, `AgentError.UPSTREAM`                                                                  |
-| 503    | `AuthError.BACKEND_UNAVAILABLE`, `BillingError.UNAVAILABLE`                                                                                             |
-| 500    | `CommonError.UNKNOWN` and any unmapped code (default)                                                                                                   |
+| Status | Codes (examples)                                                                                                                                                                                                      |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `RequestError.BAD_REQUEST`, `BAD_REQUEST_INVALID_JSON`, `MonitorError.EMAIL_TOKEN_INVALID`                                                                                                                            |
+| 401    | `AuthError.MISSING_API_KEY`, `INVALID_API_KEY`, `OAUTH_TOKEN_EXPIRED`                                                                                                                                                 |
+| 402    | `BillingError.INSUFFICIENT_CREDITS`, `UNVERIFIED_CREDIT_LIMIT`                                                                                                                                                        |
+| 403    | `AuthError.TEAM_SUSPENDED`, `GatingError.URL_BLOCKED`, `COUNTRY_RESTRICTED`, `AuthError.KEY_NOT_KEYLESS_ELIGIBLE`, `BrowserError.SESSION_FORBIDDEN`                                                                   |
+| 404    | `LifecycleError.JOB_NOT_FOUND`, `JOB_EXPIRED`, `JOB_WRONG_TEAM`, `BrowserError.SESSION_NOT_FOUND`, `MonitorError.MONITOR_NOT_FOUND`, `CHECK_NOT_FOUND`, `FeedbackError.TARGET_NOT_FOUND`, `ProxyError.NOT_CONFIGURED` |
+| 408    | `ScrapeError.TIMEOUT`, `MapError.TIMEOUT`, `DependencyError.TIMEOUT`, `ProxyError.UPSTREAM_TIMEOUT`                                                                                                                   |
+| 409    | `GatingError.IDEMPOTENCY_CONFLICT`, `LifecycleError.JOB_CANCELLED`, `MonitorError.CONFLICT`                                                                                                                           |
+| 410    | `BrowserError.SESSION_EXPIRED`, `MonitorError.EMAIL_TOKEN_EXPIRED`, `FeedbackError.WINDOW_EXPIRED`                                                                                                                    |
+| 422    | `ScrapeError.ACTIONS_NOT_SUPPORTED`, `BRANDING_NOT_SUPPORTED`, `UNSUPPORTED_FILE`, `LifecycleError.ZDR_NOT_SUPPORTED`, `LocalError.FEATURE_UNSUPPORTED`, `BrowserError.EXECUTION_FAILED`                              |
+| 429    | `RateError.RATE_LIMIT_EXCEEDED`, `QUEUE_FULL`, `BrowserError.SESSION_LIMIT_EXCEEDED`                                                                                                                                  |
+| 502    | `ScrapeError.ALL_ENGINES_FAILED`, `DependencyError.UNAVAILABLE`, `AgentError.UPSTREAM`, `ProxyError.UPSTREAM_BAD_RESPONSE`, `ProxyError.UPSTREAM_UNAVAILABLE`                                                         |
+| 503    | `AuthError.BACKEND_UNAVAILABLE`, `BillingError.UNAVAILABLE`, `BrowserError.SERVICE_UNAVAILABLE`, `FeedbackError.DB_UNAVAILABLE`                                                                                       |
+| 500    | `CommonError.UNKNOWN` and any unmapped code (default)                                                                                                                                                                 |
 
 ---
 
 ## 6. Scope of the migration (accurate surface)
 
-This is broad on purpose; making `code` required forces every error path to declare itself.
+This is broad on purpose. The new response envelope applies to **all non-streaming v2 JSON
+responses**. Ignore older v1/v0 behavior except for mechanical compile fallout from shared
+`ErrorCodes`.
 
 - **Magic-string comparisons:** 17 sites → enum members (§2): `scrape.ts` ×7, `parse.ts` ×5,
   `v1/scrape.ts` ×5.
-- **`code` becomes required:** every place that constructs an `ErrorResponse` must supply a `code`
-  or it won't compile. That includes the **~191 `res.status(<n>).json(...)` sites across v2
-  controllers** (a mix of successes and errors) — many of which today return a **bare string with no
-  code** (e.g. `monitor.ts` returns `{ success:false, error:"Monitor not found" }` ×6). The bulk of
-  the work is **assigning a code** to these ad-hoc returns, not the typing.
+- **`ResponseCore` fields become required:** every client-facing v2 JSON response gets
+  `status` and `diagnostics`. The response builder in `controllers/v2/response-enveloper.ts` is the
+  intended forcing function; do not hand-roll these fields at each site.
+- **`code` becomes required on failures:** every request-level `ErrorResponse` and async
+  `AsyncJobFailureResponse` must supply a dominant/root-cause code. This includes many ad-hoc
+  returns that today are bare strings, plus untyped escape hatches that TypeScript will not catch.
 - **Status normalization:** route those error returns + the **3 `TransportableError` status ladders**
   (`scrape.ts:397`, `parse.ts:606`, `v1:259`) + the **~6 shared-middleware gates**
   (auth/credits/rate/blocklist/country/idempotency) through `errorCodeToHttpStatus`.
@@ -503,6 +703,16 @@ This is broad on purpose; making `code` required forces every error path to decl
 - **Warnings:** add `warnings?: WarningEntry[]` to each v2 response type; convert the 16 producers
   to also push a typed entry (keeping their `warning` string assignment); build `warnings[]` inline
   per endpoint.
+- **Async job failures:** crawl/batch, scrape status, extract status, and agent status use
+  `AsyncJobFailureResponse` for terminal job failure. Status lookup failures still use
+  `ErrorResponse`. Async status/cancel responses add `jobState`.
+- **Proxy/keyless coverage:** locally generated support/research proxy failures are normalized into
+  the envelope with `ProxyError.*`. Upstream responses that are genuinely pass-through may remain
+  pass-through. `keyless/eligibility` errors also get the envelope because consumers and the
+  playground need to know why eligibility failed.
+- **Typed escape hatches:** `Response<...>` typing will not catch every v2 error. Guard with static
+  grep/tests for `res.status(4xx|5xx).json({ error`, `success:false` without `code`, and
+  `res.status(4xx|5xx).end()` in v2 controllers/routes.
 
 The build will be red until these are addressed; that is the intended forcing function.
 
@@ -554,11 +764,17 @@ the controller. So they transport for free.
 2. Migrate the 17 magic-string comparisons to enum members.
 3. `lib/error-catalog.ts` (both catalogs + helpers).
 4. `TransportableError.details` + serialize/deserialize across subclasses; worker-boundary fix.
-5. Make `code` required; assign codes to every ad-hoc error return; route status through
-   `errorCodeToHttpStatus` (controllers + ladders + middleware).
-6. `errorId` on the opaque path only (Sentry id, else logged uuid); improve the opaque message.
-7. Add `warnings?: WarningEntry[]` per v2 response; convert the 16 producers to push typed entries
-   inline (keep `warning` string).
+5. Add `controllers/v2/response-enveloper.ts` with v2-local builders for diagnostics/privacy,
+   success, warning, request error, and async job failure responses. Do not place this in `lib/`;
+   future API versions may need a different envelope.
+6. Make `status`/`diagnostics` required on all client-facing v2 JSON response types; make `code`
+   required on `ErrorCore`; add `AsyncJobFailureResponse<TData>` + async `jobState`.
+7. Assign codes to every ad-hoc request-level and async failure return; route request-level failure
+   HTTP status through `errorCodeToHttpStatus` (controllers + ladders + middleware).
+8. `errorId` on the opaque path only (Sentry id, else logged uuid); improve the opaque message.
+9. Add `warnings?: WarningEntry[]` per v2 response; convert the 16 producers to push typed entries
+   inline (keep `warning` string). Use `status:"warning"` whenever `warnings[]` or legacy `warning`
+   is present, including async completed/cancelled responses.
 
 Backward-compat: new fields are additive; `warning` string preserved; the deliberate behavior
 changes are **HTTP status normalization** and **`error` message wording** (real context instead of
@@ -569,13 +785,40 @@ changes are **HTTP status normalization** and **`error` message wording** (real 
 - **Two completeness unit tests**: `ERROR_CATALOG` covers every `ErrorCodes` member and
   `WARNING_CATALOG` every `WarningCodes` member (the `Record<…>` types enforce at compile time;
   tests guard `@ts-expect-error` slips and assert sane `httpStatus`).
+- Response-envelope unit tests: builders always include `status` + `diagnostics.privacy`; warnings
+  force `status:"warning"`; async failures require `code` + `jobState:"failed"`; request errors use
+  `errorCodeToHttpStatus`.
 - Failure-path snips: assert `code` (as the enum value) and `errorCodeToHttpStatus` per group
-  (auth 401, billing 402, rate 429, lifecycle 404, engines 502, dependency 502/503, local 422).
+  (auth 401, billing 402, rate 429, lifecycle 404, browser/monitor/proxy/feedback specifics,
+  engines 502, dependency 502/503, local 422).
   Assert typed errors carry **no `errorId`**, and the opaque `UNKNOWN_ERROR` path carries one only
   when Sentry is configured.
+- Async job snips: crawl/batch kickoff failure, failed scrape-status, failed extract-status, and
+  failed agent-status return `AsyncJobFailureResponse` with `status:"failed"`, required dominant
+  `code`, optional `failureCount`/`failuresByCode`, and `diagnostics`.
 - Warning snips: assert structured `warnings[]` entries **and** that the `warning` string still
   contains the original legacy text verbatim (preserved, not derived) — e.g. media-unavailable,
-  extract-trimmed, crawl few-results.
+  extract-trimmed, crawl few-results. Assert responses with warnings use `status:"warning"`.
+- ZDR/privacy snips: request-scoped and team-forced ZDR responses include
+  `diagnostics.privacy.zeroDataRetention === true`; diagnostics are reduced and do not include URL
+  path/query, request options, selectors/actions, content, prompts, or cross-system trace ids.
+- Static guard: no v2 `success:false` JSON without `code`; no `res.status(4xx|5xx).json({ error`
+  bare envelope; no `res.status(4xx|5xx).end()` in v2 controllers/routes unless explicitly marked
+  as pass-through proxy behavior.
 - Gate fire-engine cases behind `!process.env.TEST_SUITE_SELF_HOSTED`; AI cases behind
   `!process.env.TEST_SUITE_SELF_HOSTED || OPENAI_API_KEY || OLLAMA_BASE_URL`; use `scrapeTimeout`
   from `./lib`.
+
+## 11. Phase 2 — SDK/OpenAPI alignment
+
+Do not block Phase 1 API implementation on SDK work. After the v2 API envelope is green, update
+public client surfaces in a follow-up phase:
+
+- `apps/api/openapi.json`: add `ResponseStatus`, `Diagnostics`, `WarningEntry`, required `code`,
+  `status`, and `diagnostics`; model async job failure separately from request-level `ErrorResponse`.
+- `apps/js-sdk/firecrawl/src/v2/*`: type `code`, `status`, `errorId`, `details`, `diagnostics`,
+  structured `warnings[]`, and async `jobState`; keep runtime pass-through behavior where possible.
+- `apps/python-sdk/firecrawl/v2/*`: same type alignment.
+
+Runtime SDK parsing should remain tolerant of unknown fields. The main Phase 2 requirement is that
+typed clients and generated docs reflect the new response contract.
