@@ -12,7 +12,14 @@ import {
 import { v7 as uuidv7 } from "uuid";
 import { hasFormatOfType } from "../../lib/format-utils";
 import { TransportableError } from "../../lib/error";
-import { AgentError, CommonError, ScrapeError } from "../../lib/error-codes";
+import {
+  AgentError,
+  BillingError,
+  CommonError,
+  RequestError,
+  ScrapeError,
+  type ErrorCodes,
+} from "../../lib/error-codes";
 import { errorCodeToHttpStatus } from "../../lib/error-catalog";
 import { NuQJob } from "../../services/worker/nuq";
 import { checkPermissions } from "../../lib/permissions";
@@ -26,6 +33,7 @@ import { getErrorContactMessage } from "../../lib/deployment";
 import { captureExceptionWithZdrCheck } from "../../services/sentry";
 import type { BillingMetadata } from "../../services/billing/types";
 import { getScrapeZDR } from "../../lib/zdr-helpers";
+import { errorResponse } from "./response-enveloper";
 import {
   KEYLESS_CREDITS_MESSAGE,
   adjustKeylessCredits,
@@ -72,6 +80,21 @@ function getPrivacyMode(
 
 function jsonResponse(res: Response, statusCode: number, body: unknown) {
   return res.status(statusCode).json(body as any);
+}
+
+function sendErrorResponse(
+  res: Response,
+  code: ErrorCodes,
+  error: string | Error,
+  ctx: {
+    traceId?: string;
+    zeroDataRetention?: boolean;
+    privacyMode: PrivacyMode;
+  },
+  opts: Parameters<typeof errorResponse>[3] = {},
+) {
+  const envelope = errorResponse(code, error, ctx, opts);
+  return jsonResponse(res, envelope.httpStatus, envelope.body);
 }
 
 export async function scrapeController(
@@ -138,12 +161,21 @@ export async function scrapeController(
           "scrape.error": permissions.error,
           "scrape.status_code": 403,
         });
-        return jsonResponse(res, 403, {
-          success: false,
-          status: "failed",
-          diagnostics,
-          error: permissions.error,
-        });
+        return sendErrorResponse(
+          res,
+          RequestError.BAD_REQUEST,
+          permissions.error,
+          {
+            traceId: jobId,
+            zeroDataRetention: effectiveZeroDataRetention,
+            privacyMode: getPrivacyMode(
+              effectiveZeroDataRetention,
+              req.body.zeroDataRetention ?? false,
+              forcedByTeam,
+            ),
+          },
+          { httpStatus: 403 },
+        );
       }
 
       const billing: BillingMetadata = req.body.__agentInterop
@@ -155,19 +187,37 @@ export async function scrapeController(
         config.AGENT_INTEROP_SECRET &&
         req.body.__agentInterop.auth !== config.AGENT_INTEROP_SECRET
       ) {
-        return jsonResponse(res, 403, {
-          success: false,
-          status: "failed",
-          diagnostics,
-          error: "Invalid agent interop.",
-        });
+        return sendErrorResponse(
+          res,
+          RequestError.BAD_REQUEST,
+          "Invalid agent interop.",
+          {
+            traceId: jobId,
+            zeroDataRetention: effectiveZeroDataRetention,
+            privacyMode: getPrivacyMode(
+              effectiveZeroDataRetention,
+              req.body.zeroDataRetention ?? false,
+              forcedByTeam,
+            ),
+          },
+          { httpStatus: 403 },
+        );
       } else if (req.body.__agentInterop && !config.AGENT_INTEROP_SECRET) {
-        return jsonResponse(res, 403, {
-          success: false,
-          status: "failed",
-          diagnostics,
-          error: "Agent interop is not enabled.",
-        });
+        return sendErrorResponse(
+          res,
+          RequestError.BAD_REQUEST,
+          "Agent interop is not enabled.",
+          {
+            traceId: jobId,
+            zeroDataRetention: effectiveZeroDataRetention,
+            privacyMode: getPrivacyMode(
+              effectiveZeroDataRetention,
+              req.body.zeroDataRetention ?? false,
+              forcedByTeam,
+            ),
+          },
+          { httpStatus: 403 },
+        );
       }
 
       const shouldBill = req.body.__agentInterop?.shouldBill ?? true;
@@ -195,12 +245,21 @@ export async function scrapeController(
         );
         if (!reservation.ok) {
           applyAgentAuthDiscoveryHeader(res);
-          return jsonResponse(res, 429, {
-            success: false,
-            status: "failed",
-            diagnostics,
-            error: KEYLESS_CREDITS_MESSAGE,
-          });
+          return sendErrorResponse(
+            res,
+            BillingError.INSUFFICIENT_CREDITS,
+            KEYLESS_CREDITS_MESSAGE,
+            {
+              traceId: jobId,
+              zeroDataRetention: effectiveZeroDataRetention,
+              privacyMode: getPrivacyMode(
+                effectiveZeroDataRetention,
+                req.body.zeroDataRetention ?? false,
+                forcedByTeam,
+              ),
+            },
+            { httpStatus: 429 },
+          );
         }
         reservedKeylessCredits = projectedKeylessCredits;
       }
@@ -398,33 +457,48 @@ export async function scrapeController(
             setSpanAttributes(span, {
               "scrape.status_code": 200,
             });
-            return jsonResponse(res, 200, {
-              success: false,
-              status: "failed",
-              code: e.code,
-              diagnostics,
-              error: e.message,
-            });
+            return sendErrorResponse(
+              res,
+              e.code,
+              e.message,
+              {
+                traceId: jobId,
+                zeroDataRetention: effectiveZeroDataRetention,
+                privacyMode: getPrivacyMode(
+                  effectiveZeroDataRetention,
+                  req.body.zeroDataRetention ?? false,
+                  forcedByTeam,
+                ),
+              },
+              { httpStatus: 200 },
+            );
           }
 
           const statusCode = errorCodeToHttpStatus(e.code);
           setSpanAttributes(span, {
             "scrape.status_code": statusCode,
           });
-          const response: Record<string, unknown> = {
-            success: false,
-            status: "failed",
-            code: e.code,
-            diagnostics,
-            error: e.message,
-          };
-
-          if (e.code === AgentError.INDEX_ONLY) {
-            response.sponsor_status = "pending";
-            response.login_url = "https://firecrawl.dev/signin";
-          }
-
-          return jsonResponse(res, statusCode, response);
+          return sendErrorResponse(
+            res,
+            e.code,
+            e.message,
+            {
+              traceId: jobId,
+              zeroDataRetention: effectiveZeroDataRetention,
+              privacyMode: getPrivacyMode(
+                effectiveZeroDataRetention,
+                req.body.zeroDataRetention ?? false,
+                forcedByTeam,
+              ),
+            },
+            e.code === AgentError.INDEX_ONLY
+              ? {
+                  httpStatus: statusCode,
+                  sponsor_status: "pending",
+                  login_url: "https://firecrawl.dev/signin",
+                }
+              : { httpStatus: statusCode },
+          );
         } else {
           const id = uuidv7();
           logger.error(`Error in scrapeController`, {
@@ -450,14 +524,21 @@ export async function scrapeController(
             "scrape.status_code": 500,
             "scrape.error_id": id,
           });
-          return jsonResponse(res, 500, {
-            success: false,
-            status: "failed",
-            diagnostics,
-            code: CommonError.UNKNOWN,
-            error: getErrorContactMessage(id),
-            errorId: id,
-          });
+          return sendErrorResponse(
+            res,
+            CommonError.UNKNOWN,
+            getErrorContactMessage(id),
+            {
+              traceId: jobId,
+              zeroDataRetention: effectiveZeroDataRetention,
+              privacyMode: getPrivacyMode(
+                effectiveZeroDataRetention,
+                req.body.zeroDataRetention ?? false,
+                forcedByTeam,
+              ),
+            },
+            { httpStatus: 500, errorId: id },
+          );
         }
       } finally {
         if (timeoutHandle) {

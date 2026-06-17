@@ -29,15 +29,13 @@ import {
 } from "./error-codes";
 import { WarningDetailsFor } from "./error-details";
 
-export interface ErrorCatalogEntry {
+interface ErrorCatalogEntry {
   httpStatus: number;
   explanation: string;
   fix: string;
 }
 
-export type ErrorEntry = ErrorCatalogEntry;
-
-export interface WarningCatalogEntry {
+interface WarningCatalogEntry {
   explanation: string;
   fix: string;
 }

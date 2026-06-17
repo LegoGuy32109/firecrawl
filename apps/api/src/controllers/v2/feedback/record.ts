@@ -13,11 +13,7 @@ import {
   featureIdForBillingEndpoint,
 } from "../../../services/autumn/autumn.service";
 import { captureExceptionWithZdrCheck } from "../../../services/sentry";
-import {
-  EndpointFeedbackErrorCode,
-  RequestWithAuth,
-  SearchFeedbackErrorCode,
-} from "../types";
+import { RequestWithAuth } from "../types";
 import {
   findExistingFeedback,
   insertFeedback,
@@ -60,16 +56,11 @@ function feedbackFailure(
   code: ErrorCodes,
   error: string,
   req: RequestWithAuth<any, any, any>,
-  feedbackErrorCode?: EndpointFeedbackErrorCode | SearchFeedbackErrorCode,
 ): FeedbackRecordResult {
   const envelope = errorResponse(code, error, req, { httpStatus: status });
-  const body = {
-    ...envelope.body,
-    ...(feedbackErrorCode ? { feedbackErrorCode } : {}),
-  } as FeedbackRecordResult["body"];
   return {
     status: envelope.httpStatus,
-    body,
+    body: envelope.body as FeedbackRecordResult["body"],
   };
 }
 
@@ -100,7 +91,6 @@ function validateAccess(
       options.dbDisabledMessage ??
         "Feedback requires database authentication and is unavailable on this deployment.",
       req,
-      "DB_DISABLED",
     );
   }
 
@@ -110,7 +100,6 @@ function validateAccess(
       RequestError.BAD_REQUEST,
       "Feedback is not available for preview teams.",
       req,
-      "PREVIEW_TEAM_NOT_ALLOWED",
     );
   }
 
@@ -121,7 +110,6 @@ function validateAccess(
       FeedbackError.TEAM_OPTED_OUT,
       "Feedback is disabled for this team. Contact support@firecrawl.com to re-enable.",
       req,
-      "TEAM_OPTED_OUT",
     );
   }
 
@@ -151,7 +139,6 @@ async function lookupJobWithRetry(
         FeedbackError.TARGET_NOT_FOUND,
         `${options.endpoint} job not found for this team.`,
         req,
-        options.notFoundCode ?? "JOB_NOT_FOUND",
       );
     }
 
@@ -163,7 +150,6 @@ async function lookupJobWithRetry(
       CommonError.UNKNOWN,
       "Failed to look up job.",
       req,
-      "INTERNAL",
     );
   }
 }
@@ -180,7 +166,6 @@ function validateJob(
       CommonError.UNKNOWN,
       `Cannot submit feedback for a ${options.endpoint} job that did not succeed.`,
       req,
-      options.failedJobCode ?? "INTERNAL",
     );
   }
 
@@ -201,7 +186,6 @@ function validateJob(
     options.windowExpiredMessage ??
       `Feedback must be submitted within ${maxAgeSec} seconds of the job.`,
     req,
-    "FEEDBACK_WINDOW_EXPIRED",
   );
 }
 
@@ -324,7 +308,6 @@ export async function recordEndpointFeedback(
         CommonError.UNKNOWN,
         "Failed to record feedback.",
         req,
-        "INTERNAL",
       );
     }
 
@@ -412,7 +395,6 @@ export async function recordEndpointFeedback(
       CommonError.UNKNOWN,
       error instanceof Error ? error.message : "Unknown error",
       req,
-      "INTERNAL",
     );
   }
 }

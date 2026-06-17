@@ -1,9 +1,7 @@
 import { logger as _logger } from "../../../lib/logger";
 import {
   EndpointFeedbackEndpoint,
-  EndpointFeedbackErrorCode,
   EndpointFeedbackResponse,
-  SearchFeedbackErrorCode,
   SearchFeedbackResponse,
 } from "../types";
 
@@ -40,8 +38,6 @@ export type FeedbackRecordOptions = {
   jobId: string;
   feedback: FeedbackInput;
   requireSuccessfulJob?: boolean;
-  notFoundCode?: EndpointFeedbackErrorCode | SearchFeedbackErrorCode;
-  failedJobCode?: SearchFeedbackErrorCode;
   dbDisabledMessage?: string;
   windowExpiredMessage?: string;
   maxAgeSec?: number;

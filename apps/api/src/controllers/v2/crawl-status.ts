@@ -20,7 +20,11 @@ import { configDotenv } from "dotenv";
 import { logger } from "../../lib/logger";
 import { creditsBilledByCrawlId } from "../../db/rpc";
 import { getJobFromGCS } from "../../lib/gcs-jobs";
-import { asyncJobFailureResponse, errorResponse } from "./response-enveloper";
+import {
+  asyncJobFailureResponse,
+  errorResponse,
+  okResponse,
+} from "./response-enveloper";
 import {
   scrapeQueue,
   NuQJob,
@@ -39,6 +43,19 @@ import {
 import { deserializeTransportableError } from "../../lib/error-serde";
 import type { WarningEntry } from "./types";
 configDotenv();
+
+function buildAsyncStatusBody(
+  req: any,
+  body: Record<string, unknown>,
+  jobState: "processing" | "completed" | "cancelled",
+) {
+  const response = okResponse(body, req).body as any;
+  return {
+    ...response,
+    status: jobState === "processing" ? "processing" : response.status,
+    jobState,
+  };
+}
 
 export type PseudoJob<T> = {
   id: string;
@@ -408,6 +425,10 @@ export async function crawlStatusController(
   }
 
   const status = outputBulkA.status ?? "scraping";
+  const jobState: "processing" | "completed" | "cancelled" | "failed" =
+    status === "scraping"
+      ? "processing"
+      : (status as "completed" | "cancelled" | "failed");
   const createdAtMs = sc?.createdAt;
   const lastDoneMs =
     status !== "scraping"
@@ -421,7 +442,7 @@ export async function crawlStatusController(
     ? Math.max(0, ((completedAtMs ?? Date.now()) - createdAtMs) / 1000)
     : undefined;
 
-  if (status === "failed") {
+  if (jobState === "failed") {
     const failedError = deserializeTransportableError(crawlError ?? "");
     const response = asyncJobFailureResponse(
       failedError?.code ?? CommonError.UNKNOWN,
@@ -445,21 +466,30 @@ export async function crawlStatusController(
     return res.status(response.httpStatus).json(response.body as any);
   }
 
-  return res.status(200).json({
-    success: true,
-    status: (warning || warnings.length > 0 ? "warning" : status) as any,
-    completed: outputBulkA.completed ?? 0,
-    total: outputBulkA.total ?? 0,
-    creditsUsed: outputBulkA.creditsUsed ?? 0,
-    expiresAt: (await getCrawlExpiry(req.params.jobId)).toISOString(),
-    next: outputBulkB.next,
-    data: outputBulkB.data,
-    ...(createdAtMs && { createdAt: new Date(createdAtMs).toISOString() }),
-    ...(completedAtMs && {
-      completedAt: new Date(completedAtMs).toISOString(),
-    }),
-    ...(durationSeconds !== undefined && { duration: durationSeconds }),
-    ...(warning && { warning }),
-    ...(warnings.length > 0 && { warnings }),
-  });
+  const terminalJobState =
+    jobState === "processing"
+      ? "processing"
+      : (jobState as "completed" | "cancelled");
+
+  return res.status(200).json(
+    buildAsyncStatusBody(
+      req,
+      {
+        completed: outputBulkA.completed ?? 0,
+        total: outputBulkA.total ?? 0,
+        creditsUsed: outputBulkA.creditsUsed ?? 0,
+        expiresAt: (await getCrawlExpiry(req.params.jobId)).toISOString(),
+        next: outputBulkB.next,
+        data: outputBulkB.data,
+        ...(createdAtMs && { createdAt: new Date(createdAtMs).toISOString() }),
+        ...(completedAtMs && {
+          completedAt: new Date(completedAtMs).toISOString(),
+        }),
+        ...(durationSeconds !== undefined && { duration: durationSeconds }),
+        ...(warning && { warning }),
+        ...(warnings.length > 0 && { warnings }),
+      },
+      terminalJobState,
+    ),
+  );
 }

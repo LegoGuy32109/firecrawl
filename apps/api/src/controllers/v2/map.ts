@@ -16,7 +16,7 @@ import { v7 as uuidv7 } from "uuid";
 import { isBaseDomain, extractBaseDomain } from "../../lib/url-utils";
 import { getScrapeZDR } from "../../lib/zdr-helpers";
 import { resolveViaAvgrab } from "../../lib/avgrab-resolve";
-import { errorResponse } from "./response-enveloper";
+import { errorResponse, okResponse } from "./response-enveloper";
 import { MapError, RequestError } from "../../lib/error-codes";
 
 configDotenv();
@@ -120,11 +120,15 @@ export async function mapController(
         );
       });
 
-      return res.status(200).json({
-        success: true,
-        id: mapId,
-        links: avgrabResults,
-      });
+      const response = okResponse(
+        {
+          id: mapId,
+          links: avgrabResults,
+        },
+        req,
+      );
+
+      return res.status(response.httpStatus).json(response.body);
     }
   } catch (error) {
     if (error instanceof MapFailedError) {
@@ -257,12 +261,14 @@ export async function mapController(
     }
   }
 
-  const response = {
-    success: true as const,
-    id: result.job_id,
-    links: result.mapResults,
-    ...(warning && { warning }),
-  };
+  const response = okResponse(
+    {
+      id: result.job_id,
+      links: result.mapResults,
+      ...(warning && { warning }),
+    },
+    req,
+  );
 
-  return res.status(200).json(response);
+  return res.status(response.httpStatus).json(response.body);
 }

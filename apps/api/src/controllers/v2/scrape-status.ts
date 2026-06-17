@@ -7,8 +7,25 @@ import {
   LifecycleError,
   RequestError,
 } from "../../lib/error-codes";
-import { asyncJobFailureResponse, errorResponse } from "./response-enveloper";
+import {
+  asyncJobFailureResponse,
+  errorResponse,
+  okResponse,
+} from "./response-enveloper";
 import { deserializeTransportableError } from "../../lib/error-serde";
+
+function buildAsyncStatusBody(
+  req: any,
+  body: Record<string, unknown>,
+  jobState: "processing" | "completed",
+) {
+  const response = okResponse(body, req).body as any;
+  return {
+    ...response,
+    status: jobState === "processing" ? "processing" : response.status,
+    jobState,
+  };
+}
 
 export async function scrapeStatusController(req: any, res: any) {
   const uuidReg =
@@ -92,8 +109,17 @@ export async function scrapeStatusController(req: any, res: any) {
     return res.status(response.httpStatus).json(response.body as any);
   }
 
-  return res.status(200).json({
-    success: true,
-    data,
-  });
+  const jobState = jobData?.status === "completed" ? "completed" : "processing";
+  return res.status(200).json(
+    buildAsyncStatusBody(
+      req,
+      {
+        data,
+        expiresAt: new Date(
+          new Date(job.created_at).getTime() + 1000 * 60 * 60 * 24,
+        ).toISOString(),
+      },
+      jobState,
+    ),
+  );
 }

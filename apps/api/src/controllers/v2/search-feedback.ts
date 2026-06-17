@@ -43,10 +43,7 @@ export async function searchFeedbackController(
           details: error.issues as any,
         },
       );
-      return res.status(envelope.httpStatus).json({
-        ...envelope.body,
-        feedbackErrorCode: "INVALID_BODY",
-      });
+      return res.status(envelope.httpStatus).json(envelope.body);
     }
     throw error;
   }

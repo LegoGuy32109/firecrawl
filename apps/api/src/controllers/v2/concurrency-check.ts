@@ -8,7 +8,7 @@ import { Response } from "express";
 import { getACUCTeam } from "../auth";
 import { RateLimiterMode } from "../../types";
 import { getCombinedTeamActiveCount } from "../../services/worker/nuq-router";
-import { errorResponse } from "./response-enveloper";
+import { errorResponse, okResponse } from "./response-enveloper";
 import { AuthError } from "../../lib/error-codes";
 
 // Basically just middleware and error wrapping
@@ -44,9 +44,16 @@ export async function concurrencyCheckController(
 
   const activeJobsOfTeam = await getCombinedTeamActiveCount(req.auth.team_id);
 
-  return res.status(200).json({
-    success: true,
-    concurrency: activeJobsOfTeam,
-    maxConcurrency: Math.max(req.acuc.concurrency, otherACUC?.concurrency ?? 0),
-  });
+  const response = okResponse(
+    {
+      concurrency: activeJobsOfTeam,
+      maxConcurrency: Math.max(
+        req.acuc.concurrency,
+        otherACUC?.concurrency ?? 0,
+      ),
+    },
+    req,
+  );
+
+  return res.status(response.httpStatus).json(response.body);
 }

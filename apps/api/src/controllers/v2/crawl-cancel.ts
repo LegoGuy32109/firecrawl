@@ -13,7 +13,7 @@ import { crawlGroup } from "../../services/worker/nuq-router";
 import { normalizeOwnerId } from "../../lib/owner-id";
 import { removeConcurrencyLimitedJobs } from "../../lib/concurrency-limit";
 import { CommonError, LifecycleError } from "../../lib/error-codes";
-import { errorResponse } from "./response-enveloper";
+import { errorResponse, okResponse } from "./response-enveloper";
 configDotenv();
 
 export async function crawlCancelController(
@@ -75,9 +75,10 @@ export async function crawlCancelController(
       await removeConcurrencyLimitedJobs(sc.team_id, jobIds);
     }
 
-    res.json({
-      success: true,
-      status: "cancelled",
+    const response = okResponse({}, req);
+    return res.status(response.httpStatus).json({
+      ...response.body,
+      jobState: "cancelled",
     } as any);
   } catch (error) {
     Sentry.captureException(error);

@@ -10,6 +10,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { db } from "../../../db/connection";
 import * as schema from "../../../db/schema";
+import { FeedbackError } from "../../../lib/error-codes";
 
 let identity: Identity;
 let secondaryIdentity: Identity;
@@ -137,7 +138,7 @@ describeIf(TEST_PRODUCTION)("Search feedback tests", () => {
         secondaryIdentity,
       );
       expect(failed.error.toLowerCase()).toContain("not found");
-      expect((failed as any).feedbackErrorCode).toBe("SEARCH_NOT_FOUND");
+      expect((failed as any).code).toBe(FeedbackError.TARGET_NOT_FOUND);
     },
     90000,
   );
@@ -154,7 +155,7 @@ describeIf(TEST_PRODUCTION)("Search feedback tests", () => {
         identity,
       );
       expect(failed.error.toLowerCase()).toContain("not found");
-      expect((failed as any).feedbackErrorCode).toBe("SEARCH_NOT_FOUND");
+      expect((failed as any).code).toBe(FeedbackError.TARGET_NOT_FOUND);
     },
     30000,
   );
@@ -440,7 +441,7 @@ describeIf(TEST_PRODUCTION)("Search feedback tests", () => {
         },
         identity,
       );
-      expect((failed as any).feedbackErrorCode).toBe("FEEDBACK_WINDOW_EXPIRED");
+      expect((failed as any).code).toBe(FeedbackError.WINDOW_EXPIRED);
     },
     90000,
   );

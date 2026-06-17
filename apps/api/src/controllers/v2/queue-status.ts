@@ -17,6 +17,7 @@ import {
   getConcurrencyLimitActiveJobsCount,
   getConcurrencyQueueJobsCount,
 } from "../../lib/concurrency-limit";
+import { okResponse } from "./response-enveloper";
 
 type QueueStatusResponse = {
   success: boolean;
@@ -87,19 +88,21 @@ export async function queueStatusController(
     "most-recent-success:" + req.auth.team_id,
   );
 
-  return res.status(200).json({
-    success: true,
+  const response = okResponse(
+    {
+      jobsInQueue: activeJobsOfTeam + queuedJobsOfTeam,
+      activeJobsInQueue: activeJobsOfTeam,
+      waitingJobsInQueue: queuedJobsOfTeam,
+      maxConcurrency: Math.max(
+        req.acuc?.concurrency ?? 1,
+        otherACUC?.concurrency ?? 1,
+      ),
+      mostRecentSuccess: mostRecentSuccess
+        ? new Date(mostRecentSuccess).toISOString()
+        : null,
+    },
+    req,
+  );
 
-    jobsInQueue: activeJobsOfTeam + queuedJobsOfTeam,
-    activeJobsInQueue: activeJobsOfTeam,
-    waitingJobsInQueue: queuedJobsOfTeam,
-    maxConcurrency: Math.max(
-      req.acuc?.concurrency ?? 1,
-      otherACUC?.concurrency ?? 1,
-    ),
-
-    mostRecentSuccess: mostRecentSuccess
-      ? new Date(mostRecentSuccess).toISOString()
-      : null,
-  });
+  return res.status(response.httpStatus).json(response.body);
 }

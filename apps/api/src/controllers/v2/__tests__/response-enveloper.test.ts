@@ -163,6 +163,11 @@ describe("v2 response enveloper", () => {
       code: RateError.RATE_LIMIT_EXCEEDED,
       error: "Too many requests",
     });
+    expect(response.body.diagnostics.privacy).toEqual({
+      zeroDataRetention: false,
+      mode: "disabled",
+      reduced: false,
+    });
   });
 
   it("keeps async job failures as HTTP 200 with jobState", () => {

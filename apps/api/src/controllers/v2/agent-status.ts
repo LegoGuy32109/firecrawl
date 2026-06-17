@@ -8,7 +8,11 @@ import { logger as _logger, logger } from "../../lib/logger";
 import { getJobFromGCS } from "../../lib/gcs-jobs";
 import { config } from "../../config";
 import { CommonError, LifecycleError } from "../../lib/error-codes";
-import { asyncJobFailureResponse, errorResponse } from "./response-enveloper";
+import {
+  asyncJobFailureResponse,
+  errorResponse,
+  okResponse,
+} from "./response-enveloper";
 import { deserializeTransportableError } from "../../lib/error-serde";
 
 export async function agentStatusController(
@@ -97,20 +101,25 @@ export async function agentStatusController(
     return res.status(response.httpStatus).json(response.body as any);
   }
 
+  const successStatus = !agent ? "processing" : "completed";
+  const response = okResponse(
+    {
+      data,
+      model,
+      expiresAt: new Date(
+        new Date(agent?.created_at ?? agentRequest.created_at).getTime() +
+          1000 * 60 * 60 * 24,
+      ).toISOString(),
+      creditsUsed: agent?.credits_cost,
+    },
+    req,
+  );
+
   return res.status(200).json({
+    ...response.body,
     success: true,
-    status: !agent
-      ? "processing"
-      : agent.is_successful
-        ? "completed"
-        : "failed",
-    error: agent?.error || undefined,
-    data,
-    model,
-    expiresAt: new Date(
-      new Date(agent?.created_at ?? agentRequest.created_at).getTime() +
-        1000 * 60 * 60 * 24,
-    ).toISOString(),
-    creditsUsed: agent?.credits_cost,
-  });
+    status:
+      successStatus === "processing" ? "processing" : response.body.status,
+    jobState: successStatus,
+  } as any);
 }

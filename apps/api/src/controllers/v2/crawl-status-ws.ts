@@ -4,7 +4,6 @@ import {
   CrawlStatusParams,
   CrawlStatusResponse,
   Document,
-  ErrorResponse,
   RequestWithAuth,
 } from "./types";
 import { WebSocket } from "ws";
@@ -22,6 +21,13 @@ import * as Sentry from "@sentry/node";
 import { getConcurrencyLimitedJobs } from "../../lib/concurrency-limit";
 import { scrapeQueue, NuQJobStatus } from "../../services/worker/nuq-router";
 import { getErrorContactMessage } from "../../lib/deployment";
+import {
+  asyncJobFailureResponse,
+  errorResponse,
+  okResponse,
+} from "./response-enveloper";
+import { CommonError, LifecycleError } from "../../lib/error-codes";
+import { deserializeTransportableError } from "../../lib/error-serde";
 
 type ErrorMessage = {
   type: "error";
@@ -41,6 +47,22 @@ type DocumentMessage = {
 type DoneMessage = { type: "done" };
 
 type Message = ErrorMessage | CatchupMessage | DoneMessage | DocumentMessage;
+
+function buildAsyncStatusBody(
+  req: RequestWithAuth<CrawlStatusParams, undefined, undefined>,
+  body: Record<string, unknown>,
+  jobState: "processing" | "completed" | "cancelled" | "failed",
+) {
+  const response = okResponse(body, req).body as any;
+  return {
+    ...response,
+    status:
+      jobState === "processing" || jobState === "failed"
+        ? jobState
+        : response.status,
+    jobState,
+  };
+}
 
 function send(ws: WebSocket, msg: Message) {
   if (ws.readyState === 1) {
@@ -65,11 +87,21 @@ async function crawlStatusWS(
 ) {
   const sc = await getCrawl(req.params.jobId);
   if (!sc) {
-    return close(ws, 1008, { type: "error", error: "Job not found" });
+    const response = errorResponse(
+      LifecycleError.JOB_NOT_FOUND,
+      "Job not found",
+      req,
+    );
+    return close(ws, 1008, { type: "error", error: response.body.error });
   }
 
   if (sc.team_id !== req.auth.team_id) {
-    return close(ws, 3003, { type: "error", error: "Forbidden" });
+    const response = errorResponse(
+      LifecycleError.JOB_WRONG_TEAM,
+      "Forbidden",
+      req,
+    );
+    return close(ws, 3003, { type: "error", error: response.body.error });
   }
 
   let doneJobIDs: string[] = [];
@@ -143,54 +175,76 @@ async function crawlStatusWS(
   // Check if the crawl failed during kickoff (e.g. queue full)
   const crawlError = await getCrawlError(req.params.jobId);
 
-  let status: Exclude<CrawlStatusResponse, ErrorResponse>["status"] =
-    sc.cancelled
-      ? "cancelled"
-      : validJobStatuses.every(x => x[1] === "completed")
-        ? "completed"
-        : "scraping";
+  let status: "scraping" | "completed" | "failed" | "cancelled" = sc.cancelled
+    ? "cancelled"
+    : validJobStatuses.every(x => x[1] === "completed")
+      ? "completed"
+      : "scraping";
 
   if (crawlError && jobIDs.length === 0 && status === "completed") {
     status = "failed";
   }
+
+  const jobState: "processing" | "completed" | "cancelled" | "failed" =
+    status === "scraping"
+      ? "processing"
+      : (status as "completed" | "cancelled" | "failed");
 
   jobIDs = validJobIDs; // Use validJobIDs instead of jobIDs for further processing
 
   const doneJobs = await getJobs(doneJobIDs, logger);
   const data = doneJobs.map(x => x.returnvalue);
 
-  if (status === "failed" && crawlError) {
+  if (jobState === "failed" && crawlError) {
+    const failedError = deserializeTransportableError(crawlError);
+    const failure = asyncJobFailureResponse<Document[]>(
+      failedError?.code ?? CommonError.UNKNOWN,
+      failedError?.message ?? crawlError,
+      req,
+      {
+        data: [],
+        failureCount: 1,
+        failuresByCode: {
+          [failedError?.code ?? CommonError.UNKNOWN]: 1,
+        },
+        creditsUsed: 0,
+        expiresAt: (await getCrawlExpiry(req.params.jobId)).toISOString(),
+      },
+    );
+
     await send(ws, {
       type: "catchup",
       data: {
-        success: false,
-        error: crawlError,
-        status: "failed",
+        ...failure.body,
         total: 0,
         completed: 0,
-        creditsUsed: 0,
-        expiresAt: (await getCrawlExpiry(req.params.jobId)).toISOString(),
-        data: [],
       },
     });
     finished = true;
     return close(ws, 1000, { type: "done" });
   }
 
+  const terminalJobState =
+    jobState === "processing"
+      ? "processing"
+      : (jobState as "completed" | "cancelled");
+
   await send(ws, {
     type: "catchup",
-    data: {
-      success: true,
-      status,
-      total: jobIDs.length,
-      completed: doneJobIDs.length,
-      creditsUsed: jobIDs.length,
-      expiresAt: (await getCrawlExpiry(req.params.jobId)).toISOString(),
-      data: data,
-    },
+    data: buildAsyncStatusBody(
+      req,
+      {
+        total: jobIDs.length,
+        completed: doneJobIDs.length,
+        creditsUsed: jobIDs.length,
+        expiresAt: (await getCrawlExpiry(req.params.jobId)).toISOString(),
+        data,
+      },
+      terminalJobState,
+    ),
   });
 
-  if (status !== "scraping") {
+  if (jobState !== "processing") {
     finished = true;
     return close(ws, 1000, { type: "done" });
   }

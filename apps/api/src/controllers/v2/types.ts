@@ -1314,16 +1314,11 @@ export type VideoItem = {
   metadata?: Record<string, unknown>;
 };
 
-export type ResponseStatus = "ok" | "warning" | "processing" | "failed";
+type ResponseStatus = "ok" | "warning" | "processing" | "failed";
 
-export type JobState = "processing" | "completed" | "cancelled" | "failed";
+type JobState = "processing" | "completed" | "cancelled" | "failed";
 
-export type DiagnosticStatus =
-  | "ok"
-  | "warning"
-  | "failed"
-  | "skipped"
-  | "timed_out";
+type DiagnosticStatus = "ok" | "warning" | "failed" | "skipped" | "timed_out";
 
 export type DiagnosticStep = {
   name: string;
@@ -1363,7 +1358,7 @@ export type ResponseCore = {
   warnings?: WarningEntry[];
 };
 
-export type ErrorCore = ResponseCore & {
+type ErrorCore = ResponseCore & {
   success: false;
   status: "failed";
   code: ErrorCodes;
@@ -1377,19 +1372,10 @@ export type StrictErrorResponse = ErrorCore & {
   login_url?: string;
 };
 
-export type LegacyErrorResponse = {
-  success: false;
-  code?: ErrorCodes;
-  error: string;
-  details?: any;
-  sponsor_status?: string;
-  login_url?: string;
-};
-
-export type ErrorResponse = StrictErrorResponse | LegacyErrorResponse;
+export type ErrorResponse = StrictErrorResponse;
 
 export type AsyncJobFailureResponse<TData = unknown> = ErrorCore & {
-  jobState: "failed";
+  jobState: Extract<JobState, "failed">;
   failureCount?: number;
   failuresByCode?: Partial<Record<ErrorCodes, number>>;
   data?: TData;
@@ -1521,6 +1507,10 @@ export type ConcurrencyCheckResponse =
 
 export type CrawlStatusResponse =
   | ErrorResponse
+  | (AsyncJobFailureResponse<Document[]> & {
+      completed: number;
+      total: number;
+    })
   | {
       success: true;
       status: "scraping" | "completed" | "failed" | "cancelled";
@@ -1534,19 +1524,6 @@ export type CrawlStatusResponse =
       next?: string;
       data: Document[];
       warning?: string;
-    }
-  | {
-      success: false;
-      status: "failed";
-      error: string;
-      completed: number;
-      total: number;
-      creditsUsed: number;
-      expiresAt: string;
-      createdAt?: string;
-      completedAt?: string;
-      duration?: number;
-      data: Document[];
     };
 
 export type OngoingCrawlsResponse =
@@ -2221,18 +2198,8 @@ export const searchFeedbackSchema = z
 export type SearchFeedbackRequest = z.infer<typeof searchFeedbackSchema>;
 export type SearchFeedbackRequestInput = z.input<typeof searchFeedbackSchema>;
 
-export type SearchFeedbackErrorCode =
-  | "SEARCH_NOT_FOUND"
-  | "FEEDBACK_WINDOW_EXPIRED"
-  | "SEARCH_FAILED"
-  | "PREVIEW_TEAM_NOT_ALLOWED"
-  | "TEAM_OPTED_OUT"
-  | "INVALID_BODY"
-  | "DB_DISABLED"
-  | "INTERNAL";
-
 export type SearchFeedbackResponse =
-  | (ErrorResponse & { feedbackErrorCode?: SearchFeedbackErrorCode })
+  | ErrorResponse
   | {
       success: true;
       feedbackId: string;
@@ -2335,17 +2302,8 @@ export type EndpointFeedbackRequestInput = z.input<
   typeof endpointFeedbackSchema
 >;
 
-export type EndpointFeedbackErrorCode =
-  | "JOB_NOT_FOUND"
-  | "FEEDBACK_WINDOW_EXPIRED"
-  | "PREVIEW_TEAM_NOT_ALLOWED"
-  | "TEAM_OPTED_OUT"
-  | "INVALID_BODY"
-  | "DB_DISABLED"
-  | "INTERNAL";
-
 export type EndpointFeedbackResponse =
-  | (ErrorResponse & { feedbackErrorCode?: EndpointFeedbackErrorCode })
+  | ErrorResponse
   | {
       success: true;
       feedbackId: string;

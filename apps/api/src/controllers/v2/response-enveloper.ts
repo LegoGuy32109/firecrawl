@@ -15,7 +15,7 @@ import type {
 
 type PrivacyMode = Diagnostics["privacy"]["mode"];
 
-export type EnvelopeContext = {
+type EnvelopeContext = {
   traceId?: string;
   zeroDataRetention?: boolean;
   privacyMode?: PrivacyMode;
@@ -23,7 +23,7 @@ export type EnvelopeContext = {
   durationMs?: number;
 };
 
-export type DiagnosticStepInput = {
+type DiagnosticStepInput = {
   name: string;
   status: DiagnosticStep["status"];
   code?: DiagnosticStep["code"];
@@ -35,7 +35,7 @@ export type DiagnosticStepInput = {
   endedAt?: string;
 };
 
-export type EnvelopeResult<TBody> = {
+type EnvelopeResult<TBody> = {
   httpStatus: number;
   body: TBody;
 };
@@ -223,7 +223,9 @@ function statusForWarnings(warning?: string, warnings?: WarningEntry[]) {
 export function okResponse<TBody extends Record<string, unknown>>(
   body: TBody,
   ctx: Request | EnvelopeContext,
-): EnvelopeResult<TBody & ResponseCore> {
+): EnvelopeResult<
+  TBody & ResponseCore & { success: true; status: "ok" | "warning" }
+> {
   const warning = typeof body.warning === "string" ? body.warning : undefined;
   const warnings = Array.isArray(body.warnings)
     ? (body.warnings as WarningEntry[])
@@ -236,7 +238,7 @@ export function okResponse<TBody extends Record<string, unknown>>(
       success: true,
       status: statusForWarnings(warning, warnings),
       diagnostics: diagnosticsForRequest(ctx),
-    } as TBody & ResponseCore,
+    } as TBody & ResponseCore & { success: true; status: "ok" | "warning" },
   };
 }
 
@@ -244,7 +246,7 @@ export function warningResponse<TBody extends Record<string, unknown>>(
   body: TBody,
   warnings: WarningEntry[],
   ctx: Request | EnvelopeContext,
-): EnvelopeResult<TBody & ResponseCore> {
+): EnvelopeResult<TBody & ResponseCore & { success: true; status: "warning" }> {
   return {
     httpStatus: 200,
     body: {
@@ -253,7 +255,7 @@ export function warningResponse<TBody extends Record<string, unknown>>(
       status: "warning",
       warnings,
       diagnostics: diagnosticsForRequest(ctx),
-    } as TBody & ResponseCore,
+    } as TBody & ResponseCore & { success: true; status: "warning" },
   };
 }
 

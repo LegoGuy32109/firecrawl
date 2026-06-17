@@ -36,6 +36,11 @@ import {
   ScrapeError,
   ScrapeWarning,
 } from "../../error-codes";
+import type {
+  ErrorDetailsFor,
+  ErrorDetailsMap,
+  WarningDetailsMap,
+} from "../../error-details";
 
 const errorEnums = [
   AuthError,
@@ -67,6 +72,14 @@ const warningEnums = [
   MapWarning,
   CrawlWarning,
 ];
+
+const typedDnsDetails: ErrorDetailsFor<ScrapeError.DNS> = {
+  hostname: "example.com",
+};
+const typedErrorDetails: ErrorDetailsMap[ScrapeError.DNS] = typedDnsDetails;
+const typedWarningDetails: WarningDetailsMap[MediaWarning.AUDIO_UNAVAILABLE] = {
+  reason: "not_configured",
+};
 
 describe("error catalog", () => {
   it("is complete for every error code", () => {
@@ -114,6 +127,9 @@ describe("error catalog", () => {
   });
 
   it("builds warning occurrences without drifting from the supplied message", () => {
+    expect(typedErrorDetails).toEqual({ hostname: "example.com" });
+    expect(typedWarningDetails).toEqual({ reason: "not_configured" });
+
     const detailed = makeWarning(
       MediaWarning.AUDIO_UNAVAILABLE,
       "Audio extraction is unavailable.",
@@ -135,8 +151,8 @@ describe("error catalog", () => {
     });
 
     if (false) {
-      // @ts-expect-error Details must match the warning code.
       makeWarning(MediaWarning.AUDIO_UNAVAILABLE, "x", {
+        // @ts-expect-error Details must match the warning code.
         unsupportedFeatures: ["video"],
       });
     }

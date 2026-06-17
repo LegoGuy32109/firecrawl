@@ -45,7 +45,13 @@ import {
 } from "../../services/monitoring/email_recipients";
 import { syncMonitorEmailRecipients } from "../../services/monitoring/email_recipients_sync";
 import { errorResponse } from "./response-enveloper";
-import { CommonError, MonitorError, RequestError } from "../../lib/error-codes";
+import {
+  CommonError,
+  LifecycleError,
+  MonitorError,
+  RequestError,
+} from "../../lib/error-codes";
+import type { ErrorDetails } from "../../lib/error-details";
 import type { StrictErrorResponse } from "./types";
 
 const logger = _logger.child({ module: "monitor-controller" });
@@ -62,15 +68,15 @@ function sendMonitorError(
   req: RequestWithAuth<any, any, any>,
   res: Response,
   status: number,
-  code: MonitorError | RequestError | CommonError,
+  code: MonitorError | RequestError | CommonError | LifecycleError,
   error: string | Error,
-  extra: Record<string, unknown> = {},
+  details?: ErrorDetails,
 ) {
-  const envelope = errorResponse(code, error, req, { httpStatus: status });
-  return res.status(envelope.httpStatus).json({
-    ...envelope.body,
-    ...extra,
+  const envelope = errorResponse(code, error, req, {
+    httpStatus: status,
+    ...(details ? { details } : {}),
   });
+  return res.status(envelope.httpStatus).json(envelope.body);
 }
 
 function rejectZdr(
@@ -82,7 +88,7 @@ function rejectZdr(
       req,
       res,
       400,
-      RequestError.BAD_REQUEST,
+      LifecycleError.ZDR_NOT_SUPPORTED,
       "Monitoring requires retained snapshots and diffs, and is not supported for zero data retention teams.",
     );
     return true;
@@ -487,7 +493,7 @@ export async function runMonitorController(
       409,
       MonitorError.CONFLICT,
       "Monitor check is already running.",
-      { checkId: monitor.current_check_id },
+      { reason: `Check ${monitor.current_check_id} is already running.` },
     );
   }
 

@@ -56,7 +56,11 @@ describe("agentStatusController", () => {
 
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "spark-1-mini" }),
+      expect.objectContaining({
+        model: "spark-1-mini",
+        status: "ok",
+        jobState: "completed",
+      }),
     );
   });
 
@@ -80,7 +84,11 @@ describe("agentStatusController", () => {
 
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "spark-1-pro" }),
+      expect.objectContaining({
+        model: "spark-1-pro",
+        status: "processing",
+        jobState: "processing",
+      }),
     );
   });
 

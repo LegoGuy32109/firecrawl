@@ -14,7 +14,11 @@ import {
 import { logger as _logger } from "../../lib/logger";
 import { getJobFromGCS } from "../../lib/gcs-jobs";
 import { CommonError, LifecycleError } from "../../lib/error-codes";
-import { asyncJobFailureResponse, errorResponse } from "./response-enveloper";
+import {
+  asyncJobFailureResponse,
+  errorResponse,
+  okResponse,
+} from "./response-enveloper";
 import { deserializeTransportableError } from "../../lib/error-serde";
 
 async function getExtractData(id: string): Promise<any> {
@@ -31,6 +35,19 @@ async function getExtractData(id: string): Promise<any> {
     return Array.isArray(redisData) ? redisData[0] : redisData;
   }
   return [];
+}
+
+function buildAsyncStatusBody(
+  req: any,
+  body: Record<string, unknown>,
+  jobState: "processing" | "completed",
+) {
+  const response = okResponse(body, req).body as any;
+  return {
+    ...response,
+    status: jobState === "processing" ? "processing" : response.status,
+    jobState,
+  };
 }
 
 export async function extractStatusController(
@@ -86,21 +103,23 @@ export async function extractStatusController(
         data = await getJobFromGCS(agent.id);
       }
 
-      return res.status(200).json({
-        success: true,
-        status: !agent
-          ? "processing"
-          : agent.is_successful
-            ? "completed"
-            : "failed",
-        error: agent?.error || undefined,
-        data,
-        expiresAt: new Date(
-          new Date(agent?.created_at ?? extractRequest.created_at).getTime() +
-            1000 * 60 * 60 * 24,
-        ).toISOString(),
-        creditsUsed: agent?.credits_cost,
-      });
+      const jobState = !agent ? "processing" : "completed";
+      return res.status(200).json(
+        buildAsyncStatusBody(
+          req,
+          {
+            data,
+            expiresAt: new Date(
+              new Date(
+                agent?.created_at ?? extractRequest.created_at,
+              ).getTime() +
+                1000 * 60 * 60 * 24,
+            ).toISOString(),
+            creditsUsed: agent?.credits_cost,
+          },
+          jobState,
+        ),
+      );
     }
   }
 
@@ -135,28 +154,35 @@ export async function extractStatusController(
           return res.status(response.httpStatus).json(response.body as any);
         }
 
-        return res.status(200).json({
-          success: dbExtract.is_successful,
-          data,
-          status: dbExtract.is_successful ? "completed" : "failed",
-          error: dbExtract.error || undefined,
-          expiresAt: new Date(
-            new Date(dbExtract.created_at).getTime() + 1000 * 60 * 60 * 24,
-          ).toISOString(),
-        });
+        return res.status(200).json(
+          buildAsyncStatusBody(
+            req,
+            {
+              data,
+              expiresAt: new Date(
+                new Date(dbExtract.created_at).getTime() + 1000 * 60 * 60 * 24,
+              ).toISOString(),
+            },
+            "completed",
+          ),
+        );
       }
     }
 
     // Fall back to extractRequest info
-    return res.status(200).json({
-      success: true,
-      data: [],
-      status: "processing",
-      expiresAt: new Date(
-        new Date(extractRequest?.created_at ?? Date.now()).getTime() +
-          1000 * 60 * 60 * 24,
-      ).toISOString(),
-    });
+    return res.status(200).json(
+      buildAsyncStatusBody(
+        req,
+        {
+          data: [],
+          expiresAt: new Date(
+            new Date(extractRequest?.created_at ?? Date.now()).getTime() +
+              1000 * 60 * 60 * 24,
+          ).toISOString(),
+        },
+        "processing",
+      ),
+    );
   }
 
   // Get result data if completed
@@ -195,34 +221,29 @@ export async function extractStatusController(
     return res.status(response.httpStatus).json(response.body as any);
   }
 
-  return res.status(200).json({
-    success: true,
-    data,
-    status: redisExtract.status,
-    error: (() => {
-      if (typeof redisExtract.error === "string") return redisExtract.error;
-      if (redisExtract.error && typeof redisExtract.error === "object") {
-        return typeof redisExtract.error.message === "string"
-          ? redisExtract.error.message
-          : typeof redisExtract.error.error === "string"
-            ? redisExtract.error.error
-            : JSON.stringify(redisExtract.error);
-      }
-      return undefined;
-    })(),
-    expiresAt: (await getExtractExpiry(req.params.jobId)).toISOString(),
-    steps: redisExtract.showSteps ? redisExtract.steps : undefined,
-    llmUsage: redisExtract.showLLMUsage ? redisExtract.llmUsage : undefined,
-    sources: redisExtract.showSources ? redisExtract.sources : undefined,
-    costTracking: redisExtract.showCostTracking
-      ? redisExtract.costTracking
-      : undefined,
-    sessionIds: redisExtract.sessionIds ? redisExtract.sessionIds : undefined,
-    tokensUsed: redisExtract.tokensBilled
-      ? redisExtract.tokensBilled
-      : undefined,
-    creditsUsed: redisExtract.creditsBilled
-      ? redisExtract.creditsBilled
-      : undefined,
-  });
+  return res.status(200).json(
+    buildAsyncStatusBody(
+      req,
+      {
+        data,
+        expiresAt: (await getExtractExpiry(req.params.jobId)).toISOString(),
+        steps: redisExtract.showSteps ? redisExtract.steps : undefined,
+        llmUsage: redisExtract.showLLMUsage ? redisExtract.llmUsage : undefined,
+        sources: redisExtract.showSources ? redisExtract.sources : undefined,
+        costTracking: redisExtract.showCostTracking
+          ? redisExtract.costTracking
+          : undefined,
+        sessionIds: redisExtract.sessionIds
+          ? redisExtract.sessionIds
+          : undefined,
+        tokensUsed: redisExtract.tokensBilled
+          ? redisExtract.tokensBilled
+          : undefined,
+        creditsUsed: redisExtract.creditsBilled
+          ? redisExtract.creditsBilled
+          : undefined,
+      },
+      redisExtract.status === "completed" ? "completed" : "processing",
+    ),
+  );
 }

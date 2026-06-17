@@ -6,7 +6,7 @@ import {
 } from "../../lib/supabase-jobs";
 import { config } from "../../config";
 import { LifecycleError } from "../../lib/error-codes";
-import { errorResponse } from "./response-enveloper";
+import { errorResponse, okResponse } from "./response-enveloper";
 
 export async function agentCancelController(
   req: RequestWithAuth<{ jobId: string }, AgentCancelResponse, any>,
@@ -48,14 +48,16 @@ export async function agentCancelController(
   );
 
   if (resp.status === 409) {
-    return res.status(200).json({
-      success: true,
-      status: "cancelled",
+    const response = okResponse({}, req);
+    return res.status(response.httpStatus).json({
+      ...response.body,
+      jobState: "cancelled",
     } as any);
   }
 
-  return res.status(200).json({
-    success: true,
-    status: "cancelled",
+  const response = okResponse({}, req);
+  return res.status(response.httpStatus).json({
+    ...response.body,
+    jobState: "cancelled",
   } as any);
 }

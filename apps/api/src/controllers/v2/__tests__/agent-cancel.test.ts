@@ -53,7 +53,8 @@ describe("agentCancelController", () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
         success: true,
-        status: "cancelled",
+        status: "ok",
+        jobState: "cancelled",
       }),
     );
   });

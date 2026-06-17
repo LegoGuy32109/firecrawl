@@ -15,7 +15,7 @@ import { errorResponse } from "./response-enveloper";
 import {
   AgentError,
   DependencyError,
-  RequestError,
+  LifecycleError,
 } from "../../lib/error-codes";
 
 export async function agentController(
@@ -39,10 +39,10 @@ export async function agentController(
 
   if (getScrapeZDR(req.acuc?.flags) === "forced") {
     const envelope = errorResponse(
-      RequestError.BAD_REQUEST,
-      "Your team has zero data retention enabled. This is not supported on extract. Please contact support@firecrawl.com to unblock this feature.",
+      LifecycleError.ZDR_NOT_SUPPORTED,
+      "Your team has zero data retention enabled. This is not supported on agent. Please contact support@firecrawl.com to unblock this feature.",
       req,
-      { httpStatus: 400 },
+      { httpStatus: 422 },
     );
     return res.status(envelope.httpStatus).json(envelope.body);
   }

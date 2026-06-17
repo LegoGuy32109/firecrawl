@@ -1,5 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { AuthError, BillingError } from "../../../lib/error-codes";
+import {
+  AuthError,
+  BillingError,
+  RequestError,
+} from "../../../lib/error-codes";
 
 vi.mock("../../../config", () => ({
   config: {
@@ -9,6 +13,10 @@ vi.mock("../../../config", () => ({
 
 vi.mock("../../../lib/keyless", () => ({
   checkKeylessEligibility: vi.fn(),
+}));
+
+vi.mock("../../../lib/permissions", () => ({
+  checkPermissions: vi.fn(),
 }));
 
 vi.mock("../../../services/autumn/usage", () => ({
@@ -24,12 +32,17 @@ vi.mock("../../auth", () => ({
 }));
 
 import { concurrencyCheckController } from "../concurrency-check";
+import { crawlParamsPreviewController } from "../crawl-params-preview";
 import { creditUsageController } from "../credit-usage";
 import { keylessEligibilityController } from "../keyless-eligibility";
+import { parseController } from "../parse";
+import { scrapeController } from "../scrape";
 import { tokenUsageController } from "../token-usage";
 import { getTeamBalance } from "../../../services/autumn/usage";
+import { checkPermissions } from "../../../lib/permissions";
 
 const getTeamBalanceMock = vi.mocked(getTeamBalance);
+const checkPermissionsMock = vi.mocked(checkPermissions);
 
 function buildRes() {
   return {
@@ -82,6 +95,30 @@ describe("v2 request-level error envelopes", () => {
     );
   });
 
+  it("wraps crawl params preview validation failures in the v2 envelope", async () => {
+    const req = {
+      auth: { team_id: "team-1" },
+      body: { url: "not-a-url", prompt: "" },
+    } as any;
+    const res = buildRes();
+
+    await crawlParamsPreviewController(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        status: "failed",
+        code: RequestError.BAD_REQUEST,
+        diagnostics: expect.objectContaining({
+          privacy: expect.objectContaining({
+            zeroDataRetention: false,
+          }),
+        }),
+      }),
+    );
+  });
+
   it.each([
     ["token", tokenUsageController],
     ["credit", creditUsageController],
@@ -104,10 +141,87 @@ describe("v2 request-level error envelopes", () => {
           status: "failed",
           code: BillingError.UNAVAILABLE,
           details: expect.objectContaining({
-            service: "autumn",
+            dependency: "autumn",
           }),
         }),
       );
     },
   );
+
+  it("wraps scrape permission failures in the v2 envelope", async () => {
+    checkPermissionsMock.mockReturnValueOnce({
+      error:
+        "Zero Data Retention (ZDR) is not enabled for your team. Contact support@firecrawl.com to enable this feature.",
+    });
+
+    const req = {
+      auth: { team_id: "team-1" },
+      acuc: { flags: null },
+      body: {
+        url: "https://example.com",
+      },
+    } as any;
+    const res = buildRes();
+
+    await scrapeController(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        status: "failed",
+        code: RequestError.BAD_REQUEST,
+        error:
+          "Zero Data Retention (ZDR) is not enabled for your team. Contact support@firecrawl.com to enable this feature.",
+        diagnostics: expect.objectContaining({
+          privacy: expect.objectContaining({
+            zeroDataRetention: false,
+            mode: "disabled",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("wraps parse agent interop failures in the v2 envelope", async () => {
+    checkPermissionsMock.mockReturnValueOnce({});
+
+    const req = {
+      auth: { team_id: "team-1" },
+      acuc: { flags: null, concurrency: 1 },
+      body: {
+        file: {
+          buffer: Buffer.from("<html><body>hello</body></html>"),
+          filename: "upload.html",
+          contentType: "text/html",
+          kind: "html",
+        },
+        formats: ["markdown"],
+        __agentInterop: {
+          auth: "definitely-wrong",
+          requestId: "request-1",
+          shouldBill: false,
+        },
+      },
+    } as any;
+    const res = buildRes();
+
+    await parseController(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        status: "failed",
+        code: RequestError.BAD_REQUEST,
+        error: expect.stringMatching(/agent interop/i),
+        diagnostics: expect.objectContaining({
+          privacy: expect.objectContaining({
+            zeroDataRetention: false,
+            mode: "disabled",
+          }),
+        }),
+      }),
+    );
+  });
 });

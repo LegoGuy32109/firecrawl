@@ -7,8 +7,6 @@ type MatchMap = Map<string, number>;
 const SRC_ROOT = path.resolve(__dirname, "../../");
 const ERROR_CODES_PATH = path.join(SRC_ROOT, "lib", "error-codes.ts");
 
-const ALLOWED_BARE_FAILURE_FILES = new Set<string>();
-
 const IGNORED_PRODUCTION_FILES = new Set([
   "lib/error-codes.ts",
   "lib/error-catalog.ts",
@@ -152,68 +150,63 @@ function collectBareFailureEnvelopeFiles(files: string[]): Set<string> {
     const sourceFile = parseSourceFile(file);
 
     visit(sourceFile, node => {
-      if (!ts.isCallExpression(node)) {
+      if (!ts.isObjectLiteralExpression(node)) {
         return;
       }
 
-      if (!ts.isPropertyAccessExpression(node.expression)) {
+      const isResponsePayload = (() => {
+        let current: ts.Node | undefined = node.parent;
+        while (current) {
+          if (ts.isCallExpression(current)) {
+            const expression = current.expression;
+            if (ts.isPropertyAccessExpression(expression)) {
+              return (
+                expression.name.text === "json" ||
+                expression.name.text === "send" ||
+                expression.name.text === "end"
+              );
+            }
+
+            if (ts.isIdentifier(expression)) {
+              return expression.text === "send";
+            }
+          }
+
+          current = current.parent;
+        }
+
+        return false;
+      })();
+
+      if (!isResponsePayload) {
         return;
       }
 
-      if (
-        node.expression.name.text !== "json" &&
-        node.expression.name.text !== "end"
-      ) {
-        return;
-      }
-
-      const statusCall = node.expression.expression;
-      if (
-        !ts.isCallExpression(statusCall) ||
-        !ts.isPropertyAccessExpression(statusCall.expression) ||
-        statusCall.expression.name.text !== "status"
-      ) {
-        return;
-      }
-
-      const statusArg = statusCall.arguments[0];
-      if (!statusArg || !ts.isNumericLiteral(statusArg)) {
-        return;
-      }
-
-      const status = Number(statusArg.text);
-      if (status < 400 || status >= 600) {
-        return;
-      }
-
-      if (node.expression.name.text === "end") {
-        matches.add(relative);
-        return;
-      }
-
-      const body = node.arguments[0];
-      if (!body || !ts.isObjectLiteralExpression(body)) {
-        return;
-      }
-
-      if (body.properties.length !== 1) {
-        return;
-      }
-
-      const hasErrorProperty = body.properties.some(property => {
+      const props = new Map<string, ts.PropertyAssignment>();
+      for (const property of node.properties) {
         if (!ts.isPropertyAssignment(property)) {
-          return false;
+          continue;
         }
 
         const name = property.name;
         if (ts.isIdentifier(name) || ts.isStringLiteral(name)) {
-          return name.text === "error";
+          props.set(name.text, property);
         }
+      }
 
-        return false;
-      });
+      const successProp = props.get("success");
+      if (
+        !successProp ||
+        successProp.initializer.kind !== ts.SyntaxKind.FalseKeyword
+      ) {
+        return;
+      }
 
-      if (!hasErrorProperty) {
+      if (
+        props.has("code") &&
+        props.has("status") &&
+        props.has("diagnostics")
+      ) {
         return;
       }
 
@@ -241,18 +234,15 @@ describe("Error code and failure-envelope regressions", () => {
     expect([...actual.entries()].sort()).toEqual([]);
   });
 
-  it("keeps bare v2 failure envelopes limited to the known legacy files", () => {
+  it("keeps bare v2 failure envelopes out of response payloads", () => {
     const sourceFiles = [
       ...walkSourceFiles(path.join(SRC_ROOT, "controllers", "v2")),
-      ...walkSourceFiles(path.join(SRC_ROOT, "routes")),
+      path.join(SRC_ROOT, "routes", "v2.ts"),
     ];
 
     const actual = collectBareFailureEnvelopeFiles(sourceFiles);
-    const unexpected = [...actual].filter(
-      relative => !ALLOWED_BARE_FAILURE_FILES.has(relative),
-    );
 
-    expect(unexpected).toEqual([]);
+    expect([...actual].sort()).toEqual([]);
   });
 
   it("keeps browser and proxy v2 failure envelopes on the response enveloper", () => {

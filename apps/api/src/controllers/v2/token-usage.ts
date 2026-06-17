@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { ErrorResponse, RequestWithAuth } from "./types";
 import { getTeamBalance } from "../../services/autumn/usage";
-import { errorResponse } from "./response-enveloper";
+import { errorResponse, okResponse } from "./response-enveloper";
 import { BillingError } from "../../lib/error-codes";
 
 const TOKENS_PER_CREDIT = 15;
@@ -28,20 +28,24 @@ export async function tokenUsageController(
       "Could not find token usage information",
       req,
       {
-        details: { service: "autumn" },
+        details: { dependency: "autumn" },
       },
     );
     res.status(response.httpStatus).json(response.body);
     return;
   }
 
-  res.json({
-    success: true,
-    data: {
-      remainingTokens: balance.remaining * TOKENS_PER_CREDIT,
-      planTokens: balance.planCredits * TOKENS_PER_CREDIT,
-      billingPeriodStart: balance.periodStart,
-      billingPeriodEnd: balance.periodEnd,
+  const response = okResponse(
+    {
+      data: {
+        remainingTokens: balance.remaining * TOKENS_PER_CREDIT,
+        planTokens: balance.planCredits * TOKENS_PER_CREDIT,
+        billingPeriodStart: balance.periodStart,
+        billingPeriodEnd: balance.periodEnd,
+      },
     },
-  });
+    req,
+  );
+
+  res.status(response.httpStatus).json(response.body);
 }

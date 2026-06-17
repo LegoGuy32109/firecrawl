@@ -82,6 +82,12 @@ export async function scrapeWithFailure(
 ): Promise<{
   success: false;
   error: string;
+  code?: string;
+  status?: string;
+  diagnostics?: unknown;
+  errorId?: string;
+  sponsor_status?: string;
+  login_url?: string;
 }> {
   const raw = await scrapeRaw(body, identity);
   expectScrapeToFail(raw);
@@ -263,6 +269,11 @@ export async function parseWithFailure(
   success: false;
   error: string;
   code?: string;
+  status?: string;
+  diagnostics?: unknown;
+  errorId?: string;
+  sponsor_status?: string;
+  login_url?: string;
 }> {
   const req = request(TEST_API_URL)
     .post("/v2/parse")
