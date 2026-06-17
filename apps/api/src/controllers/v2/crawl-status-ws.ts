@@ -21,12 +21,9 @@ import * as Sentry from "@sentry/node";
 import { getConcurrencyLimitedJobs } from "../../lib/concurrency-limit";
 import { scrapeQueue, NuQJobStatus } from "../../services/worker/nuq-router";
 import { getErrorContactMessage } from "../../lib/deployment";
-import {
-  asyncJobFailureResponse,
-  errorResponse,
-  okResponse,
-} from "./response-enveloper";
+import { asyncJobFailureResponse, okResponse } from "./response-enveloper";
 import { CommonError, LifecycleError } from "../../lib/error-codes";
+import { explainError } from "../../lib/error-catalog";
 import { deserializeTransportableError } from "../../lib/error-serde";
 
 type ErrorMessage = {
@@ -87,21 +84,18 @@ async function crawlStatusWS(
 ) {
   const sc = await getCrawl(req.params.jobId);
   if (!sc) {
-    const response = errorResponse(
-      LifecycleError.JOB_NOT_FOUND,
-      "Job not found",
-      req,
-    );
-    return close(ws, 1008, { type: "error", error: response.body.error });
+    const code = LifecycleError.JOB_NOT_FOUND;
+    const entry = explainError(code);
+    return close(ws, 1008, {
+      type: "error",
+      error: entry.explanation,
+    });
   }
 
   if (sc.team_id !== req.auth.team_id) {
-    const response = errorResponse(
-      LifecycleError.JOB_WRONG_TEAM,
-      "Forbidden",
-      req,
-    );
-    return close(ws, 3003, { type: "error", error: response.body.error });
+    const code = LifecycleError.JOB_WRONG_TEAM;
+    const entry = explainError(code);
+    return close(ws, 3003, { type: "error", error: entry.explanation });
   }
 
   let doneJobIDs: string[] = [];

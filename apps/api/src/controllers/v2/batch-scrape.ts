@@ -74,10 +74,9 @@ export async function batchScrapeController(
     req.body.__agentInterop.auth !== config.AGENT_INTEROP_SECRET
   ) {
     // NOTE: INVALID_API_KEY is 401 in the catalog (was 403).
-    return r.fail(AuthError.INVALID_API_KEY, "Invalid agent interop.");
+    return r.fail(AuthError.INTEROP_FORBIDDEN, "Invalid agent interop.");
   } else if (req.body.__agentInterop && !config.AGENT_INTEROP_SECRET) {
-    // NOTE: MISSING_API_KEY is 401 in the catalog (was 403).
-    return r.fail(AuthError.MISSING_API_KEY, "Agent interop is not enabled.");
+    return r.fail(AuthError.INTEROP_FORBIDDEN, "Agent interop is not enabled.");
   }
 
   const id = req.body.appendToId ?? uuidv7();

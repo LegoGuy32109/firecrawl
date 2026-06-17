@@ -40,5 +40,6 @@ export async function keylessEligibilityController(
     (typeof ipHeader === "string" ? ipHeader.trim() : "") || req.ip || "";
 
   const result = await checkKeylessEligibility(ip);
+  // raw-response: trusted proxy probe returns upstream eligibility payload verbatim
   res.status(200).json(result);
 }

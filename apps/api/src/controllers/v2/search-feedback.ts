@@ -51,5 +51,6 @@ export async function searchFeedbackController(
     }),
   );
 
+  // raw-response: feedback helper already formats the exact response envelope.
   return res.status(result.status).json(result.body as SearchFeedbackResponse);
 }

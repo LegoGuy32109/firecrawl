@@ -1314,11 +1314,27 @@ export type VideoItem = {
   metadata?: Record<string, unknown>;
 };
 
-type ResponseStatus = "ok" | "warning" | "processing" | "failed";
+export enum ResponseStatus {
+  Ok = "ok",
+  Warning = "warning",
+  Processing = "processing",
+  Failed = "failed",
+}
 
-type JobState = "processing" | "completed" | "cancelled" | "failed";
+export enum JobState {
+  Processing = "processing",
+  Completed = "completed",
+  Cancelled = "cancelled",
+  Failed = "failed",
+}
 
-type DiagnosticStatus = "ok" | "warning" | "failed" | "skipped" | "timed_out";
+export enum DiagnosticStatus {
+  Ok = "ok",
+  Warning = "warning",
+  Failed = "failed",
+  Skipped = "skipped",
+  TimedOut = "timed_out",
+}
 
 export type PrivacyMode =
   | "disabled"
@@ -1384,7 +1400,7 @@ export type ResponseCore = {
 
 type ErrorCore = ResponseCore & {
   success: false;
-  status: "failed";
+  status: ResponseStatus.Failed;
   code: ErrorCodes;
   error: string;
   errorId?: string;
@@ -1399,7 +1415,7 @@ export type StrictErrorResponse = ErrorCore & {
 export type ErrorResponse = StrictErrorResponse;
 
 export type AsyncJobFailureResponse<TData = unknown> = ErrorCore & {
-  jobState: Extract<JobState, "failed">;
+  jobState: JobState.Failed;
   failureCount?: number;
   failuresByCode?: Partial<Record<ErrorCodes, number>>;
   data?: TData;
@@ -1412,12 +1428,12 @@ export type AsyncJobFailureResponse<TData = unknown> = ErrorCore & {
 
 export type ScrapeResponse =
   | ErrorResponse
-  | {
+  | (ResponseCore & {
       success: true;
       warning?: string;
       data: Document;
       scrape_id?: string;
-    };
+    });
 
 export interface URLTrace {
   url: string;
@@ -1456,45 +1472,48 @@ export interface ExtractResponse {
 
 export type AgentResponse =
   | ErrorResponse
-  | {
-      success: boolean;
+  | (ResponseCore & {
+      success: true;
       id: string;
-    };
+    });
 
 export type AgentStatusResponse =
   | ErrorResponse
-  | {
-      success: boolean;
-      status: "processing" | "completed" | "failed";
+  | (ResponseCore & {
+      success: true;
+      status:
+        | ResponseStatus.Processing
+        | ResponseStatus.Failed
+        | ResponseStatus.Ok;
       error?: string;
       data?: any;
       model?: "spark-1-pro" | "spark-1-mini";
       expiresAt: string;
       creditsUsed?: number;
-    };
+    });
 
 export type AgentCancelResponse =
   | ErrorResponse
-  | {
-      success: boolean;
-    };
+  | (ResponseCore & {
+      success: true;
+    });
 
 export type CrawlResponse =
   | ErrorResponse
-  | {
+  | (ResponseCore & {
       success: true;
       id: string;
       url: string;
-    };
+    });
 
 export type BatchScrapeResponse =
   | ErrorResponse
-  | {
+  | (ResponseCore & {
       success: true;
       id: string;
       url: string;
       invalidURLs?: string[];
-    };
+    });
 
 // Map document interface (transitioned from v1)
 export interface MapDocument {
@@ -1506,12 +1525,12 @@ export interface MapDocument {
 // V2 Map Response with dictionary format
 export type MapResponse =
   | ErrorResponse
-  | {
+  | (ResponseCore & {
       success: true;
       id: string;
       links?: MapDocument[];
       warning?: string;
-    };
+    });
 
 export type CrawlStatusParams = {
   jobId: string;
@@ -1523,11 +1542,11 @@ export type ConcurrencyCheckParams = {
 
 export type ConcurrencyCheckResponse =
   | ErrorResponse
-  | {
+  | (ResponseCore & {
       success: true;
       concurrency: number;
       maxConcurrency: number;
-    };
+    });
 
 export type CrawlStatusResponse =
   | ErrorResponse
@@ -1535,9 +1554,12 @@ export type CrawlStatusResponse =
       completed: number;
       total: number;
     })
-  | {
+  | (ResponseCore & {
       success: true;
-      status: "scraping" | "completed" | "failed" | "cancelled";
+      status:
+        | ResponseStatus.Processing
+        | ResponseStatus.Ok
+        | ResponseStatus.Failed;
       completed: number;
       total: number;
       creditsUsed: number;
@@ -1548,11 +1570,11 @@ export type CrawlStatusResponse =
       next?: string;
       data: Document[];
       warning?: string;
-    };
+    });
 
 export type OngoingCrawlsResponse =
   | ErrorResponse
-  | {
+  | (ResponseCore & {
       success: true;
       crawls: {
         id: string;
@@ -1561,11 +1583,12 @@ export type OngoingCrawlsResponse =
         created_at: string;
         options: CrawlerOptions;
       }[];
-    };
+    });
 
 export type CrawlErrorsResponse =
   | ErrorResponse
-  | {
+  | (ResponseCore & {
+      success: true;
       errors: {
         id: string;
         timestamp?: string;
@@ -1574,7 +1597,7 @@ export type CrawlErrorsResponse =
         error: string;
       }[];
       robotsBlocked: string[];
-    };
+    });
 
 type AuthObject = {
   team_id: string;

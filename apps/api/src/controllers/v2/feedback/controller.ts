@@ -39,6 +39,7 @@ export async function feedbackController(
     }),
   );
 
+  // raw-response: feedback endpoint returns the stored envelope directly.
   return res
     .status(result.status)
     .json(result.body as EndpointFeedbackResponse);

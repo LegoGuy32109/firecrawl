@@ -30,6 +30,7 @@ import { projectSearchTotalCredits } from "../../lib/keyless-credit-projection";
 import { applyAgentAuthDiscoveryHeader } from "../../lib/agent-auth-discovery";
 import { makeResponder } from "./response-enveloper";
 import {
+  AuthError,
   BillingError,
   CommonError,
   RequestError,
@@ -74,9 +75,12 @@ export async function searchController(
       config.AGENT_INTEROP_SECRET &&
       req.body.__agentInterop.auth !== config.AGENT_INTEROP_SECRET
     ) {
-      return r.fail(RequestError.BAD_REQUEST, "Invalid agent interop.");
+      return r.fail(AuthError.INTEROP_FORBIDDEN, "Invalid agent interop.");
     } else if (req.body.__agentInterop && !config.AGENT_INTEROP_SECRET) {
-      return r.fail(RequestError.BAD_REQUEST, "Agent interop is not enabled.");
+      return r.fail(
+        AuthError.INTEROP_FORBIDDEN,
+        "Agent interop is not enabled.",
+      );
     }
 
     const shouldBill = req.body.__agentInterop?.shouldBill ?? true;

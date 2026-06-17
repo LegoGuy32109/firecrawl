@@ -3,13 +3,16 @@ import { errorCodeToHttpStatus } from "../../lib/error-catalog";
 import type { ErrorCodes } from "../../lib/error-codes";
 import { CommonError } from "../../lib/error-codes";
 import type { ErrorDetails } from "../../lib/error-details";
-import type {
+import {
   AsyncJobFailureResponse,
   Diagnostics,
   ErrorResponse,
   DiagnosticStep,
+  DiagnosticStatus,
+  JobState,
   RequestPrivacy,
   ResponseCore,
+  ResponseStatus,
   StrictErrorResponse,
   Warning,
 } from "./types";
@@ -145,11 +148,11 @@ const CONTROLLED_DIAGNOSTIC_STEP_NAMES = new Set([
 ]);
 
 const CONTROLLED_DIAGNOSTIC_STATUSES: DiagnosticStep["status"][] = [
-  "ok",
-  "warning",
-  "failed",
-  "skipped",
-  "timed_out",
+  DiagnosticStatus.Ok,
+  DiagnosticStatus.Warning,
+  DiagnosticStatus.Failed,
+  DiagnosticStatus.Skipped,
+  DiagnosticStatus.TimedOut,
 ];
 
 function normalizeDiagnosticStepName(name: string): string {
@@ -163,7 +166,7 @@ function normalizeDiagnosticStepStatus(
     status as DiagnosticStep["status"],
   )
     ? (status as DiagnosticStep["status"])
-    : "skipped";
+    : DiagnosticStatus.Skipped;
 }
 
 // Steps are written through this projection so reduced diagnostics can never leak raw text.
@@ -218,14 +221,20 @@ export function addStep(
 }
 
 function statusForWarnings(warning?: string, warnings?: Warning[]) {
-  return warning || (warnings?.length ?? 0) > 0 ? "warning" : "ok";
+  return warning || (warnings?.length ?? 0) > 0
+    ? ResponseStatus.Warning
+    : ResponseStatus.Ok;
 }
 
 export function okResponse<TBody extends Record<string, unknown>>(
   body: TBody,
   ctx: Request | EnvelopeContext,
 ): EnvelopeResult<
-  TBody & ResponseCore & { success: true; status: "ok" | "warning" }
+  TBody &
+    ResponseCore & {
+      success: true;
+      status: ResponseStatus.Ok | ResponseStatus.Warning;
+    }
 > {
   const warning = typeof body.warning === "string" ? body.warning : undefined;
   const warnings = Array.isArray(body.warnings)
@@ -239,7 +248,11 @@ export function okResponse<TBody extends Record<string, unknown>>(
       success: true,
       status: statusForWarnings(warning, warnings),
       diagnostics: diagnosticsForRequest(ctx),
-    } as TBody & ResponseCore & { success: true; status: "ok" | "warning" },
+    } as TBody &
+      ResponseCore & {
+        success: true;
+        status: ResponseStatus.Ok | ResponseStatus.Warning;
+      },
   };
 }
 
@@ -247,16 +260,22 @@ export function warningResponse<TBody extends Record<string, unknown>>(
   body: TBody,
   warnings: Warning[],
   ctx: Request | EnvelopeContext,
-): EnvelopeResult<TBody & ResponseCore & { success: true; status: "warning" }> {
+): EnvelopeResult<
+  TBody & ResponseCore & { success: true; status: ResponseStatus.Warning }
+> {
   return {
     httpStatus: 200,
     body: {
       ...body,
       success: true,
-      status: "warning",
+      status: ResponseStatus.Warning,
       warnings,
       diagnostics: diagnosticsForRequest(ctx),
-    } as TBody & ResponseCore & { success: true; status: "warning" },
+    } as TBody &
+      ResponseCore & {
+        success: true;
+        status: ResponseStatus.Warning;
+      },
   };
 }
 
@@ -267,16 +286,15 @@ export function errorResponse(
   opts: {
     details?: ErrorDetails;
     errorId?: string;
-    httpStatus?: number;
     sponsor_status?: string;
     login_url?: string;
   } = {},
 ): EnvelopeResult<ErrorResponse> {
   return {
-    httpStatus: opts.httpStatus ?? errorCodeToHttpStatus(code),
+    httpStatus: errorCodeToHttpStatus(code),
     body: {
       success: false,
-      status: "failed",
+      status: ResponseStatus.Failed,
       code,
       error: typeof error === "string" ? error : error.message,
       diagnostics: diagnosticsForRequest(ctx),
@@ -312,7 +330,7 @@ export function asyncJobFailureResponse<TData = unknown>(
         details: opts.details,
         errorId: opts.errorId,
       }).body as StrictErrorResponse),
-      jobState: "failed",
+      jobState: JobState.Failed,
       ...(opts.data !== undefined ? { data: opts.data } : {}),
       ...(opts.failureCount !== undefined
         ? { failureCount: opts.failureCount }
@@ -399,7 +417,7 @@ export function makeResponder(req: Request, res: Response): Responder {
     opts: FailOpts = {},
   ): StrictErrorResponse => ({
     success: false,
-    status: "failed",
+    status: ResponseStatus.Failed,
     code,
     error: toMessage(error),
     diagnostics,
@@ -438,7 +456,7 @@ export function makeResponder(req: Request, res: Response): Responder {
       return res.status(200).json({
         ...body,
         success: true,
-        status: "warning",
+        status: ResponseStatus.Warning,
         warnings,
         diagnostics,
       });
@@ -447,7 +465,7 @@ export function makeResponder(req: Request, res: Response): Responder {
       return res.status(200).json({
         ...body,
         success: true,
-        status: "processing",
+        status: ResponseStatus.Processing,
         diagnostics,
       });
     },
@@ -459,7 +477,7 @@ export function makeResponder(req: Request, res: Response): Responder {
     asyncFail(code, error, opts = {}) {
       return res.status(200).json({
         ...failBody(code, error, opts),
-        jobState: "failed",
+        jobState: JobState.Failed,
         ...(opts.data !== undefined ? { data: opts.data } : {}),
         ...(opts.failureCount !== undefined
           ? { failureCount: opts.failureCount }

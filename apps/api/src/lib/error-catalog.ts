@@ -73,6 +73,11 @@ export const ERROR_CATALOG = {
     "The key cannot use keyless access.",
     "Use a standard API key or complete keyless setup.",
   ),
+  [AuthError.INTEROP_FORBIDDEN]: entry(
+    403,
+    "Agent interop is not enabled or the provided agent interop secret is invalid.",
+    "Use a valid agent interop secret or disable agent interop.",
+  ),
   [AuthError.TEAM_SUSPENDED]: entry(
     403,
     "The team is suspended.",
@@ -154,7 +159,7 @@ export const ERROR_CATALOG = {
     "Start a new job if needed.",
   ),
   [LifecycleError.ZDR_NOT_SUPPORTED]: entry(
-    400,
+    422,
     "The requested feature is not available with ZDR.",
     "Disable ZDR or remove the feature.",
   ),
@@ -329,7 +334,7 @@ export const ERROR_CATALOG = {
     "Use a narrower URL or retry.",
   ),
   [MapError.FAILED]: entry(
-    502,
+    500,
     "The map operation failed.",
     "Retry or use a different starting URL.",
   ),

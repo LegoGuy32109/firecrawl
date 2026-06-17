@@ -1,6 +1,6 @@
 import { Response } from "express";
 import { config } from "../../config";
-import { RequestWithAuth } from "./types";
+import { JobState, RequestWithAuth } from "./types";
 import {
   getExtract,
   getExtractExpiry,
@@ -36,10 +36,12 @@ async function getExtractData(id: string): Promise<any> {
 function sendAsyncStatus(
   r: Responder,
   body: Record<string, unknown>,
-  jobState: "processing" | "completed",
+  jobState: JobState.Processing | JobState.Completed,
 ) {
   const withState = { ...body, jobState };
-  return jobState === "processing" ? r.processing(withState) : r.ok(withState);
+  return jobState === JobState.Processing
+    ? r.processing(withState)
+    : r.ok(withState);
 }
 
 export async function extractStatusController(
@@ -84,7 +86,7 @@ export async function extractStatusController(
         data = await getJobFromGCS(agent.id);
       }
 
-      const jobState = !agent ? "processing" : "completed";
+      const jobState = !agent ? JobState.Processing : JobState.Completed;
       return sendAsyncStatus(
         r,
         {
@@ -137,7 +139,7 @@ export async function extractStatusController(
               new Date(dbExtract.created_at).getTime() + 1000 * 60 * 60 * 24,
             ).toISOString(),
           },
-          "completed",
+          JobState.Completed,
         );
       }
     }
@@ -152,7 +154,7 @@ export async function extractStatusController(
             1000 * 60 * 60 * 24,
         ).toISOString(),
       },
-      "processing",
+      JobState.Processing,
     );
   }
 
@@ -209,6 +211,8 @@ export async function extractStatusController(
         ? redisExtract.creditsBilled
         : undefined,
     },
-    redisExtract.status === "completed" ? "completed" : "processing",
+    redisExtract.status === "completed"
+      ? JobState.Completed
+      : JobState.Processing,
   );
 }

@@ -8,7 +8,7 @@ import {
 } from "../../lib/crawl-redis";
 import * as Sentry from "@sentry/node";
 import { configDotenv } from "dotenv";
-import { RequestWithAuth, scrapeOptions } from "./types";
+import { JobState, RequestWithAuth, scrapeOptions } from "./types";
 import { crawlGroup } from "../../services/worker/nuq-router";
 import { normalizeOwnerId } from "../../lib/owner-id";
 import { removeConcurrencyLimitedJobs } from "../../lib/concurrency-limit";
@@ -62,7 +62,7 @@ export async function crawlCancelController(
     }
 
     // Cancellation is a SUCCESS terminal state, not an error.
-    return r.ok({ jobState: "cancelled" });
+    return r.ok({ jobState: JobState.Cancelled });
   } catch (error) {
     Sentry.captureException(error);
     logger.error(error);

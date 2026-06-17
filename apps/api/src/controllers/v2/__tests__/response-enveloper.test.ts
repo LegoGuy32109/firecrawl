@@ -1,18 +1,28 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   RateError,
   ScrapeError,
   ScrapeWarning,
 } from "../../../lib/error-codes";
+import { DiagnosticStatus, JobState, ResponseStatus } from "../types";
 import {
   asyncJobFailureResponse,
   addStep,
   buildDiagnosticsPrivacy,
   errorResponse,
+  makeResponder,
   okResponse,
   warningResponse,
   diagnosticsForRequest,
 } from "../response-enveloper";
+
+function createResponse() {
+  const res: any = {
+    status: vi.fn().mockReturnThis(),
+    json: vi.fn().mockReturnThis(),
+  };
+  return res;
+}
 
 describe("v2 response enveloper", () => {
   it("always includes diagnostics privacy", () => {
@@ -62,6 +72,29 @@ describe("v2 response enveloper", () => {
     });
   });
 
+  it("defaults responder privacy safely before auth", () => {
+    const res = createResponse();
+    const r = makeResponder({} as any, res);
+
+    r.step({ name: "request", status: DiagnosticStatus.Ok });
+    r.processing({ data: { ok: true } });
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        status: ResponseStatus.Processing,
+        diagnostics: expect.objectContaining({
+          privacy: {
+            zeroDataRetention: false,
+            mode: "disabled",
+            reduced: false,
+          },
+        }),
+      }),
+    );
+  });
+
   it("strips unsafe step data when privacy is reduced", () => {
     const diagnostics = diagnosticsForRequest(undefined, {
       privacyMode: "forced",
@@ -71,7 +104,7 @@ describe("v2 response enveloper", () => {
       diagnostics,
       {
         name: "unsafe-step",
-        status: "warning",
+        status: DiagnosticStatus.Warning,
         code: ScrapeError.TIMEOUT,
         message: "raw message with secret https://example.com",
         messageTemplate: "Request to {host} timed out",
@@ -97,7 +130,7 @@ describe("v2 response enveloper", () => {
       diagnostics,
       {
         name: "handler",
-        status: "ok",
+        status: DiagnosticStatus.Ok,
         code: ScrapeWarning.ENGINE_PARTIAL_FEATURES,
         message: "partial completion",
         details: { unsupportedFeatures: ["actions"] },
@@ -159,7 +192,7 @@ describe("v2 response enveloper", () => {
     expect(response.httpStatus).toBe(429);
     expect(response.body).toMatchObject({
       success: false,
-      status: "failed",
+      status: ResponseStatus.Failed,
       code: RateError.RATE_LIMIT_EXCEEDED,
       error: "Too many requests",
     });
@@ -184,8 +217,8 @@ describe("v2 response enveloper", () => {
     expect(response.httpStatus).toBe(200);
     expect(response.body).toMatchObject({
       success: false,
-      status: "failed",
-      jobState: "failed",
+      status: ResponseStatus.Failed,
+      jobState: JobState.Failed,
       code: ScrapeError.ALL_ENGINES_FAILED,
       failureCount: 2,
       failuresByCode: { [ScrapeError.ALL_ENGINES_FAILED]: 2 },

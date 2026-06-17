@@ -467,8 +467,9 @@ export async function browserExecuteController(
   } catch (err) {
     logger.error("Failed to execute code via browser service", { error: err });
     return r.fail(
-      BrowserError.EXECUTION_FAILED,
+      BrowserError.SERVICE_UNAVAILABLE,
       "Failed to execute code in browser session.",
+      { details: { dependency: "browser-service" } },
     );
   }
 
@@ -491,13 +492,26 @@ export async function browserExecuteController(
 
   const hasError = execResult.exitCode !== 0 || execResult.killed;
 
+  if (hasError) {
+    // CHANGED: execution failures are surfaced as cataloged 422 responses instead of a 200 body.
+    return r.fail(
+      BrowserError.EXECUTION_FAILED,
+      execResult.stderr || "Execution failed",
+      {
+        details: {
+          exitCode: execResult.exitCode,
+          killed: execResult.killed,
+        },
+      },
+    );
+  }
+
   return r.ok({
     stdout: execResult.stdout,
     result: execResult.result,
     stderr: execResult.stderr,
     exitCode: execResult.exitCode,
     killed: execResult.killed,
-    ...(hasError ? { error: execResult.stderr || "Execution failed" } : {}),
   });
 }
 
@@ -695,6 +709,7 @@ export async function browserWebhookDestroyedController(
   const session = await getBrowserSessionByBrowserId(browserId);
   if (!session) {
     logger.warn("No session found for destroyed webhook", { browserId });
+    // raw-response: webhook ack is a fixed upstream-facing body.
     return res.status(200).json({ ok: true });
   }
 
@@ -717,6 +732,7 @@ export async function browserWebhookDestroyedController(
       sessionId: session.id,
       browserId,
     });
+    // raw-response: webhook ack is a fixed upstream-facing body.
     return res.status(200).json({ ok: true });
   }
 
@@ -766,5 +782,6 @@ export async function browserWebhookDestroyedController(
     rate,
   });
 
+  // raw-response: webhook ack is a fixed upstream-facing body.
   return res.status(200).json({ ok: true });
 }

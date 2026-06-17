@@ -1,5 +1,5 @@
 import { Response } from "express";
-import { AgentStatusResponse, RequestWithAuth } from "./types";
+import { AgentStatusResponse, JobState, RequestWithAuth } from "./types";
 import {
   supabaseGetAgentByIdDirect,
   supabaseGetAgentRequestByIdDirect,
@@ -94,7 +94,7 @@ export async function agentStatusController(
     );
   }
 
-  const successStatus = !agent ? "processing" : "completed";
+  const successStatus = !agent ? JobState.Processing : JobState.Completed;
   const body = {
     data,
     model,

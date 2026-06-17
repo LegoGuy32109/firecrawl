@@ -1,5 +1,5 @@
 import { Response } from "express";
-import { AgentCancelResponse, RequestWithAuth } from "./types";
+import { AgentCancelResponse, JobState, RequestWithAuth } from "./types";
 import {
   supabaseGetAgentByIdDirect,
   supabaseGetAgentRequestByIdDirect,
@@ -43,11 +43,11 @@ export async function agentCancelController(
 
   if (resp.status === 409) {
     return r.ok({
-      jobState: "cancelled",
+      jobState: JobState.Cancelled,
     } as any);
   }
 
   return r.ok({
-    jobState: "cancelled",
+    jobState: JobState.Cancelled,
   } as any);
 }

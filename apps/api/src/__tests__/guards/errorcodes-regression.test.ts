@@ -217,6 +217,90 @@ function collectBareFailureEnvelopeFiles(files: string[]): Set<string> {
   return matches;
 }
 
+function collectRawResponseCallsites(files: string[]): Set<string> {
+  const matches = new Set<string>();
+
+  for (const file of files) {
+    const relative = getRelativeFile(file);
+    const sourceFile = parseSourceFile(file);
+    const text = sourceFile.getFullText();
+
+    const hasMarker = (node: ts.Node): boolean => {
+      const line = sourceFile.getLineAndCharacterOfPosition(
+        node.getStart(sourceFile),
+      ).line;
+      const inspectLine = (lineIndex: number): boolean => {
+        if (lineIndex < 0) {
+          return false;
+        }
+        const start = sourceFile.getPositionOfLineAndCharacter(lineIndex, 0);
+        const end =
+          lineIndex + 1 <
+          sourceFile.getLineAndCharacterOfPosition(text.length).line
+            ? sourceFile.getPositionOfLineAndCharacter(lineIndex + 1, 0)
+            : text.length;
+        return text.slice(start, end).includes("raw-response:");
+      };
+      return inspectLine(line) || inspectLine(line - 1);
+    };
+
+    visit(sourceFile, node => {
+      if (!ts.isCallExpression(node) || hasMarker(node)) {
+        return;
+      }
+
+      let current: ts.Node | undefined = node;
+      let inControllerOrRoute = false;
+      while (current) {
+        if (
+          (ts.isFunctionDeclaration(current) ||
+            ts.isFunctionExpression(current) ||
+            ts.isArrowFunction(current)) &&
+          current.parent &&
+          ts.isVariableDeclaration(current.parent)
+        ) {
+          const name = current.parent.name;
+          if (ts.isIdentifier(name) && name.text.endsWith("Controller")) {
+            inControllerOrRoute = true;
+            break;
+          }
+        }
+        current = current.parent;
+      }
+
+      if (!inControllerOrRoute && relative !== "routes/shared.ts") {
+        return;
+      }
+
+      const expr = node.expression;
+      const isJson =
+        ts.isPropertyAccessExpression(expr) &&
+        expr.name.text === "json" &&
+        ts.isIdentifier(expr.expression) &&
+        expr.expression.text === "res";
+      const isSend =
+        ts.isPropertyAccessExpression(expr) &&
+        expr.name.text === "send" &&
+        ts.isIdentifier(expr.expression) &&
+        expr.expression.text === "res";
+      const isStatusJson =
+        ts.isPropertyAccessExpression(expr) &&
+        expr.name.text === "json" &&
+        ts.isCallExpression(expr.expression) &&
+        ts.isPropertyAccessExpression(expr.expression.expression) &&
+        expr.expression.expression.name.text === "status" &&
+        ts.isIdentifier(expr.expression.expression.expression) &&
+        expr.expression.expression.expression.text === "res";
+
+      if (isJson || isSend || isStatusJson) {
+        matches.add(`${relative}:${getLine(sourceFile, node)}`);
+      }
+    });
+  }
+
+  return matches;
+}
+
 describe("Error code and failure-envelope regressions", () => {
   it("does not allow magic-string error code comparisons", () => {
     const sourceFiles = [
@@ -241,6 +325,17 @@ describe("Error code and failure-envelope regressions", () => {
     ];
 
     const actual = collectBareFailureEnvelopeFiles(sourceFiles);
+
+    expect([...actual].sort()).toEqual([]);
+  });
+
+  it("flags raw v2 response writes outside the responder and marker comments", () => {
+    const sourceFiles = [
+      ...walkSourceFiles(path.join(SRC_ROOT, "controllers", "v2")),
+      ...walkSourceFiles(path.join(SRC_ROOT, "routes")),
+    ].filter(file => !file.endsWith("response-enveloper.ts"));
+
+    const actual = collectRawResponseCallsites(sourceFiles);
 
     expect([...actual].sort()).toEqual([]);
   });

@@ -18,7 +18,10 @@ import {
   getRoutePattern,
 } from "../lib/http-metrics";
 import { UNSUPPORTED_SITE_MESSAGE } from "../lib/strings";
-import { errorResponse } from "../controllers/v2/response-enveloper";
+import {
+  errorResponse,
+  makeResponder,
+} from "../controllers/v2/response-enveloper";
 import {
   AuthError,
   BillingError,
@@ -59,10 +62,10 @@ function respondRequestError(
   opts: Parameters<typeof errorResponse>[3] = {},
 ) {
   if (isV2Request(req)) {
-    const response = errorResponse(code, error, req, opts);
-    return res.status(response.httpStatus).json(response.body);
+    return makeResponder(req as any, res).fail(code, error, opts);
   }
 
+  // raw-response: legacy non-v2 response body
   return res.status(legacyStatus).json(
     legacyBody ?? {
       success: false,
@@ -317,7 +320,7 @@ export function authMiddleware(
                 : error.includes("Invalid token")
                   ? AuthError.INVALID_API_KEY
                   : AuthError.MISSING_API_KEY;
-            const response = errorResponse(code, error, req, {
+            return makeResponder(req as any, res).fail(code, error, {
               details:
                 code === AuthError.INVALID_API_KEY
                   ? { reason: error }
@@ -327,9 +330,9 @@ export function authMiddleware(
                   ? "https://firecrawl.dev/signin"
                   : undefined,
             });
-            return res.status(response.httpStatus).json(response.body);
           }
 
+          // raw-response: legacy non-v2 auth failure body.
           return res
             .status(auth.status)
             .json({ success: false, error: auth.error });
