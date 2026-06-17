@@ -25,6 +25,8 @@ export async function scrapeURLWithPlaywrightCDP(
       timeout: meta.abort.scrapeTimeout(),
       headers: meta.options.headers,
       skip_tls_verification: meta.options.skipTlsVerification,
+      mobile: meta.options.mobile,
+      location: meta.options.location,
       ...(wantsScreenshot && {
         screenshot: true,
         full_page_screenshot: wantsFullPage,

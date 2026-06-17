@@ -215,6 +215,11 @@ interface UrlModel {
   skip_tls_verification?: boolean;
   screenshot?: boolean;
   full_page_screenshot?: boolean;
+  mobile?: boolean;
+  location?: {
+    country?: string;
+    languages?: string[];
+  };
   actions?: ScrapeAction[];
 }
 
@@ -261,15 +266,33 @@ const initializeBrowser = async () => {
   });
 };
 
+const MOBILE_USER_AGENT =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+
+const geolocationByCountry: Record<string, { latitude: number; longitude: number }> =
+  {
+    US: { latitude: 37.7749, longitude: -122.4194 },
+    CA: { latitude: 43.6532, longitude: -79.3832 },
+    DE: { latitude: 52.52, longitude: 13.405 },
+    GB: { latitude: 51.5074, longitude: -0.1278 },
+    FR: { latitude: 48.8566, longitude: 2.3522 },
+    JP: { latitude: 35.6762, longitude: 139.6503 },
+  };
+
 const createContext = async (
   skipTlsVerification: boolean = false,
   userAgentOverride?: string,
+  mobile: boolean = false,
+  location?: UrlModel["location"],
 ): Promise<{
   context: BrowserContext;
   securityState: ContextSecurityState;
 }> => {
-  const userAgent = userAgentOverride || new UserAgent().toString();
-  const viewport = { width: 1280, height: 800 };
+  const userAgent =
+    userAgentOverride || (mobile ? MOBILE_USER_AGENT : new UserAgent().toString());
+  const viewport = mobile
+    ? { width: 390, height: 844 }
+    : { width: 1280, height: 800 };
   const securityState: ContextSecurityState = {
     blockedNavigationRequestUrl: null,
   };
@@ -280,6 +303,25 @@ const createContext = async (
     ignoreHTTPSErrors: skipTlsVerification,
     serviceWorkers: "block",
   };
+
+  if (mobile) {
+    contextOptions.isMobile = true;
+    contextOptions.hasTouch = true;
+    contextOptions.deviceScaleFactor = 3;
+  }
+
+  if (location?.country) {
+    contextOptions.geolocation =
+      geolocationByCountry[location.country.toUpperCase()] ?? {
+        latitude: 0,
+        longitude: 0,
+      };
+    contextOptions.permissions = ["geolocation"];
+  }
+
+  if (location?.languages?.length) {
+    contextOptions.locale = location.languages[0];
+  }
 
   if (PROXY_SERVER && PROXY_USERNAME && PROXY_PASSWORD) {
     contextOptions.proxy = {
@@ -480,9 +522,18 @@ const executeActions = async (
           results.push({ type: "scrape", content: await page.content() });
           break;
         case "executeJavascript":
+          const actionTimeout = Math.max(1, timeout - 500);
           results.push({
             type: "executeJavascript",
-            value: await page.evaluate(action.script),
+            value: await Promise.race([
+              page.evaluate(action.script),
+              new Promise((_, reject) =>
+                setTimeout(
+                  () => reject(new Error("executeJavascript timed out")),
+                  actionTimeout,
+                ),
+              ),
+            ]),
           });
           break;
         default:
@@ -533,6 +584,8 @@ app.post("/scrape", async (req: Request, res: Response) => {
     skip_tls_verification = false,
     screenshot = false,
     full_page_screenshot = false,
+    mobile = false,
+    location,
     actions = [],
   }: UrlModel = req.body;
 
@@ -597,10 +650,74 @@ app.post("/scrape", async (req: Request, res: Response) => {
     const contextBundle = await createContext(
       skip_tls_verification,
       userAgentOverride,
+      mobile,
+      location,
     );
     requestContext = contextBundle.context;
     securityState = contextBundle.securityState;
     page = await requestContext.newPage();
+
+    if (location) {
+      await requestContext.addInitScript(
+        locationData => {
+          const locationState = locationData as {
+            country?: string;
+            languages?: string[];
+          };
+          const coordinates = {
+            US: { latitude: 37.7749, longitude: -122.4194 },
+            CA: { latitude: 43.6532, longitude: -79.3832 },
+            DE: { latitude: 52.52, longitude: 13.405 },
+            GB: { latitude: 51.5074, longitude: -0.1278 },
+            FR: { latitude: 48.8566, longitude: 2.3522 },
+            JP: { latitude: 35.6762, longitude: 139.6503 },
+          }[locationState.country?.toUpperCase() ?? ""] ?? {
+            latitude: 0,
+            longitude: 0,
+          };
+
+          (globalThis as typeof globalThis & {
+            __firecrawlLocation?: typeof locationState;
+          }).__firecrawlLocation = locationState;
+
+          Object.defineProperty(globalThis.navigator, "geolocation", {
+            configurable: true,
+            value: {
+              getCurrentPosition: (success: Function) =>
+                success({
+                  coords: {
+                    accuracy: 1,
+                    altitude: null,
+                    altitudeAccuracy: null,
+                    heading: null,
+                    latitude: coordinates.latitude,
+                    longitude: coordinates.longitude,
+                    speed: null,
+                  },
+                  timestamp: Date.now(),
+                }),
+              watchPosition: (success: Function) => {
+                success({
+                  coords: {
+                    accuracy: 1,
+                    altitude: null,
+                    altitudeAccuracy: null,
+                    heading: null,
+                    latitude: coordinates.latitude,
+                    longitude: coordinates.longitude,
+                    speed: null,
+                  },
+                  timestamp: Date.now(),
+                });
+                return 1;
+              },
+              clearWatch: () => undefined,
+            },
+          });
+        },
+        location,
+      );
+    }
 
     if (headers) {
       // Remove the user-agent key before calling setExtraHTTPHeaders since

@@ -145,7 +145,7 @@ describe("playwright;cdp engine", () => {
             {
               type: "executeJavascript",
               script:
-                "(() => { document.querySelector('#action-state').textContent = 'execute javascript playwright cdp state'; return { ok: true, engine: 'playwright;cdp' }; })()",
+                "(() => { document.querySelector('#js-state').textContent = 'execute javascript playwright cdp state'; return { ok: true, engine: 'playwright;cdp' }; })()",
             },
             { type: "screenshot" },
             { type: "wait", selector: "#action-state" },
@@ -163,6 +163,44 @@ describe("playwright;cdp engine", () => {
         value: { ok: true, engine: "playwright;cdp" },
       });
       expect(response.actions?.screenshots?.[0]).toEqual(expect.any(String));
+      expect(selectedEngine(response)).toBe("playwright;cdp");
+    },
+    scrapeTimeout,
+  );
+
+  concurrentIf(HAS_LOCAL_PLAYWRIGHT_NO_FIRE_ENGINE && ALLOW_TEST_SUITE_WEBSITE)(
+    "supports mobile viewport and mobile user agent emulation",
+    async () => {
+      const response = await scrape(
+        {
+          url: fixtureUrl,
+          formats: ["markdown"],
+          mobile: true,
+          maxAge: 0,
+        },
+        identity,
+      );
+
+      expect(response.markdown).toContain("mobile viewport or user agent");
+      expect(selectedEngine(response)).toBe("playwright;cdp");
+    },
+    scrapeTimeout,
+  );
+
+  concurrentIf(HAS_LOCAL_PLAYWRIGHT_NO_FIRE_ENGINE && ALLOW_TEST_SUITE_WEBSITE)(
+    "supports geolocation overrides and exposes the injected region",
+    async () => {
+      const response = await scrape(
+        {
+          url: fixtureUrl,
+          formats: ["markdown"],
+          location: { country: "DE", languages: ["de-DE", "en-US"] },
+          maxAge: 0,
+        },
+        identity,
+      );
+
+      expect(response.markdown).toContain("geo 52.52 13.40 region DE");
       expect(selectedEngine(response)).toBe("playwright;cdp");
     },
     scrapeTimeout,
@@ -196,6 +234,69 @@ describe("playwright;cdp engine", () => {
     scrapeTimeout,
   );
 
+  itIf(HAS_LOCAL_PLAYWRIGHT_NO_FIRE_ENGINE && ALLOW_TEST_SUITE_WEBSITE)(
+    "returns ScrapeError.ACTION for bad executeJavascript code",
+    async () => {
+      const raw = await scrapeRaw(
+        {
+          url: fixtureUrl,
+          formats: ["markdown"],
+          actions: [
+            {
+              type: "executeJavascript",
+              script: "(() => { throw new Error('boom'); })()",
+            },
+          ],
+          maxAge: 0,
+        },
+        identity,
+      );
+
+      expect(raw.statusCode).toBe(errorCodeToHttpStatus(ScrapeError.ACTION));
+      expect(raw.body.success).toBe(false);
+      expect(raw.body.code).toBe(ScrapeError.ACTION);
+      expect(raw.body.details).toEqual(
+        expect.objectContaining({
+          actionIndex: 0,
+        }),
+      );
+      expect(raw.body.error).toContain("boom");
+    },
+    scrapeTimeout,
+  );
+
+  itIf(HAS_LOCAL_PLAYWRIGHT_NO_FIRE_ENGINE && ALLOW_TEST_SUITE_WEBSITE)(
+    "returns ScrapeError.ACTION when executeJavascript times out",
+    async () => {
+      const raw = await scrapeRaw(
+        {
+          url: fixtureUrl,
+          formats: ["markdown"],
+          timeout: 2000,
+          actions: [
+            {
+              type: "executeJavascript",
+              script: "new Promise(() => {})",
+            },
+          ],
+          maxAge: 0,
+        },
+        identity,
+      );
+
+      expect(raw.statusCode).toBe(errorCodeToHttpStatus(ScrapeError.ACTION));
+      expect(raw.body.success).toBe(false);
+      expect(raw.body.code).toBe(ScrapeError.ACTION);
+      expect(raw.body.details).toEqual(
+        expect.objectContaining({
+          actionIndex: 0,
+        }),
+      );
+      expect(raw.body.error).toContain("timed out");
+    },
+    scrapeTimeout,
+  );
+
   concurrentIf(HAS_LOCAL_PLAYWRIGHT_NO_FIRE_ENGINE && ALLOW_TEST_SUITE_WEBSITE)(
     "still rejects branding locally instead of routing it to playwright;cdp",
     async () => {
@@ -214,6 +315,32 @@ describe("playwright;cdp engine", () => {
         ScrapeError.BRANDING_NOT_SUPPORTED,
         "FEATURE_UNSUPPORTED_LOCALLY",
       ]).toContain(raw.body.code);
+    },
+    scrapeTimeout,
+  );
+
+  concurrentIf(HAS_LOCAL_PLAYWRIGHT_NO_FIRE_ENGINE && ALLOW_TEST_SUITE_WEBSITE)(
+    "still rejects stealthProxy locally instead of routing it to playwright;cdp",
+    async () => {
+      const raw = await scrapeRaw(
+        {
+          url: fixtureUrl,
+          formats: ["markdown"],
+          proxy: "stealth",
+          maxAge: 0,
+        },
+        identity,
+      );
+
+      expect(raw.statusCode).not.toBe(200);
+      expect(raw.body.success).toBe(false);
+      expect(raw.body.code).toBe(LocalError.FEATURE_UNSUPPORTED);
+      expect(raw.body.details).toEqual(
+        expect.objectContaining({
+          feature: "stealthProxy",
+          requiresEngine: "fire-engine",
+        }),
+      );
     },
     scrapeTimeout,
   );

@@ -12,14 +12,8 @@ import Footer from "../components/Footer.astro";
       description="Fixture page for local CDP engine tests"
     />
     <style>
-      #mobile-state::after {
-        content: "desktop viewport";
-      }
-
-      @media (max-width: 640px) {
-        #mobile-state::after {
-          content: "mobile viewport";
-        }
+      body {
+        font-family: system-ui, sans-serif;
       }
     </style>
   </head>
@@ -28,12 +22,25 @@ import Footer from "../components/Footer.astro";
     <main>
       <h1>CDP Engine Fixture</h1>
       <p id="action-state">before click</p>
+      <p id="js-state">before execute javascript</p>
       <button id="reveal-action" type="button">Reveal action state</button>
       <p id="mobile-state"></p>
       <p id="geo-state">geolocation pending</p>
     </main>
     <Footer />
     <script>
+      const mobileState = document.querySelector("#mobile-state");
+      if (mobileState) {
+        const isMobileUserAgent = /Mobi|Android|iPhone|iPad|iPod/i.test(
+          navigator.userAgent,
+        );
+        const isNarrowViewport = window.innerWidth <= 640;
+        mobileState.textContent =
+          isMobileUserAgent || isNarrowViewport
+            ? "mobile viewport or user agent"
+            : "desktop viewport or user agent";
+      }
+
       document
         .querySelector("#reveal-action")
         ?.addEventListener("click", () => {
@@ -48,7 +55,8 @@ import Footer from "../components/Footer.astro";
         position => {
           const state = document.querySelector("#geo-state");
           if (state) {
-            state.textContent = `geo ${position.coords.latitude.toFixed(2)} ${position.coords.longitude.toFixed(2)}`;
+            const location = window.__firecrawlLocation;
+            state.textContent = `geo ${position.coords.latitude.toFixed(2)} ${position.coords.longitude.toFixed(2)} region ${location?.country?.toUpperCase() ?? "unknown"}`;
           }
         },
         () => {

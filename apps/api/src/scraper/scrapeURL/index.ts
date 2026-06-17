@@ -79,6 +79,10 @@ import {
   ActionsNotSupportedError,
   LocalFeatureUnsupportedError,
 } from "../../lib/error";
+
+const useFireEngine =
+  config.FIRE_ENGINE_BETA_URL !== "" &&
+  config.FIRE_ENGINE_BETA_URL !== undefined;
 import { htmlTransform } from "./lib/removeUnwantedElements";
 import { postprocessors } from "./postprocessors";
 import { rewriteUrl } from "./lib/rewriteUrl";
@@ -696,6 +700,16 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
 
     // TODO: handle sitemap data, see WebScraper/index.ts:280
     // TODO: ScrapeEvents
+
+    if (!useFireEngine && meta.mock === null) {
+      const fireEngineOnlyFeature = ["audio", "video", "stealthProxy"].find(
+        feature => meta.featureFlags.has(feature as FeatureFlag),
+      );
+
+      if (fireEngineOnlyFeature !== undefined) {
+        throw new LocalFeatureUnsupportedError(fireEngineOnlyFeature);
+      }
+    }
 
     const fallbackList = await buildFallbackList(meta);
 
