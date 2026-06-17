@@ -1,0 +1,17 @@
+services:
+  test-site:
+    build: apps/test-site
+    profiles:
+      - snips
+    networks:
+      - backend
+    ports:
+      - "4321:4321"
+    command: sh -lc "pnpm build && pnpm preview --host 0.0.0.0 --port 4321 --strictPort"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+        compress: "true"
+

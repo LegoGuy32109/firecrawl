@@ -8,35 +8,52 @@ import { TeamFlags } from "../../controllers/v1/types";
 // Configuration
 // =========================================
 
-export const TEST_API_URL = config.TEST_API_URL;
+export const TEST_API_URL = process.env.TEST_API_URL || config.TEST_API_URL;
 
 const stripTrailingSlash = (url: string) => {
   if (url.length < 1) throw new Error("Invalid URL supplied");
   return url.endsWith("/") ? url.substring(0, url.length - 1) : url;
 };
 
-export const TEST_SUITE_WEBSITE = stripTrailingSlash(config.TEST_SUITE_WEBSITE);
+export const TEST_SUITE_WEBSITE = stripTrailingSlash(
+  process.env.TEST_SUITE_WEBSITE || config.TEST_SUITE_WEBSITE,
+);
 
 export const TEST_SELF_HOST = !!config.TEST_SUITE_SELF_HOSTED;
 export const TEST_PRODUCTION = !TEST_SELF_HOST;
 
 // TODO: do we want to run AI tests when users run this command locally? It may lead to increased spending for them, depending on configuration
-export const HAS_AI = !!(config.OPENAI_API_KEY || config.OLLAMA_BASE_URL);
+export const HAS_AI = !!(
+  process.env.OPENAI_API_KEY ||
+  process.env.OLLAMA_BASE_URL ||
+  config.OPENAI_API_KEY ||
+  config.OLLAMA_BASE_URL
+);
 export const HAS_FIREWORKS = !!process.env.FIREWORKS_API_KEY;
-export const HAS_FIRE_ENGINE = !!config.FIRE_ENGINE_BETA_URL;
-export const HAS_PLAYWRIGHT = !!config.PLAYWRIGHT_MICROSERVICE_URL;
-export const HAS_PROXY = !!config.PROXY_SERVER;
+export const HAS_FIRE_ENGINE = !!(
+  process.env.FIRE_ENGINE_BETA_URL || config.FIRE_ENGINE_BETA_URL
+);
+export const HAS_PLAYWRIGHT = !!(
+  process.env.PLAYWRIGHT_MICROSERVICE_URL || config.PLAYWRIGHT_MICROSERVICE_URL
+);
+export const HAS_PROXY = !!(process.env.PROXY_SERVER || config.PROXY_SERVER);
 
 export const HAS_SEARCH = TEST_PRODUCTION || !!config.SEARXNG_ENDPOINT;
 
 const isLocalUrl = (x: string) =>
-  /^https?:\/\/(localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?([\/?#]|$)/i.test(
+  /^https?:\/\/(localhost|host\.docker\.internal|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?([\/?#]|$)/i.test(
     x as string,
   );
 
+const isComposeServiceUrl = (x: string) =>
+  /^https?:\/\/test-site(:\d+)?([\/?#]|$)/i.test(x as string);
+
 // due to playwright / api using proxy, we don't want to run local tests while proxy is enabled or in production testing
 export const ALLOW_TEST_SUITE_WEBSITE =
-  !TEST_SELF_HOST || (isLocalUrl(TEST_SUITE_WEBSITE) && !HAS_PROXY);
+  !TEST_SELF_HOST ||
+  ((isLocalUrl(TEST_SUITE_WEBSITE) ||
+    isComposeServiceUrl(TEST_SUITE_WEBSITE)) &&
+    !HAS_PROXY);
 
 // TODO: print the config that determines tests run
 
@@ -48,7 +65,7 @@ export const itIf = (cond: boolean) => (cond ? it : it.skip);
 export const createTestIdUrl = () =>
   `${TEST_SUITE_WEBSITE}?testId=${crypto.randomUUID()}`;
 
-if (isLocalUrl(TEST_SUITE_WEBSITE)) {
+if (isLocalUrl(TEST_SUITE_WEBSITE) || isComposeServiceUrl(TEST_SUITE_WEBSITE)) {
   if (TEST_SELF_HOST) {
     config.ALLOW_LOCAL_WEBHOOKS = true;
   } else {

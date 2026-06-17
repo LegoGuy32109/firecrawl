@@ -13,5 +13,8 @@ const SITE_URL =
 export default defineConfig({
   site: SITE_URL,
   output: 'static',
+  preview: {
+    allowedHosts: ["host.docker.internal"],
+  },
   integrations: [mdx(), sitemap()],
 });

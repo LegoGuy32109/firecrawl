@@ -20,6 +20,8 @@
     "test:full": "vitest run --exclude='**/__tests__/e2e_noAuth/**' --exclude='**/__tests__/e2e_withAuth/**'",
     "test:prod": "vitest run --exclude='**/__tests__/e2e_noAuth/**' --exclude='**/__tests__/e2e_full_withAuth/**' --exclude='**/scraper/scrapeURL/**'",
     "test:snips": "vitest run src/__tests__/snips/v1 src/__tests__/snips/v2",
+    "compose:snips": "docker compose -f ../../docker-compose.yaml -f ../../docker-compose.snips.yaml --profile snips up --build",
+    "test:snips:compose": "TEST_SUITE_WEBSITE=http://host.docker.internal:4321 TEST_API_URL=http://127.0.0.1:3002 PLAYWRIGHT_MICROSERVICE_URL=http://playwright-service:3000/scrape FIRE_ENGINE_BETA_URL= vitest run src/__tests__/snips/v2/scrape-playwright-cdp.test.ts",
     "harness": "tsx src/harness.ts",
     "workers": "tsc-watch --onSuccess \"node dist/src/services/queue-worker.js\"",
     "worker:production": "node dist/src/services/queue-worker.js",
