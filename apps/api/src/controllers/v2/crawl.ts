@@ -26,6 +26,12 @@ import {
 } from "../../services/worker/nuq-router";
 import { logRequest } from "../../services/logging/log_job";
 import { getScrapeZDR } from "../../lib/zdr-helpers";
+import { errorResponse } from "./response-enveloper";
+import {
+  GatingError,
+  LifecycleError,
+  RequestError,
+} from "../../lib/error-codes";
 
 export async function crawlController(
   req: RequestWithAuth<{}, CrawlResponse, CrawlRequest>,
@@ -39,10 +45,15 @@ export async function crawlController(
     req.acuc?.flags,
   );
   if (permissions.error) {
-    return res.status(403).json({
-      success: false,
-      error: permissions.error,
-    });
+    const response = errorResponse(
+      permissions.error.toLowerCase().includes("zero data retention")
+        ? LifecycleError.ZDR_NOT_SUPPORTED
+        : GatingError.URL_BLOCKED,
+      permissions.error,
+      req,
+      { httpStatus: 403 },
+    );
+    return res.status(response.httpStatus).json(response.body as any);
   }
 
   const zeroDataRetention =
@@ -123,11 +134,12 @@ export async function crawlController(
         error: error.message,
         prompt: req.body.prompt,
       });
-      return res.status(400).json({
-        success: false,
-        error:
-          "Failed to process natural language prompt. Please try rephrasing or use explicit crawler options.",
-      });
+      const response = errorResponse(
+        RequestError.BAD_REQUEST,
+        "Failed to process natural language prompt. Please try rephrasing or use explicit crawler options.",
+        req,
+      );
+      return res.status(response.httpStatus).json(response.body as any);
     }
   }
 
@@ -156,7 +168,12 @@ export async function crawlController(
       try {
         new RegExp(x);
       } catch (e) {
-        return res.status(400).json({ success: false, error: e.message });
+        const response = errorResponse(
+          RequestError.BAD_REQUEST,
+          e.message,
+          req,
+        );
+        return res.status(response.httpStatus).json(response.body as any);
       }
     }
   }
@@ -166,7 +183,12 @@ export async function crawlController(
       try {
         new RegExp(x);
       } catch (e) {
-        return res.status(400).json({ success: false, error: e.message });
+        const response = errorResponse(
+          RequestError.BAD_REQUEST,
+          e.message,
+          req,
+        );
+        return res.status(response.httpStatus).json(response.body as any);
       }
     }
   }

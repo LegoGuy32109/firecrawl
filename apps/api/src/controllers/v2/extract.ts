@@ -13,6 +13,8 @@ import { isUrlBlocked } from "../../scraper/WebScraper/utils/blocklist";
 import { logger as _logger } from "../../lib/logger";
 import { logRequest } from "../../services/logging/log_job";
 import { getScrapeZDR } from "../../lib/zdr-helpers";
+import { errorResponse } from "./response-enveloper";
+import { ExtractError, RequestError } from "../../lib/error-codes";
 
 /**
  * Extracts data from the provided URLs based on the request parameters.
@@ -29,11 +31,13 @@ export async function extractController(
   req.body = extractRequestSchema.parse(req.body);
 
   if (getScrapeZDR(req.acuc?.flags) === "forced") {
-    return res.status(400).json({
-      success: false,
-      error:
-        "Your team has zero data retention enabled. This is not supported on extract. Please contact support@firecrawl.com to unblock this feature.",
-    });
+    const envelope = errorResponse(
+      RequestError.BAD_REQUEST,
+      "Your team has zero data retention enabled. This is not supported on extract. Please contact support@firecrawl.com to unblock this feature.",
+      req,
+      { httpStatus: 400 },
+    );
+    return res.status(envelope.httpStatus).json(envelope.body);
   }
 
   const extractId = uuidv7();
@@ -49,11 +53,13 @@ export async function extractController(
   });
 
   if (req.body.agent?.model === "v3-beta") {
-    return res.status(400).json({
-      success: false,
-      error:
-        "Use the new /agent endpoint instead of passing agent.model=v3-beta into /extract.",
-    });
+    const envelope = errorResponse(
+      RequestError.BAD_REQUEST,
+      "Use the new /agent endpoint instead of passing agent.model=v3-beta into /extract.",
+      req,
+      { httpStatus: 400 },
+    );
+    return res.status(envelope.httpStatus).json(envelope.body);
   }
 
   const invalidURLs: string[] =
@@ -66,10 +72,13 @@ export async function extractController(
 
   if (invalidURLs.length > 0 && !req.body.ignoreInvalidURLs) {
     if (!res.headersSent) {
-      return res.status(403).json({
-        success: false,
-        error: UNSUPPORTED_SITE_MESSAGE,
-      });
+      const envelope = errorResponse(
+        ExtractError.NO_VALID_URLS,
+        UNSUPPORTED_SITE_MESSAGE,
+        req,
+        { httpStatus: 403 },
+      );
+      return res.status(envelope.httpStatus).json(envelope.body);
     }
   }
 

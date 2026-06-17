@@ -7,6 +7,7 @@ import {
   supabaseGetAgentRequestByIdDirect,
 } from "../../../lib/supabase-jobs";
 import { getJobFromGCS } from "../../../lib/gcs-jobs";
+import { CommonError } from "../../../lib/error-codes";
 
 vi.mock("../../../lib/supabase-jobs", () => ({
   supabaseGetAgentByIdDirect: vi.fn(),
@@ -31,6 +32,10 @@ describe("agentStatusController", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("returns model from agent options", async () => {
@@ -60,10 +65,34 @@ describe("agentStatusController", () => {
       team_id: "team-123",
       created_at: "2025-01-01T00:00:00Z",
     });
+    (supabaseGetAgentByIdDirect as Mock).mockResolvedValue(null);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        status: 500,
+        text: vi.fn().mockResolvedValue("nope"),
+        json: vi.fn().mockResolvedValue({}),
+      }),
+    );
+
+    const res = buildRes();
+    await agentStatusController(baseReq, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "spark-1-pro" }),
+    );
+  });
+
+  it("returns async failure envelope when the agent job failed", async () => {
+    (supabaseGetAgentRequestByIdDirect as Mock).mockResolvedValue({
+      team_id: "team-123",
+      created_at: "2025-01-01T00:00:00Z",
+    });
     (supabaseGetAgentByIdDirect as Mock).mockResolvedValue({
       id: "job-123",
       is_successful: false,
-      options: null,
+      error: "synthetic failure",
       created_at: "2025-01-01T00:00:00Z",
     });
 
@@ -72,7 +101,13 @@ describe("agentStatusController", () => {
 
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "spark-1-pro" }),
+      expect.objectContaining({
+        success: false,
+        status: "failed",
+        jobState: "failed",
+        code: CommonError.UNKNOWN,
+        error: "synthetic failure",
+      }),
     );
   });
 });

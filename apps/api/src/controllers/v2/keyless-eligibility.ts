@@ -1,6 +1,8 @@
 import { Request, Response } from "express";
 import { config } from "../../config";
 import { checkKeylessEligibility } from "../../lib/keyless";
+import { errorResponse } from "./response-enveloper";
+import { AuthError } from "../../lib/error-codes";
 
 /**
  * Internal endpoint for trusted proxies (the hosted MCP) to check, at connect
@@ -15,7 +17,17 @@ export async function keylessEligibilityController(
 ): Promise<void> {
   const secret = req.headers["x-firecrawl-keyless-secret"];
   if (!config.KEYLESS_PROXY_SECRET || secret !== config.KEYLESS_PROXY_SECRET) {
-    res.status(401).json({ eligible: false, error: "Unauthorized" });
+    const code =
+      !config.KEYLESS_PROXY_SECRET || secret === undefined
+        ? AuthError.MISSING_API_KEY
+        : AuthError.INVALID_API_KEY;
+    const response = errorResponse(code, "Unauthorized", req, {
+      details:
+        code === AuthError.INVALID_API_KEY
+          ? { reason: "keyless proxy secret mismatch" }
+          : undefined,
+    });
+    res.status(response.httpStatus).json({ ...response.body, eligible: false });
     return;
   }
 

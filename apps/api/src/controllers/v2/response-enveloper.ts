@@ -7,6 +7,7 @@ import type {
   AsyncJobFailureResponse,
   Diagnostics,
   ErrorResponse,
+  DiagnosticStep,
   ResponseCore,
   StrictErrorResponse,
   WarningEntry,
@@ -22,10 +23,34 @@ export type EnvelopeContext = {
   durationMs?: number;
 };
 
+export type DiagnosticStepInput = {
+  name: string;
+  status: DiagnosticStep["status"];
+  code?: DiagnosticStep["code"];
+  message?: string;
+  messageTemplate?: string;
+  details?: Record<string, unknown>;
+  durationMs?: number;
+  startedAt?: string;
+  endedAt?: string;
+};
+
 export type EnvelopeResult<TBody> = {
   httpStatus: number;
   body: TBody;
 };
+
+function isRequest(
+  reqOrContext?: Request | EnvelopeContext,
+): reqOrContext is Request {
+  return Boolean(reqOrContext && "header" in reqOrContext);
+}
+
+function getEnvelopeContext(
+  reqOrContext?: Request | EnvelopeContext,
+): EnvelopeContext | undefined {
+  return reqOrContext && !isRequest(reqOrContext) ? reqOrContext : undefined;
+}
 
 function requestTraceId(
   reqOrContext?: Request | EnvelopeContext,
@@ -34,7 +59,7 @@ function requestTraceId(
     return undefined;
   }
 
-  if (!("header" in reqOrContext)) {
+  if (!isRequest(reqOrContext)) {
     return reqOrContext.traceId;
   }
 
@@ -49,22 +74,19 @@ export function buildDiagnosticsPrivacy(
   reqOrContext?: Request | EnvelopeContext,
   opts: Partial<EnvelopeContext> = {},
 ): Diagnostics["privacy"] {
-  const context =
-    reqOrContext && "traceId" in reqOrContext ? reqOrContext : undefined;
+  const context = getEnvelopeContext(reqOrContext);
   const zeroDataRetention =
     opts.zeroDataRetention ?? context?.zeroDataRetention ?? false;
   const mode =
     opts.privacyMode ??
     context?.privacyMode ??
     (zeroDataRetention ? "request" : "disabled");
+  const reduced = mode === "forced" || mode === "request";
 
   return {
     zeroDataRetention,
     mode,
-    reduced:
-      opts.reducedDiagnostics ??
-      context?.reducedDiagnostics ??
-      zeroDataRetention,
+    reduced,
   };
 }
 
@@ -76,7 +98,7 @@ export function diagnosticsForRequest(
   const traceId = opts.traceId ?? requestTraceId(reqOrContext);
   const durationMs =
     opts.durationMs ??
-    (reqOrContext && "durationMs" in reqOrContext
+    (reqOrContext && !isRequest(reqOrContext) && "durationMs" in reqOrContext
       ? reqOrContext.durationMs
       : undefined);
 
@@ -84,6 +106,113 @@ export function diagnosticsForRequest(
     privacy,
     ...(privacy.zeroDataRetention ? {} : traceId ? { traceId } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
+  };
+}
+
+const CONTROLLED_DIAGNOSTIC_STEP_NAMES = new Set([
+  "request",
+  "response",
+  "handler",
+  "job",
+  "source",
+  "sources",
+  "action",
+  "actions",
+  "warning",
+  "error",
+  "scrape",
+  "extract",
+  "query",
+  "crawl",
+  "map",
+  "browser",
+  "agent",
+  "auth",
+  "billing",
+  "rate",
+  "gating",
+  "dependency",
+  "proxy",
+  "validation",
+  "parse",
+  "compare",
+  "cleanup",
+  "generation",
+  "highlight",
+  "sitemap",
+  "dns",
+]);
+
+const CONTROLLED_DIAGNOSTIC_STATUSES: DiagnosticStep["status"][] = [
+  "ok",
+  "warning",
+  "failed",
+  "skipped",
+  "timed_out",
+];
+
+function normalizeDiagnosticStepName(name: string): string {
+  return CONTROLLED_DIAGNOSTIC_STEP_NAMES.has(name) ? name : "response";
+}
+
+function normalizeDiagnosticStepStatus(
+  status: string,
+): DiagnosticStep["status"] {
+  return CONTROLLED_DIAGNOSTIC_STATUSES.includes(
+    status as DiagnosticStep["status"],
+  )
+    ? (status as DiagnosticStep["status"])
+    : "skipped";
+}
+
+// Steps are written through this projection so reduced diagnostics can never leak raw text.
+function buildDiagnosticStep(
+  step: DiagnosticStepInput,
+  privacy: Diagnostics["privacy"],
+): DiagnosticStep {
+  const message = privacy.reduced
+    ? step.messageTemplate
+    : (step.message ?? step.messageTemplate);
+
+  return {
+    name: normalizeDiagnosticStepName(step.name),
+    status: normalizeDiagnosticStepStatus(step.status),
+    ...(step.code !== undefined ? { code: step.code } : {}),
+    ...(step.durationMs !== undefined ? { durationMs: step.durationMs } : {}),
+    ...(step.startedAt ? { startedAt: step.startedAt } : {}),
+    ...(step.endedAt ? { endedAt: step.endedAt } : {}),
+    ...(message ? { message } : {}),
+    ...(privacy.reduced
+      ? {}
+      : step.details !== undefined
+        ? { details: step.details }
+        : {}),
+  };
+}
+
+export function addStep(
+  diagnostics: Diagnostics,
+  step: DiagnosticStepInput,
+  target: "steps" | "sources" | "actions" = "steps",
+  key?: string,
+): Diagnostics {
+  const privacy = diagnostics.privacy;
+  const sanitizedStep = buildDiagnosticStep(step, privacy);
+
+  if (target === "sources") {
+    const sourceKey = key ?? sanitizedStep.name;
+    return {
+      ...diagnostics,
+      sources: {
+        ...(diagnostics.sources ?? {}),
+        [sourceKey]: sanitizedStep,
+      },
+    };
+  }
+
+  return {
+    ...diagnostics,
+    [target]: [...(diagnostics[target] ?? []), sanitizedStep],
   };
 }
 

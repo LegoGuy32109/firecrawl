@@ -32,6 +32,15 @@ import {
   calculateBrowserSessionCredits,
 } from "../../lib/browser-billing";
 import { autumnService } from "../../services/autumn/autumn.service";
+import { errorResponse } from "./response-enveloper";
+import {
+  AuthError,
+  BillingError,
+  BrowserError,
+  CommonError,
+  GatingError,
+  RequestError,
+} from "../../lib/error-codes";
 
 // ---------------------------------------------------------------------------
 // Zod schemas
@@ -159,6 +168,23 @@ async function browserServiceRequest<T>(
   return res.json() as Promise<T>;
 }
 
+function sendError(
+  res: Response<any>,
+  req: Request,
+  code:
+    | AuthError
+    | BillingError
+    | BrowserError
+    | CommonError
+    | GatingError
+    | RequestError,
+  error: string,
+  opts?: Parameters<typeof errorResponse>[3],
+) {
+  const response = errorResponse(code, error, req, opts);
+  return res.status(response.httpStatus).json(response.body);
+}
+
 // ---------------------------------------------------------------------------
 // Browser service response types
 // ---------------------------------------------------------------------------
@@ -191,7 +217,7 @@ interface BrowserServiceDeleteResponse {
 
 export async function browserCreateController(
   req: RequestWithAuth<{}, BrowserCreateResponse, BrowserCreateRequest>,
-  res: Response<BrowserCreateResponse>,
+  res: Response<any>,
 ) {
   // if (!req.acuc?.flags?.browserBeta) {
   //   return res.status(403).json({
@@ -214,11 +240,13 @@ export async function browserCreateController(
   const { ttl, activityTtl, streamWebView, profile, integration } = req.body;
 
   if (!config.BROWSER_SERVICE_URL) {
-    return res.status(503).json({
-      success: false,
-      error:
-        "Browser feature is not configured (BROWSER_SERVICE_URL is missing).",
-    });
+    return sendError(
+      res,
+      req,
+      BrowserError.SERVICE_UNAVAILABLE,
+      "Browser feature is not configured (BROWSER_SERVICE_URL is missing).",
+      { details: { dependency: "browser-service" } },
+    );
   }
 
   logger.info("Creating browser session", { ttl, activityTtl });
@@ -236,10 +264,13 @@ export async function browserCreateController(
       estimatedCredits,
       ttl,
     });
-    return res.status(402).json({
-      success: false,
-      error: `Insufficient credits for a ${ttl}s browser session (requires ~${estimatedCredits} credits). For more credits, you can upgrade your plan at https://firecrawl.dev/pricing.`,
-    });
+    return sendError(
+      res,
+      req,
+      BillingError.INSUFFICIENT_CREDITS,
+      `Insufficient credits for a ${ttl}s browser session (requires ~${estimatedCredits} credits). For more credits, you can upgrade your plan at https://firecrawl.dev/pricing.`,
+      { details: { required: estimatedCredits } },
+    );
   }
 
   // 0b. Enforce concurrency limit (shared pool with scrape/crawl/interact)
@@ -250,10 +281,13 @@ export async function browserCreateController(
       activeCount,
       limit: concurrencyLimit,
     });
-    return res.status(429).json({
-      success: false,
-      error: `You have reached the maximum number of concurrent jobs (${concurrencyLimit}). Please wait for existing jobs to complete or destroy browser sessions before creating new ones.`,
-    });
+    return sendError(
+      res,
+      req,
+      BrowserError.SESSION_LIMIT_EXCEEDED,
+      `You have reached the maximum number of concurrent jobs (${concurrencyLimit}). Please wait for existing jobs to complete or destroy browser sessions before creating new ones.`,
+      { details: { active: activeCount, limit: concurrencyLimit } },
+    );
   }
 
   // 1. Create a browser session via the browser service (retry up to 3 times)
@@ -293,11 +327,13 @@ export async function browserCreateController(
           profileName: profile?.name,
           error: err,
         });
-        return res.status(409).json({
-          success: false,
-          error:
-            "Another session is currently writing to this profile. Only one writer is allowed at a time. You can still access it with saveChanges: false, or try again later.",
-        });
+        return sendError(
+          res,
+          req,
+          GatingError.IDEMPOTENCY_CONFLICT,
+          "Another session is currently writing to this profile. Only one writer is allowed at a time. You can still access it with saveChanges: false, or try again later.",
+          { details: { key: profile?.name } },
+        );
       }
 
       lastCreateError = err;
@@ -317,10 +353,13 @@ export async function browserCreateController(
       error: lastCreateError,
       attempts: MAX_CREATE_RETRIES,
     });
-    return res.status(502).json({
-      success: false,
-      error: "Failed to create browser session.",
-    });
+    return sendError(
+      res,
+      req,
+      BrowserError.SERVICE_UNAVAILABLE,
+      "Failed to create browser session.",
+      { details: { dependency: "browser-service" } },
+    );
   }
 
   // 2. Persist session in Supabase
@@ -360,10 +399,13 @@ export async function browserCreateController(
       "DELETE",
       `/browsers/${svcResponse.sessionId}`,
     ).catch(() => {});
-    return res.status(500).json({
-      success: false,
-      error: "Failed to persist browser session.",
-    });
+    return sendError(
+      res,
+      req,
+      CommonError.UNKNOWN,
+      "Failed to persist browser session.",
+      { details: { cause: "insertBrowserSession" } },
+    );
   }
 
   // Invalidate cached count so next check reflects the new session
@@ -396,7 +438,7 @@ export async function browserExecuteController(
     BrowserExecuteResponse,
     BrowserExecuteRequest
   >,
-  res: Response<BrowserExecuteResponse>,
+  res: Response<any>,
 ) {
   // if (!req.acuc?.flags?.browserBeta) {
   //   return res.status(403).json({
@@ -422,24 +464,26 @@ export async function browserExecuteController(
   const session = await getBrowserSession(id);
 
   if (!session) {
-    return res.status(404).json({
-      success: false,
-      error: "Browser session not found.",
-    });
+    return sendError(
+      res,
+      req,
+      BrowserError.SESSION_NOT_FOUND,
+      "Browser session not found.",
+    );
   }
 
   if (session.team_id !== req.auth.team_id) {
-    return res.status(403).json({
-      success: false,
-      error: "Forbidden.",
-    });
+    return sendError(res, req, BrowserError.SESSION_FORBIDDEN, "Forbidden.");
   }
 
   if (session.status === "destroyed") {
-    return res.status(410).json({
-      success: false,
-      error: "Browser session has been destroyed.",
-    });
+    return sendError(
+      res,
+      req,
+      BrowserError.SESSION_EXPIRED,
+      "Browser session has been destroyed.",
+      { details: { expiredAt: session.updated_at } },
+    );
   }
 
   // Update activity timestamp (fire-and-forget)
@@ -457,10 +501,12 @@ export async function browserExecuteController(
     );
   } catch (err) {
     logger.error("Failed to execute code via browser service", { error: err });
-    return res.status(502).json({
-      success: false,
-      error: "Failed to execute code in browser session.",
-    });
+    return sendError(
+      res,
+      req,
+      BrowserError.EXECUTION_FAILED,
+      "Failed to execute code in browser session.",
+    );
   }
 
   logger.debug("Execution result", {
@@ -495,7 +541,7 @@ export async function browserExecuteController(
 
 export async function browserDeleteController(
   req: RequestWithAuth<{ sessionId: string }, BrowserDeleteResponse>,
-  res: Response<BrowserDeleteResponse>,
+  res: Response<any>,
 ) {
   // if (!req.acuc?.flags?.browserBeta) {
   //   return res.status(403).json({
@@ -517,17 +563,16 @@ export async function browserDeleteController(
   const session = await getBrowserSession(id);
 
   if (!session) {
-    return res.status(404).json({
-      success: false,
-      error: "Browser session not found.",
-    });
+    return sendError(
+      res,
+      req,
+      BrowserError.SESSION_NOT_FOUND,
+      "Browser session not found.",
+    );
   }
 
   if (session.team_id !== req.auth.team_id) {
-    return res.status(403).json({
-      success: false,
-      error: "Forbidden.",
-    });
+    return sendError(res, req, BrowserError.SESSION_FORBIDDEN, "Forbidden.");
   }
 
   logger.info("Deleting browser session");
@@ -678,12 +723,12 @@ export async function browserWebhookDestroyedController(
     !secret ||
     secret !== config.BROWSER_SERVICE_WEBHOOK_SECRET
   ) {
-    return res.status(401).json({ error: "Unauthorized" });
+    return sendError(res, req, AuthError.INVALID_API_KEY, "Unauthorized");
   }
 
   const { sessionId } = req.body as { sessionId?: string };
   if (!sessionId) {
-    return res.status(400).json({ error: "Missing browserId" });
+    return sendError(res, req, RequestError.BAD_REQUEST, "Missing browserId");
   }
   let browserId = sessionId;
 

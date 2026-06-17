@@ -33,6 +33,13 @@ import {
 import { logRequest } from "../../services/logging/log_job";
 import type { BillingMetadata } from "../../services/billing/types";
 import { getScrapeZDR } from "../../lib/zdr-helpers";
+import { errorResponse } from "./response-enveloper";
+import {
+  AuthError,
+  GatingError,
+  LifecycleError,
+  RequestError,
+} from "../../lib/error-codes";
 
 export async function batchScrapeController(
   req: RequestWithAuth<{}, BatchScrapeResponse, BatchScrapeRequest>,
@@ -47,10 +54,15 @@ export async function batchScrapeController(
 
   const permissions = checkPermissions(req.body, req.acuc?.flags);
   if (permissions.error) {
-    return res.status(403).json({
-      success: false,
-      error: permissions.error,
-    });
+    const response = errorResponse(
+      permissions.error.toLowerCase().includes("zero data retention")
+        ? LifecycleError.ZDR_NOT_SUPPORTED
+        : GatingError.URL_BLOCKED,
+      permissions.error,
+      req,
+      { httpStatus: 403 },
+    );
+    return res.status(response.httpStatus).json(response.body as any);
   }
 
   const zeroDataRetention =
@@ -62,15 +74,21 @@ export async function batchScrapeController(
     config.AGENT_INTEROP_SECRET &&
     req.body.__agentInterop.auth !== config.AGENT_INTEROP_SECRET
   ) {
-    return res.status(403).json({
-      success: false,
-      error: "Invalid agent interop.",
-    });
+    const response = errorResponse(
+      AuthError.INVALID_API_KEY,
+      "Invalid agent interop.",
+      req,
+      { httpStatus: 403 },
+    );
+    return res.status(response.httpStatus).json(response.body as any);
   } else if (req.body.__agentInterop && !config.AGENT_INTEROP_SECRET) {
-    return res.status(403).json({
-      success: false,
-      error: "Agent interop is not enabled.",
-    });
+    const response = errorResponse(
+      AuthError.MISSING_API_KEY,
+      "Agent interop is not enabled.",
+      req,
+      { httpStatus: 403 },
+    );
+    return res.status(response.httpStatus).json(response.body as any);
   }
 
   const id = req.body.appendToId ?? uuidv7();
@@ -124,19 +142,24 @@ export async function batchScrapeController(
       )
     ) {
       if (!res.headersSent) {
-        return res.status(403).json({
-          success: false,
-          error: UNSUPPORTED_SITE_MESSAGE,
-        });
+        const response = errorResponse(
+          GatingError.URL_BLOCKED,
+          UNSUPPORTED_SITE_MESSAGE,
+          req,
+          { httpStatus: 403 },
+        );
+        return res.status(response.httpStatus).json(response.body as any);
       }
     }
   }
 
   if (urls.length === 0) {
-    return res.status(400).json({
-      success: false,
-      error: "No valid URLs provided",
-    });
+    const response = errorResponse(
+      RequestError.BAD_REQUEST,
+      "No valid URLs provided",
+      req,
+    );
+    return res.status(response.httpStatus).json(response.body as any);
   }
 
   logger.debug("Batch scrape " + id + " starting", {
@@ -185,10 +208,12 @@ export async function batchScrapeController(
 
   if (req.body.appendToId) {
     if (!sc || sc.team_id !== req.auth.team_id) {
-      return res.status(404).json({
-        success: false,
-        error: "Job not found",
-      });
+      const response = errorResponse(
+        LifecycleError.JOB_NOT_FOUND,
+        "Job not found",
+        req,
+      );
+      return res.status(response.httpStatus).json(response.body as any);
     }
   }
 

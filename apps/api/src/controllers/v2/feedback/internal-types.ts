@@ -4,6 +4,7 @@ import {
   EndpointFeedbackErrorCode,
   EndpointFeedbackResponse,
   SearchFeedbackErrorCode,
+  SearchFeedbackResponse,
 } from "../types";
 
 export type FeedbackRating = "good" | "partial" | "bad";
@@ -52,7 +53,7 @@ export type FeedbackRecordOptions = {
 
 export type FeedbackRecordResult = {
   status: number;
-  body: EndpointFeedbackResponse | any;
+  body: EndpointFeedbackResponse | SearchFeedbackResponse;
 };
 
 export type RefundPolicySnapshot = {

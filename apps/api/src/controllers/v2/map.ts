@@ -16,6 +16,8 @@ import { v7 as uuidv7 } from "uuid";
 import { isBaseDomain, extractBaseDomain } from "../../lib/url-utils";
 import { getScrapeZDR } from "../../lib/zdr-helpers";
 import { resolveViaAvgrab } from "../../lib/avgrab-resolve";
+import { errorResponse } from "./response-enveloper";
+import { MapError, RequestError } from "../../lib/error-codes";
 
 configDotenv();
 
@@ -40,10 +42,13 @@ export async function mapController(
 
   const permissions = checkPermissions(req.body, req.acuc?.flags);
   if (permissions.error) {
-    return res.status(403).json({
-      success: false,
-      error: permissions.error,
-    });
+    const envelope = errorResponse(
+      RequestError.BAD_REQUEST,
+      permissions.error,
+      req,
+      { httpStatus: 403 },
+    );
+    return res.status(envelope.httpStatus).json(envelope.body);
   }
 
   const middlewareTime = controllerStartTime - middlewareStartTime;
@@ -123,10 +128,10 @@ export async function mapController(
     }
   } catch (error) {
     if (error instanceof MapFailedError) {
-      return res.status(500).json({
-        success: false,
-        error: error.message,
+      const envelope = errorResponse(MapError.FAILED, error.message, req, {
+        httpStatus: 500,
       });
+      return res.status(envelope.httpStatus).json(envelope.body);
     }
     logger.warn("avgrab resolve failed, falling back to standard map", {
       error,
@@ -175,11 +180,10 @@ export async function mapController(
     ])) as any;
   } catch (error) {
     if (error instanceof MapTimeoutError) {
-      return res.status(408).json({
-        success: false,
-        code: error.code,
-        error: error.message,
+      const envelope = errorResponse(MapError.TIMEOUT, error.message, req, {
+        httpStatus: 408,
       });
+      return res.status(envelope.httpStatus).json(envelope.body);
     } else {
       throw error;
     }

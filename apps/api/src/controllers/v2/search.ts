@@ -28,6 +28,24 @@ import type { BillingMetadata } from "../../services/billing/types";
 import { getSearchForcedKind, getSearchZDR } from "../../lib/zdr-helpers";
 import { projectSearchTotalCredits } from "../../lib/keyless-credit-projection";
 import { applyAgentAuthDiscoveryHeader } from "../../lib/agent-auth-discovery";
+import { errorResponse } from "./response-enveloper";
+import {
+  BillingError,
+  CommonError,
+  RequestError,
+  ScrapeError,
+} from "../../lib/error-codes";
+
+function sendSearchError(
+  req: RequestWithAuth<{}, SearchResponse, SearchRequest>,
+  res: Response<SearchResponse>,
+  status: number,
+  code: BillingError | CommonError | RequestError | ScrapeError,
+  error: string | Error,
+) {
+  const envelope = errorResponse(code, error, req, { httpStatus: status });
+  return res.status(envelope.httpStatus).json(envelope.body);
+}
 
 export async function searchController(
   req: RequestWithAuth<{}, SearchResponse, SearchRequest>,
@@ -66,15 +84,21 @@ export async function searchController(
       config.AGENT_INTEROP_SECRET &&
       req.body.__agentInterop.auth !== config.AGENT_INTEROP_SECRET
     ) {
-      return res.status(403).json({
-        success: false,
-        error: "Invalid agent interop.",
-      });
+      return sendSearchError(
+        req,
+        res,
+        403,
+        RequestError.BAD_REQUEST,
+        "Invalid agent interop.",
+      );
     } else if (req.body.__agentInterop && !config.AGENT_INTEROP_SECRET) {
-      return res.status(403).json({
-        success: false,
-        error: "Agent interop is not enabled.",
-      });
+      return sendSearchError(
+        req,
+        res,
+        403,
+        RequestError.BAD_REQUEST,
+        "Agent interop is not enabled.",
+      );
     }
 
     const shouldBill = req.body.__agentInterop?.shouldBill ?? true;
@@ -108,11 +132,13 @@ export async function searchController(
     // Verify the team has searchZDR enabled before allowing enterprise ZDR/anon
     if (isZDROrAnon && !teamForcedKind) {
       if (searchZDRMode !== "allowed") {
-        return res.status(403).json({
-          success: false,
-          error:
-            "Zero Data Retention (ZDR) search is not enabled for your team. Contact support@firecrawl.com to enable this feature.",
-        });
+        return sendSearchError(
+          req,
+          res,
+          403,
+          RequestError.BAD_REQUEST,
+          "Zero Data Retention (ZDR) search is not enabled for your team. Contact support@firecrawl.com to enable this feature.",
+        );
       }
     }
 
@@ -149,10 +175,13 @@ export async function searchController(
       );
       if (!reservation.ok) {
         applyAgentAuthDiscoveryHeader(res);
-        return res.status(429).json({
-          success: false,
-          error: KEYLESS_CREDITS_MESSAGE,
-        });
+        return sendSearchError(
+          req,
+          res,
+          429,
+          BillingError.INSUFFICIENT_CREDITS,
+          KEYLESS_CREDITS_MESSAGE,
+        );
       }
       reservedKeylessCredits = projectedKeylessCredits;
     }
@@ -273,19 +302,17 @@ export async function searchController(
 
     if (error instanceof z.ZodError) {
       logger.warn("Invalid request body", { error: error.issues });
-      return res.status(400).json({
-        success: false,
-        error: "Invalid request body",
-        details: error.issues,
-      });
+      return sendSearchError(
+        req,
+        res,
+        400,
+        RequestError.BAD_REQUEST,
+        "Invalid request body",
+      );
     }
 
     if (error instanceof ScrapeJobTimeoutError) {
-      return res.status(408).json({
-        success: false,
-        code: error.code,
-        error: error.message,
-      });
+      return sendSearchError(req, res, 408, ScrapeError.TIMEOUT, error.message);
     }
 
     captureExceptionWithZdrCheck(error, {
@@ -295,9 +322,6 @@ export async function searchController(
       version: "v2",
       error,
     });
-    return res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    return sendSearchError(req, res, 500, CommonError.UNKNOWN, error as Error);
   }
 }

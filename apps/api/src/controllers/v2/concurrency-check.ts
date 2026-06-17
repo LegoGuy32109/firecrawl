@@ -8,6 +8,8 @@ import { Response } from "express";
 import { getACUCTeam } from "../auth";
 import { RateLimiterMode } from "../../types";
 import { getCombinedTeamActiveCount } from "../../services/worker/nuq-router";
+import { errorResponse } from "./response-enveloper";
+import { AuthError } from "../../lib/error-codes";
 
 // Basically just middleware and error wrapping
 export async function concurrencyCheckController(
@@ -15,10 +17,12 @@ export async function concurrencyCheckController(
   res: Response<ConcurrencyCheckResponse>,
 ) {
   if (!req.acuc) {
-    return res.status(401).json({
-      success: false,
-      error: "Unauthorized",
-    });
+    const response = errorResponse(
+      AuthError.MISSING_API_KEY,
+      "Unauthorized",
+      req,
+    );
+    return res.status(response.httpStatus).json(response.body);
   }
 
   let otherACUC: AuthCreditUsageChunkFromTeam | null = null;

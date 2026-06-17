@@ -63,6 +63,14 @@ import {
 } from "../../lib/browser-billing";
 import { autumnService } from "../../services/autumn/autumn.service";
 import { applyAgentAuthDiscoveryHeader } from "../../lib/agent-auth-discovery";
+import { errorResponse } from "./response-enveloper";
+import {
+  BillingError,
+  BrowserError,
+  CommonError,
+  GatingError,
+  LifecycleError,
+} from "../../lib/error-codes";
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -127,7 +135,7 @@ export async function scrapeInteractController(
     BrowserExecuteResponse,
     BrowserExecuteRequest
   >,
-  res: Response<BrowserExecuteResponse>,
+  res: Response<any>,
 ) {
   req.body = browserExecuteRequestSchema.parse(req.body);
 
@@ -147,7 +155,13 @@ export async function scrapeInteractController(
     scrapeId,
   )) as ScrapeContextRow | null;
   if (!scrape) {
-    return res.status(404).json({ success: false, error: "Job not found." });
+    const response = errorResponse(
+      LifecycleError.JOB_NOT_FOUND,
+      "Job not found.",
+      req,
+      { details: { jobId: scrapeId } },
+    );
+    return res.status(response.httpStatus).json(response.body);
   }
   // Keyless scrapes are persisted under a deterministic per-IP UUID (the
   // `scrapes.team_id` column is a UUID, so the raw `preview_keyless_<ip>` string
@@ -155,19 +169,26 @@ export async function scrapeInteractController(
   const expectedScrapeTeam =
     keylessTeamUuid(req.auth.team_id) ?? req.auth.team_id;
   if (scrape.team_id !== expectedScrapeTeam) {
-    return res.status(403).json({ success: false, error: "Forbidden." });
+    const response = errorResponse(
+      LifecycleError.JOB_WRONG_TEAM,
+      "Forbidden.",
+      req,
+      { details: { jobId: scrapeId, teamId: scrape.team_id } },
+    );
+    return res.status(response.httpStatus).json(response.body);
   }
 
   // --- Build replay context from original scrape ---
 
   const replay = buildReplayContextFromScrape(scrape);
   if (!replay.context) {
-    return res.status(409).json({
-      success: false,
-      error:
-        replay.error ??
+    const response = errorResponse(
+      BrowserError.EXECUTION_FAILED,
+      replay.error ??
         "Replay context is unavailable for this scrape job. Please rerun the scrape.",
-    });
+      req,
+    );
+    return res.status(response.httpStatus).json(response.body);
   }
   const replayContext = replay.context;
 
@@ -229,12 +250,22 @@ export async function scrapeInteractController(
   }
 
   if (session.team_id !== req.auth.team_id) {
-    return res.status(403).json({ success: false, error: "Forbidden." });
+    const response = errorResponse(
+      BrowserError.SESSION_FORBIDDEN,
+      "Forbidden.",
+      req,
+      { details: { key: session.id } },
+    );
+    return res.status(response.httpStatus).json(response.body);
   }
   if (session.status === "destroyed") {
-    return res
-      .status(410)
-      .json({ success: false, error: "Browser session has been destroyed." });
+    const response = errorResponse(
+      BrowserError.SESSION_EXPIRED,
+      "Browser session has been destroyed.",
+      req,
+      { details: { expiredAt: session.updated_at } },
+    );
+    return res.status(response.httpStatus).json(response.body);
   }
 
   updateBrowserSessionActivity(session.id).catch(() => {});
@@ -295,10 +326,12 @@ export async function scrapeInteractController(
       );
     } catch (err) {
       logger.error("Agent loop failed", { error: err });
-      return res.status(502).json({
-        success: false,
-        error: "Browser agent failed to execute the task.",
-      });
+      const response = errorResponse(
+        BrowserError.EXECUTION_FAILED,
+        "Browser agent failed to execute the task.",
+        req,
+      );
+      return res.status(response.httpStatus).json(response.body);
     }
 
     enqueueBrowserSessionActivity({
@@ -330,10 +363,12 @@ export async function scrapeInteractController(
       logger.error("Failed to execute code via browser service", {
         error: err,
       });
-      return res.status(502).json({
-        success: false,
-        error: "Failed to execute code in browser session.",
-      });
+      const response = errorResponse(
+        BrowserError.EXECUTION_FAILED,
+        "Failed to execute code in browser session.",
+        req,
+      );
+      return res.status(response.httpStatus).json(response.body);
     }
 
     enqueueBrowserSessionActivity({
@@ -379,7 +414,7 @@ export async function scrapeInteractController(
 
 export async function scrapeStopInteractiveBrowserController(
   req: RequestWithAuth<{ jobId: string }, BrowserDeleteResponse>,
-  res: Response<BrowserDeleteResponse>,
+  res: Response<any>,
 ) {
   let logger = _logger.child({
     scrapeId: req.params.jobId,
@@ -391,12 +426,21 @@ export async function scrapeStopInteractiveBrowserController(
   const session = await getBrowserSessionFromScrape(req.params.jobId);
 
   if (!session) {
-    return res
-      .status(404)
-      .json({ success: false, error: "Browser session not found." });
+    const response = errorResponse(
+      BrowserError.SESSION_NOT_FOUND,
+      "Browser session not found.",
+      req,
+    );
+    return res.status(response.httpStatus).json(response.body);
   }
   if (session.team_id !== req.auth.team_id) {
-    return res.status(403).json({ success: false, error: "Forbidden." });
+    const response = errorResponse(
+      BrowserError.SESSION_FORBIDDEN,
+      "Forbidden.",
+      req,
+      { details: { key: session.id } },
+    );
+    return res.status(response.httpStatus).json(response.body);
   }
 
   logger = logger.child({
@@ -515,7 +559,7 @@ async function createSessionForScrape(
   profile: { name: string; saveChanges: boolean } | undefined,
 ): Promise<
   | { session: Awaited<ReturnType<typeof insertBrowserSession>> }
-  | { status: number; body: { success: false; error: string }; error: true }
+  | { status: number; body: any; error: true }
 > {
   const sessionId = uuidv7();
   const { ttl, activityTtl, streamWebView } = browserCreateRequestSchema.parse(
@@ -524,13 +568,15 @@ async function createSessionForScrape(
   const integration = req.body?.integration ?? null;
 
   if (!config.BROWSER_SERVICE_URL) {
+    const response = errorResponse(
+      BrowserError.SERVICE_UNAVAILABLE,
+      "Browser feature is not configured (BROWSER_SERVICE_URL is missing).",
+      req,
+      { details: { dependency: "browser-service" } },
+    );
     return {
-      status: 503,
-      body: {
-        success: false,
-        error:
-          "Browser feature is not configured (BROWSER_SERVICE_URL is missing).",
-      },
+      status: response.httpStatus,
+      body: response.body,
       error: true,
     };
   }
@@ -548,12 +594,15 @@ async function createSessionForScrape(
     estimatedCredits,
   );
   if (!reservation.ok) {
+    const response = errorResponse(
+      BillingError.INSUFFICIENT_CREDITS,
+      KEYLESS_CREDITS_MESSAGE,
+      req,
+      { details: { required: estimatedCredits } },
+    );
     return {
-      status: 429,
-      body: {
-        success: false,
-        error: KEYLESS_CREDITS_MESSAGE,
-      },
+      status: response.httpStatus,
+      body: response.body,
       error: true,
     };
   }
@@ -567,12 +616,15 @@ async function createSessionForScrape(
 
   if (autumnResult !== null && !autumnResult.allowed) {
     adjustKeylessCredits(req.auth.team_id, -keylessReserved).catch(() => {});
+    const response = errorResponse(
+      BillingError.INSUFFICIENT_CREDITS,
+      `Insufficient credits for a ${ttl}s browser session (requires ~${estimatedCredits} credits). For more credits, you can upgrade your plan at https://firecrawl.dev/pricing.`,
+      req,
+      { details: { required: estimatedCredits } },
+    );
     return {
-      status: 402,
-      body: {
-        success: false,
-        error: `Insufficient credits for a ${ttl}s browser session (requires ~${estimatedCredits} credits). For more credits, you can upgrade your plan at https://firecrawl.dev/pricing.`,
-      },
+      status: response.httpStatus,
+      body: response.body,
       error: true,
     };
   }
@@ -582,12 +634,15 @@ async function createSessionForScrape(
   const activeCount = await getCombinedTeamActiveCount(req.auth.team_id);
   if (activeCount >= concurrencyLimit) {
     adjustKeylessCredits(req.auth.team_id, -keylessReserved).catch(() => {});
+    const response = errorResponse(
+      BrowserError.SESSION_LIMIT_EXCEEDED,
+      `You have reached the maximum number of concurrent jobs (${concurrencyLimit}). Please wait for existing jobs to complete or destroy browser sessions before creating new ones.`,
+      req,
+      { details: { active: activeCount, limit: concurrencyLimit } },
+    );
     return {
-      status: 429,
-      body: {
-        success: false,
-        error: `You have reached the maximum number of concurrent jobs (${concurrencyLimit}). Please wait for existing jobs to complete or destroy browser sessions before creating new ones.`,
-      },
+      status: response.httpStatus,
+      body: response.body,
       error: true,
     };
   }
@@ -626,13 +681,15 @@ async function createSessionForScrape(
         adjustKeylessCredits(req.auth.team_id, -keylessReserved).catch(
           () => {},
         );
+        const response = errorResponse(
+          GatingError.IDEMPOTENCY_CONFLICT,
+          "Another session is currently writing to this profile. Only one writer is allowed at a time. You can still access it with saveChanges: false, or try again later.",
+          req,
+          { details: { key: profile?.name } },
+        );
         return {
-          status: 409,
-          body: {
-            success: false,
-            error:
-              "Another session is currently writing to this profile. Only one writer is allowed at a time. You can still access it with saveChanges: false, or try again later.",
-          },
+          status: response.httpStatus,
+          body: response.body,
           error: true,
         };
       }
@@ -653,9 +710,15 @@ async function createSessionForScrape(
     logger.error("Failed to create browser session after all retries", {
       error: lastCreateError,
     });
+    const response = errorResponse(
+      BrowserError.SERVICE_UNAVAILABLE,
+      "Failed to create browser session.",
+      req,
+      { details: { dependency: "browser-service" } },
+    );
     return {
-      status: 502,
-      body: { success: false, error: "Failed to create browser session." },
+      status: response.httpStatus,
+      body: response.body,
       error: true,
     };
   }
@@ -743,13 +806,14 @@ async function createSessionForScrape(
       "DELETE",
       `/browsers/${svcResponse.sessionId}`,
     ).catch(() => {});
+    const response = errorResponse(
+      BrowserError.EXECUTION_FAILED,
+      "Failed to initialize browser session from the original scrape context. Please rerun the scrape and try again.",
+      req,
+    );
     return {
-      status: 409,
-      body: {
-        success: false,
-        error:
-          "Failed to initialize browser session from the original scrape context. Please rerun the scrape and try again.",
-      },
+      status: response.httpStatus,
+      body: response.body,
       error: true,
     };
   }
@@ -802,9 +866,15 @@ async function createSessionForScrape(
       "DELETE",
       `/browsers/${svcResponse.sessionId}`,
     ).catch(() => {});
+    const response = errorResponse(
+      CommonError.UNKNOWN,
+      "Failed to persist browser session.",
+      req,
+      { details: { cause: "insertBrowserSession" } },
+    );
     return {
-      status: 500,
-      body: { success: false, error: "Failed to persist browser session." },
+      status: response.httpStatus,
+      body: response.body,
       error: true,
     };
   }

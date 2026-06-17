@@ -1,6 +1,8 @@
 import { Response } from "express";
 import { ErrorResponse, RequestWithAuth } from "./types";
 import { getTeamBalance } from "../../services/autumn/usage";
+import { errorResponse } from "./response-enveloper";
+import { BillingError } from "../../lib/error-codes";
 
 const TOKENS_PER_CREDIT = 15;
 
@@ -21,10 +23,15 @@ export async function tokenUsageController(
   const balance = await getTeamBalance(req.auth.team_id);
 
   if (!balance) {
-    res.status(404).json({
-      success: false,
-      error: "Could not find token usage information",
-    });
+    const response = errorResponse(
+      BillingError.UNAVAILABLE,
+      "Could not find token usage information",
+      req,
+      {
+        details: { service: "autumn" },
+      },
+    );
+    res.status(response.httpStatus).json(response.body);
     return;
   }
 

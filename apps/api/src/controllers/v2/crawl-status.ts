@@ -20,6 +20,7 @@ import { configDotenv } from "dotenv";
 import { logger } from "../../lib/logger";
 import { creditsBilledByCrawlId } from "../../db/rpc";
 import { getJobFromGCS } from "../../lib/gcs-jobs";
+import { asyncJobFailureResponse, errorResponse } from "./response-enveloper";
 import {
   scrapeQueue,
   NuQJob,
@@ -29,7 +30,13 @@ import {
 import { ScrapeJobSingleUrls } from "../../types";
 import { redisEvictConnection } from "../../../src/services/redis";
 import { isBaseDomain, extractBaseDomain } from "../../lib/url-utils";
-import { CrawlWarning } from "../../lib/error-codes";
+import {
+  CommonError,
+  CrawlWarning,
+  LifecycleError,
+  RequestError,
+} from "../../lib/error-codes";
+import { deserializeTransportableError } from "../../lib/error-serde";
 import type { WarningEntry } from "./types";
 configDotenv();
 
@@ -182,10 +189,12 @@ export async function crawlStatusController(
   const uuidReg =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (!req.params.jobId || !uuidReg.test(req.params.jobId)) {
-    return res.status(400).json({
-      success: false,
-      error: "Invalid job ID",
-    });
+    const response = errorResponse(
+      RequestError.BAD_REQUEST,
+      "Invalid job ID",
+      req,
+    );
+    return res.status(response.httpStatus).json(response.body as any);
   }
 
   const start =
@@ -202,8 +211,22 @@ export async function crawlStatusController(
   );
   const sc = await getCrawl(req.params.jobId);
 
-  if (!group || (!groupAnyJob && (!sc || sc.team_id !== req.auth.team_id))) {
-    return res.status(404).json({ success: false, error: "Job not found" });
+  if (sc && sc.team_id !== req.auth.team_id) {
+    const response = errorResponse(
+      LifecycleError.JOB_WRONG_TEAM,
+      "Job not found",
+      req,
+    );
+    return res.status(response.httpStatus).json(response.body as any);
+  }
+
+  if (!group || !groupAnyJob) {
+    const response = errorResponse(
+      sc ? LifecycleError.JOB_EXPIRED : LifecycleError.JOB_NOT_FOUND,
+      "Job not found",
+      req,
+    );
+    return res.status(response.httpStatus).json(response.body as any);
   }
 
   const zeroDataRetention = !!(
@@ -254,21 +277,27 @@ export async function crawlStatusController(
   // if the crawl failed during kickoff, return immediately without fetching/processing jobs (there are none)
   if (outputBulkA.status === "failed" && crawlError) {
     const createdAtMs = sc?.createdAt;
-    return res.status(200).json({
-      success: false,
-      error: crawlError,
-      status: "failed",
-      completed: 0,
-      total: 0,
-      creditsUsed: outputBulkA.creditsUsed ?? 0,
-      expiresAt: (await getCrawlExpiry(req.params.jobId)).toISOString(),
-      data: [],
-      ...(createdAtMs && {
-        createdAt: new Date(createdAtMs).toISOString(),
-        completedAt: new Date(createdAtMs).toISOString(),
-        duration: 0,
-      }),
-    });
+    const failedError = deserializeTransportableError(crawlError);
+    const response = asyncJobFailureResponse(
+      failedError?.code ?? CommonError.UNKNOWN,
+      failedError?.message ?? crawlError,
+      req,
+      {
+        data: [],
+        failureCount: 1,
+        failuresByCode: {
+          [failedError?.code ?? CommonError.UNKNOWN]: 1,
+        },
+        creditsUsed: outputBulkA.creditsUsed ?? 0,
+        expiresAt: (await getCrawlExpiry(req.params.jobId)).toISOString(),
+        ...(createdAtMs && {
+          createdAt: new Date(createdAtMs).toISOString(),
+          completedAt: new Date(createdAtMs).toISOString(),
+          duration: 0,
+        }),
+      },
+    );
+    return res.status(response.httpStatus).json(response.body as any);
   }
 
   let outputBulkB: {
@@ -391,6 +420,30 @@ export async function crawlStatusController(
   const durationSeconds = createdAtMs
     ? Math.max(0, ((completedAtMs ?? Date.now()) - createdAtMs) / 1000)
     : undefined;
+
+  if (status === "failed") {
+    const failedError = deserializeTransportableError(crawlError ?? "");
+    const response = asyncJobFailureResponse(
+      failedError?.code ?? CommonError.UNKNOWN,
+      failedError?.message ?? crawlError ?? "Crawl failed",
+      req,
+      {
+        data: outputBulkB.data,
+        failureCount: 1,
+        failuresByCode: {
+          [failedError?.code ?? CommonError.UNKNOWN]: 1,
+        },
+        creditsUsed: outputBulkA.creditsUsed ?? 0,
+        expiresAt: (await getCrawlExpiry(req.params.jobId)).toISOString(),
+        ...(createdAtMs && { createdAt: new Date(createdAtMs).toISOString() }),
+        ...(completedAtMs && {
+          completedAt: new Date(completedAtMs).toISOString(),
+        }),
+        ...(durationSeconds !== undefined && { duration: durationSeconds }),
+      },
+    );
+    return res.status(response.httpStatus).json(response.body as any);
+  }
 
   return res.status(200).json({
     success: true,

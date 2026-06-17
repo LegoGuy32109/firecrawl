@@ -44,6 +44,9 @@ import {
   unsubscribeRecipientByToken,
 } from "../../services/monitoring/email_recipients";
 import { syncMonitorEmailRecipients } from "../../services/monitoring/email_recipients_sync";
+import { errorResponse } from "./response-enveloper";
+import { CommonError, MonitorError, RequestError } from "../../lib/error-codes";
+import type { StrictErrorResponse } from "./types";
 
 const logger = _logger.child({ module: "monitor-controller" });
 
@@ -55,16 +58,33 @@ const monitorCheckParamsSchema = monitorParamsSchema.extend({
   checkId: z.uuid(),
 });
 
+function sendMonitorError(
+  req: RequestWithAuth<any, any, any>,
+  res: Response,
+  status: number,
+  code: MonitorError | RequestError | CommonError,
+  error: string | Error,
+  extra: Record<string, unknown> = {},
+) {
+  const envelope = errorResponse(code, error, req, { httpStatus: status });
+  return res.status(envelope.httpStatus).json({
+    ...envelope.body,
+    ...extra,
+  });
+}
+
 function rejectZdr(
   req: RequestWithAuth<any, any, any>,
   res: Response,
 ): boolean {
   if (getScrapeZDR(req.acuc?.flags) === "forced") {
-    res.status(400).json({
-      success: false,
-      error:
-        "Monitoring requires retained snapshots and diffs, and is not supported for zero data retention teams.",
-    });
+    sendMonitorError(
+      req,
+      res,
+      400,
+      RequestError.BAD_REQUEST,
+      "Monitoring requires retained snapshots and diffs, and is not supported for zero data retention teams.",
+    );
     return true;
   }
   return false;
@@ -193,10 +213,13 @@ export async function createMonitorController(
       input.schedule.timezone,
     );
   } catch (error) {
-    return res.status(400).json({
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    return sendMonitorError(
+      req,
+      res,
+      400,
+      RequestError.BAD_REQUEST,
+      error instanceof Error ? error.message : String(error),
+    );
   }
   const monitor = await createMonitor({
     teamId: req.auth.team_id,
@@ -256,7 +279,13 @@ export async function getMonitorController(
   const { monitorId } = monitorParamsSchema.parse(req.params);
   const monitor = await getMonitor(req.auth.team_id, monitorId);
   if (!monitor) {
-    return res.status(404).json({ success: false, error: "Monitor not found" });
+    return sendMonitorError(
+      req,
+      res,
+      404,
+      MonitorError.MONITOR_NOT_FOUND,
+      "Monitor not found",
+    );
   }
 
   const subscriptions = await loadEmailRecipientSubscriptions(monitorId).catch(
@@ -286,7 +315,13 @@ export async function updateMonitorController(
   const { monitorId } = monitorParamsSchema.parse(req.params);
   const existing = await getMonitorForUpdate(req.auth.team_id, monitorId);
   if (!existing) {
-    return res.status(404).json({ success: false, error: "Monitor not found" });
+    return sendMonitorError(
+      req,
+      res,
+      404,
+      MonitorError.MONITOR_NOT_FOUND,
+      "Monitor not found",
+    );
   }
 
   const input = updateMonitorSchema.parse(req.body);
@@ -296,10 +331,13 @@ export async function updateMonitorController(
   try {
     schedule = validateMonitorCron(cron, timezone);
   } catch (error) {
-    return res.status(400).json({
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    return sendMonitorError(
+      req,
+      res,
+      400,
+      RequestError.BAD_REQUEST,
+      error instanceof Error ? error.message : String(error),
+    );
   }
   const monitor = await updateMonitor({
     teamId: req.auth.team_id,
@@ -310,7 +348,13 @@ export async function updateMonitorController(
       input.schedule || input.targets ? schedule.intervalMs : undefined,
   });
   if (!monitor) {
-    return res.status(404).json({ success: false, error: "Monitor not found" });
+    return sendMonitorError(
+      req,
+      res,
+      404,
+      MonitorError.MONITOR_NOT_FOUND,
+      "Monitor not found",
+    );
   }
 
   const interestTracking: Promise<void>[] = [];
@@ -383,7 +427,13 @@ export async function deleteMonitorController(
   const { monitorId } = monitorParamsSchema.parse(req.params);
   const existing = await getMonitorForUpdate(req.auth.team_id, monitorId);
   if (!existing) {
-    return res.status(404).json({ success: false, error: "Monitor not found" });
+    return sendMonitorError(
+      req,
+      res,
+      404,
+      MonitorError.MONITOR_NOT_FOUND,
+      "Monitor not found",
+    );
   }
 
   const deleted = await deleteMonitor({
@@ -391,7 +441,13 @@ export async function deleteMonitorController(
     monitorId,
   });
   if (!deleted) {
-    return res.status(404).json({ success: false, error: "Monitor not found" });
+    return sendMonitorError(
+      req,
+      res,
+      404,
+      MonitorError.MONITOR_NOT_FOUND,
+      "Monitor not found",
+    );
   }
 
   trackMonitorDeactivatedInterest({
@@ -416,14 +472,23 @@ export async function runMonitorController(
   const { monitorId } = monitorParamsSchema.parse(req.params);
   const monitor = await getMonitorForUpdate(req.auth.team_id, monitorId);
   if (!monitor) {
-    return res.status(404).json({ success: false, error: "Monitor not found" });
+    return sendMonitorError(
+      req,
+      res,
+      404,
+      MonitorError.MONITOR_NOT_FOUND,
+      "Monitor not found",
+    );
   }
   if (monitor.current_check_id) {
-    return res.status(409).json({
-      success: false,
-      error: "Monitor check is already running.",
-      checkId: monitor.current_check_id,
-    });
+    return sendMonitorError(
+      req,
+      res,
+      409,
+      MonitorError.CONFLICT,
+      "Monitor check is already running.",
+      { checkId: monitor.current_check_id },
+    );
   }
 
   const check = await createMonitorCheck({
@@ -450,7 +515,13 @@ export async function listMonitorChecksController(
   const { monitorId } = monitorParamsSchema.parse(req.params);
   const monitor = await getMonitor(req.auth.team_id, monitorId);
   if (!monitor) {
-    return res.status(404).json({ success: false, error: "Monitor not found" });
+    return sendMonitorError(
+      req,
+      res,
+      404,
+      MonitorError.MONITOR_NOT_FOUND,
+      "Monitor not found",
+    );
   }
 
   const query = listMonitorChecksQuerySchema.parse(req.query);
@@ -487,7 +558,13 @@ export async function getMonitorCheckController(
   const skip = query.skip;
   const check = await getMonitorCheck(req.auth.team_id, monitorId, checkId);
   if (!check) {
-    return res.status(404).json({ success: false, error: "Check not found" });
+    return sendMonitorError(
+      req,
+      res,
+      404,
+      MonitorError.CHECK_NOT_FOUND,
+      "Check not found",
+    );
   }
 
   const [pages, totalPagesForFilter, webhookLog] = await Promise.all([
@@ -588,10 +665,7 @@ type EmailActionResponse =
       email: string;
       monitorName: string | null;
     }
-  | {
-      success: false;
-      error: "invalid_token" | "not_found" | "internal_error";
-    };
+  | StrictErrorResponse;
 
 function parseTokenFromRequest(req: { body?: unknown }): string | null {
   const candidate =
@@ -608,21 +682,27 @@ export async function confirmMonitorEmailController(
 ) {
   const token = parseTokenFromRequest(req);
   if (!token) {
-    const body: EmailActionResponse = {
-      success: false,
-      error: "invalid_token",
-    };
-    return res.status(400).json(body);
+    const envelope = errorResponse(
+      MonitorError.EMAIL_TOKEN_INVALID,
+      "Invalid monitor email token.",
+      {},
+      { httpStatus: 400 },
+    );
+    const body = envelope.body as StrictErrorResponse;
+    return res.status(envelope.httpStatus).json(body);
   }
 
   try {
     const row = await confirmRecipientByToken(token);
     if (!row) {
-      const body: EmailActionResponse = {
-        success: false,
-        error: "not_found",
-      };
-      return res.status(404).json(body);
+      const envelope = errorResponse(
+        MonitorError.MONITOR_NOT_FOUND,
+        "Monitor not found.",
+        {},
+        { httpStatus: 404 },
+      );
+      const body = envelope.body as StrictErrorResponse;
+      return res.status(envelope.httpStatus).json(body);
     }
 
     const monitorName = await getMonitorNameById(row.monitor_id);
@@ -650,11 +730,14 @@ export async function confirmMonitorEmailController(
     return res.status(200).json(body);
   } catch (error) {
     logger.error("Failed to confirm monitor email recipient", { error });
-    const body: EmailActionResponse = {
-      success: false,
-      error: "internal_error",
-    };
-    return res.status(500).json(body);
+    const envelope = errorResponse(
+      CommonError.UNKNOWN,
+      "Failed to confirm monitor email recipient.",
+      {},
+      { httpStatus: 500 },
+    );
+    const body = envelope.body as StrictErrorResponse;
+    return res.status(envelope.httpStatus).json(body);
   }
 }
 
@@ -664,21 +747,27 @@ export async function unsubscribeMonitorEmailController(
 ) {
   const token = parseTokenFromRequest(req);
   if (!token) {
-    const body: EmailActionResponse = {
-      success: false,
-      error: "invalid_token",
-    };
-    return res.status(400).json(body);
+    const envelope = errorResponse(
+      MonitorError.EMAIL_TOKEN_INVALID,
+      "Invalid monitor email token.",
+      {},
+      { httpStatus: 400 },
+    );
+    const body = envelope.body as StrictErrorResponse;
+    return res.status(envelope.httpStatus).json(body);
   }
 
   try {
     const row = await unsubscribeRecipientByToken(token);
     if (!row) {
-      const body: EmailActionResponse = {
-        success: false,
-        error: "not_found",
-      };
-      return res.status(404).json(body);
+      const envelope = errorResponse(
+        MonitorError.MONITOR_NOT_FOUND,
+        "Monitor not found.",
+        {},
+        { httpStatus: 404 },
+      );
+      const body = envelope.body as StrictErrorResponse;
+      return res.status(envelope.httpStatus).json(body);
     }
 
     const monitorName = await getMonitorNameById(row.monitor_id);
@@ -698,10 +787,13 @@ export async function unsubscribeMonitorEmailController(
     return res.status(200).json(body);
   } catch (error) {
     logger.error("Failed to unsubscribe monitor email recipient", { error });
-    const body: EmailActionResponse = {
-      success: false,
-      error: "internal_error",
-    };
-    return res.status(500).json(body);
+    const envelope = errorResponse(
+      CommonError.UNKNOWN,
+      "Failed to unsubscribe monitor email recipient.",
+      {},
+      { httpStatus: 500 },
+    );
+    const body = envelope.body as StrictErrorResponse;
+    return res.status(envelope.httpStatus).json(body);
   }
 }

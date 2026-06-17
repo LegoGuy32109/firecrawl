@@ -13,6 +13,9 @@ import {
 } from "../../lib/supabase-jobs";
 import { logger as _logger } from "../../lib/logger";
 import { getJobFromGCS } from "../../lib/gcs-jobs";
+import { CommonError, LifecycleError } from "../../lib/error-codes";
+import { asyncJobFailureResponse, errorResponse } from "./response-enveloper";
+import { deserializeTransportableError } from "../../lib/error-serde";
 
 async function getExtractData(id: string): Promise<any> {
   // Try GCS first if configured
@@ -37,16 +40,46 @@ export async function extractStatusController(
   const extractRequest = config.USE_DB_AUTHENTICATION
     ? await supabaseGetExtractRequestByIdDirect(req.params.jobId)
     : null;
+  if (config.USE_DB_AUTHENTICATION && !extractRequest) {
+    const response = errorResponse(
+      LifecycleError.JOB_NOT_FOUND,
+      "Extract job not found",
+      req,
+    );
+    return res.status(response.httpStatus).json(response.body as any);
+  }
+
   if (config.USE_DB_AUTHENTICATION) {
-    if (!extractRequest || extractRequest.team_id !== req.auth.team_id) {
-      return res.status(404).json({
-        success: false,
-        error: "Extract job not found",
-      });
+    if (extractRequest.team_id !== req.auth.team_id) {
+      const response = errorResponse(
+        LifecycleError.JOB_WRONG_TEAM,
+        "Extract job not found",
+        req,
+      );
+      return res.status(response.httpStatus).json(response.body as any);
     }
 
     if (extractRequest.kind === "agent") {
       const agent = await supabaseGetAgentByIdDirect(req.params.jobId);
+
+      if (agent && !agent.is_successful) {
+        const failedError = deserializeTransportableError(agent.error ?? "");
+        const response = asyncJobFailureResponse(
+          failedError?.code ?? CommonError.UNKNOWN,
+          failedError?.message ?? agent.error ?? "Extract job failed",
+          req,
+          {
+            expiresAt: new Date(
+              new Date(
+                agent.created_at ?? extractRequest.created_at,
+              ).getTime() +
+                1000 * 60 * 60 * 24,
+            ).toISOString(),
+            creditsUsed: agent?.credits_cost,
+          },
+        );
+        return res.status(response.httpStatus).json(response.body as any);
+      }
 
       let data: any = undefined;
       if (agent?.is_successful) {
@@ -85,6 +118,23 @@ export async function extractStatusController(
           data = await getExtractData(req.params.jobId);
         }
 
+        if (!dbExtract.is_successful) {
+          const failedError = deserializeTransportableError(
+            dbExtract.error ?? "",
+          );
+          const response = asyncJobFailureResponse(
+            failedError?.code ?? CommonError.UNKNOWN,
+            failedError?.message ?? dbExtract.error ?? "Extract job failed",
+            req,
+            {
+              expiresAt: new Date(
+                new Date(dbExtract.created_at).getTime() + 1000 * 60 * 60 * 24,
+              ).toISOString(),
+            },
+          );
+          return res.status(response.httpStatus).json(response.body as any);
+        }
+
         return res.status(200).json({
           success: dbExtract.is_successful,
           data,
@@ -103,7 +153,8 @@ export async function extractStatusController(
       data: [],
       status: "processing",
       expiresAt: new Date(
-        new Date(extractRequest.created_at).getTime() + 1000 * 60 * 60 * 24,
+        new Date(extractRequest?.created_at ?? Date.now()).getTime() +
+          1000 * 60 * 60 * 24,
       ).toISOString(),
     });
   }
@@ -114,8 +165,38 @@ export async function extractStatusController(
     data = await getExtractData(req.params.jobId);
   }
 
+  if (redisExtract.status === "failed") {
+    const failedError =
+      typeof redisExtract.error === "string"
+        ? deserializeTransportableError(redisExtract.error)
+        : null;
+    const errorMessage =
+      typeof redisExtract.error === "string"
+        ? redisExtract.error
+        : redisExtract.error && typeof redisExtract.error === "object"
+          ? typeof redisExtract.error.message === "string"
+            ? redisExtract.error.message
+            : typeof redisExtract.error.error === "string"
+              ? redisExtract.error.error
+              : JSON.stringify(redisExtract.error)
+          : "Extract job failed";
+    const response = asyncJobFailureResponse(
+      failedError?.code ?? CommonError.UNKNOWN,
+      failedError?.message ?? errorMessage,
+      req,
+      {
+        expiresAt: (await getExtractExpiry(req.params.jobId)).toISOString(),
+        creditsUsed: redisExtract.creditsBilled
+          ? redisExtract.creditsBilled
+          : undefined,
+        data,
+      },
+    );
+    return res.status(response.httpStatus).json(response.body as any);
+  }
+
   return res.status(200).json({
-    success: redisExtract.status === "failed" ? false : true,
+    success: true,
     data,
     status: redisExtract.status,
     error: (() => {

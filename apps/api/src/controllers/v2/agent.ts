@@ -11,6 +11,12 @@ import { logRequest } from "../../services/logging/log_job";
 import { config } from "../../config";
 import { agentConsumeFreeRequestIfLeft } from "../../db/rpc";
 import { getScrapeZDR } from "../../lib/zdr-helpers";
+import { errorResponse } from "./response-enveloper";
+import {
+  AgentError,
+  DependencyError,
+  RequestError,
+} from "../../lib/error-codes";
 
 export async function agentController(
   req: RequestWithAuth<{}, AgentResponse, AgentRequest>,
@@ -32,11 +38,13 @@ export async function agentController(
   req.body = agentRequestSchema.parse(req.body);
 
   if (getScrapeZDR(req.acuc?.flags) === "forced") {
-    return res.status(400).json({
-      success: false,
-      error:
-        "Your team has zero data retention enabled. This is not supported on extract. Please contact support@firecrawl.com to unblock this feature.",
-    });
+    const envelope = errorResponse(
+      RequestError.BAD_REQUEST,
+      "Your team has zero data retention enabled. This is not supported on extract. Please contact support@firecrawl.com to unblock this feature.",
+      req,
+      { httpStatus: 400 },
+    );
+    return res.status(envelope.httpStatus).json(envelope.body);
   }
 
   _logger.info("Agent starting...", {
@@ -47,7 +55,13 @@ export async function agentController(
   });
 
   if (!config.EXTRACT_V3_BETA_URL) {
-    throw new Error("Agent beta is not enabled.");
+    const envelope = errorResponse(
+      DependencyError.UNAVAILABLE,
+      "Agent beta is not enabled.",
+      req,
+      { httpStatus: 503 },
+    );
+    return res.status(envelope.httpStatus).json(envelope.body);
   }
 
   // If maxCredits > 2500, skip free request consumption — this is always a paid request
@@ -110,10 +124,19 @@ export async function agentController(
       status: passthrough.status,
       text,
     });
-    return res.status(500).json({
-      success: false,
-      error: "Failed to passthrough agent request.",
-    });
+    const envelope = errorResponse(
+      AgentError.UPSTREAM,
+      "Failed to passthrough agent request.",
+      req,
+      {
+        httpStatus: 502,
+        details: {
+          status: passthrough.status,
+          body: text,
+        },
+      },
+    );
+    return res.status(envelope.httpStatus).json(envelope.body);
   }
 
   return res.status(200).json({

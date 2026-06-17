@@ -27,23 +27,32 @@ import {
   ScrapeWarning,
   WarningCodes,
 } from "./error-codes";
+import { WarningDetailsFor } from "./error-details";
 
-export type ErrorEntry = {
+export interface ErrorCatalogEntry {
   httpStatus: number;
   explanation: string;
   fix: string;
-};
+}
 
-export type WarningCatalogEntry = {
+export type ErrorEntry = ErrorCatalogEntry;
+
+export interface WarningCatalogEntry {
   explanation: string;
   fix: string;
+}
+
+type WarningOccurrence<C extends WarningCodes> = {
+  code: C;
+  message: string;
+  details?: WarningDetailsFor<C>;
 };
 
 const entry = (
   httpStatus: number,
   explanation: string,
   fix: string,
-): ErrorEntry => ({ httpStatus, explanation, fix });
+): ErrorCatalogEntry => ({ httpStatus, explanation, fix });
 
 const warn = (explanation: string, fix: string): WarningCatalogEntry => ({
   explanation,
@@ -456,7 +465,7 @@ export const ERROR_CATALOG = {
     "An unexpected server error occurred.",
     "Retry or contact support with the error id.",
   ),
-} satisfies Record<ErrorCodes, ErrorEntry>;
+} satisfies Record<ErrorCodes, ErrorCatalogEntry>;
 
 export const WARNING_CATALOG = {
   [ScrapeWarning.ENGINE_PARTIAL_FEATURES]: warn(
@@ -533,14 +542,35 @@ export const WARNING_CATALOG = {
   ),
 } satisfies Record<WarningCodes, WarningCatalogEntry>;
 
+const ERROR_CODE_SET: ReadonlySet<string> = new Set(Object.keys(ERROR_CATALOG));
+const WARNING_CODE_SET: ReadonlySet<string> = new Set(
+  Object.keys(WARNING_CATALOG),
+);
+
 export function errorCodeToHttpStatus(code: ErrorCodes): number {
   return ERROR_CATALOG[code].httpStatus;
 }
 
-export function explainError(code: ErrorCodes): ErrorEntry {
+export function explainError(code: ErrorCodes): ErrorCatalogEntry {
   return ERROR_CATALOG[code];
 }
 
 export function explainWarning(code: WarningCodes): WarningCatalogEntry {
   return WARNING_CATALOG[code];
+}
+
+export function parseErrorCode(s: string): ErrorCodes | undefined {
+  return ERROR_CODE_SET.has(s) ? (s as ErrorCodes) : undefined;
+}
+
+export function parseWarningCode(s: string): WarningCodes | undefined {
+  return WARNING_CODE_SET.has(s) ? (s as WarningCodes) : undefined;
+}
+
+export function makeWarning<C extends WarningCodes>(
+  code: C,
+  message: string,
+  details?: WarningDetailsFor<C>,
+): WarningOccurrence<C> {
+  return details ? { code, message, details } : { code, message };
 }

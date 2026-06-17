@@ -17,6 +17,8 @@ import type {
 } from "../../services/logging/log_job";
 import type { RequestWithAuth } from "../v1/types";
 import { wrap } from "../../routes/shared";
+import { errorResponse } from "./response-enveloper";
+import { ProxyError, RequestError } from "../../lib/error-codes";
 
 const TIMEOUT_MS = 120_000;
 const SEARCH_CREDITS_PER_TEN_RESULTS = 2;
@@ -193,15 +195,11 @@ function creditsFor(
 
 function researchError(
   res: Response,
-  status: number,
+  req: RequestWithAuth<any, any, any>,
   error: string,
-  details?: unknown,
 ) {
-  return res.status(status).json({
-    success: false,
-    error,
-    ...(details === undefined ? {} : { details }),
-  });
+  const response = errorResponse(RequestError.BAD_REQUEST, error, req);
+  return res.status(response.httpStatus).json(response.body);
 }
 
 async function fetchResearchUpstream(
@@ -251,12 +249,7 @@ function createResearchController(
     const parsed = schema.safeParse(req.query);
     if (!parsed.success) {
       logger.warn("Invalid research query", { error: parsed.error.issues });
-      return researchError(
-        res,
-        400,
-        "Invalid query parameters",
-        parsed.error.issues,
-      );
+      return researchError(res, authedReq, "Invalid query parameters");
     }
 
     const params = parsed.data as ResearchQueryParams;
@@ -286,9 +279,15 @@ function createResearchController(
         queryKeys,
       );
       if (!upstream) {
-        statusCode = 404;
+        statusCode = 503;
         error = "Research service is not configured";
-        return res.status(404).end();
+        const response = errorResponse(
+          ProxyError.NOT_CONFIGURED,
+          error,
+          authedReq,
+          { details: { upstream: "research" } },
+        );
+        return res.status(response.httpStatus).json(response.body);
       }
 
       statusCode = upstream.status;
@@ -343,12 +342,24 @@ function createResearchController(
       if (err instanceof DOMException && err.name === "TimeoutError") {
         statusCode = 504;
         error = "Research service timed out";
-        return res.status(504).end();
+        const response = errorResponse(
+          ProxyError.UPSTREAM_TIMEOUT,
+          error,
+          authedReq,
+          { details: { upstream: "research", timeoutMs: TIMEOUT_MS } },
+        );
+        return res.status(response.httpStatus).json(response.body);
       }
       statusCode = 502;
       error = "Research proxy error";
       logger.error("Research proxy error", { error: err });
-      return res.status(502).end();
+      const response = errorResponse(
+        ProxyError.UPSTREAM_UNAVAILABLE,
+        error,
+        authedReq,
+        { details: { upstream: "research" } },
+      );
+      return res.status(response.httpStatus).json(response.body);
     } finally {
       const timeTaken = (Date.now() - started) / 1000;
       logResearchEndpoint({

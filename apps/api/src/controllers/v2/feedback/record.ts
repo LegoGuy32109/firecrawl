@@ -2,6 +2,13 @@ import { v7 as uuidv7 } from "uuid";
 import { config } from "../../../config";
 import { logger as _logger } from "../../../lib/logger";
 import {
+  CommonError,
+  FeedbackError,
+  RequestError,
+  type ErrorCodes,
+} from "../../../lib/error-codes";
+import { errorResponse } from "../response-enveloper";
+import {
   autumnService,
   featureIdForBillingEndpoint,
 } from "../../../services/autumn/autumn.service";
@@ -50,16 +57,19 @@ function dailyCapFor(options: FeedbackRecordOptions): number {
 
 function feedbackFailure(
   status: number,
-  code: EndpointFeedbackErrorCode | SearchFeedbackErrorCode,
+  code: ErrorCodes,
   error: string,
+  req: RequestWithAuth<any, any, any>,
+  feedbackErrorCode?: EndpointFeedbackErrorCode | SearchFeedbackErrorCode,
 ): FeedbackRecordResult {
+  const envelope = errorResponse(code, error, req, { httpStatus: status });
+  const body = {
+    ...envelope.body,
+    ...(feedbackErrorCode ? { feedbackErrorCode } : {}),
+  } as FeedbackRecordResult["body"];
   return {
-    status,
-    body: {
-      success: false,
-      error,
-      feedbackErrorCode: code,
-    },
+    status: envelope.httpStatus,
+    body,
   };
 }
 
@@ -86,17 +96,21 @@ function validateAccess(
   if (config.USE_DB_AUTHENTICATION !== true) {
     return feedbackFailure(
       503,
-      "DB_DISABLED",
+      FeedbackError.DB_UNAVAILABLE,
       options.dbDisabledMessage ??
         "Feedback requires database authentication and is unavailable on this deployment.",
+      req,
+      "DB_DISABLED",
     );
   }
 
   if (isPreviewTeam(req.auth.team_id)) {
     return feedbackFailure(
       403,
-      "PREVIEW_TEAM_NOT_ALLOWED",
+      RequestError.BAD_REQUEST,
       "Feedback is not available for preview teams.",
+      req,
+      "PREVIEW_TEAM_NOT_ALLOWED",
     );
   }
 
@@ -104,8 +118,10 @@ function validateAccess(
     logger.info("Rejected feedback: team opted out");
     return feedbackFailure(
       403,
-      "TEAM_OPTED_OUT",
+      FeedbackError.TEAM_OPTED_OUT,
       "Feedback is disabled for this team. Contact support@firecrawl.com to re-enable.",
+      req,
+      "TEAM_OPTED_OUT",
     );
   }
 
@@ -113,6 +129,7 @@ function validateAccess(
 }
 
 async function lookupJobWithRetry(
+  req: RequestWithAuth<any, any, any>,
   options: FeedbackRecordOptions,
   dbTeamId: string,
   logger: FeedbackLogger,
@@ -131,19 +148,28 @@ async function lookupJobWithRetry(
     if (!job) {
       return feedbackFailure(
         404,
-        options.notFoundCode ?? "JOB_NOT_FOUND",
+        FeedbackError.TARGET_NOT_FOUND,
         `${options.endpoint} job not found for this team.`,
+        req,
+        options.notFoundCode ?? "JOB_NOT_FOUND",
       );
     }
 
     return job;
   } catch (error) {
     logger.error("Failed to look up job for feedback", { error });
-    return feedbackFailure(500, "INTERNAL", "Failed to look up job.");
+    return feedbackFailure(
+      500,
+      CommonError.UNKNOWN,
+      "Failed to look up job.",
+      req,
+      "INTERNAL",
+    );
   }
 }
 
 function validateJob(
+  req: RequestWithAuth<any, any, any>,
   job: FeedbackJobRow,
   options: FeedbackRecordOptions,
   logger: FeedbackLogger,
@@ -151,8 +177,10 @@ function validateJob(
   if (options.requireSuccessfulJob && job.is_successful === false) {
     return feedbackFailure(
       409,
-      options.failedJobCode ?? "INTERNAL",
+      CommonError.UNKNOWN,
       `Cannot submit feedback for a ${options.endpoint} job that did not succeed.`,
+      req,
+      options.failedJobCode ?? "INTERNAL",
     );
   }
 
@@ -169,9 +197,11 @@ function validateJob(
 
   return feedbackFailure(
     409,
-    "FEEDBACK_WINDOW_EXPIRED",
+    FeedbackError.WINDOW_EXPIRED,
     options.windowExpiredMessage ??
       `Feedback must be submitted within ${maxAgeSec} seconds of the job.`,
+    req,
+    "FEEDBACK_WINDOW_EXPIRED",
   );
 }
 
@@ -258,7 +288,12 @@ export async function recordEndpointFeedback(
   const dbTeamId = normalizeFeedbackTeamId(req.auth.team_id);
 
   try {
-    const jobOrFailure = await lookupJobWithRetry(options, dbTeamId, logger);
+    const jobOrFailure = await lookupJobWithRetry(
+      req,
+      options,
+      dbTeamId,
+      logger,
+    );
     if ("status" in jobOrFailure) return jobOrFailure;
 
     if (shouldSkipPersistenceForJobZdr(jobOrFailure, options)) {
@@ -266,7 +301,7 @@ export async function recordEndpointFeedback(
       return zdrFeedbackSuccess(options);
     }
 
-    const jobFailure = validateJob(jobOrFailure, options, logger);
+    const jobFailure = validateJob(req, jobOrFailure, options, logger);
     if (jobFailure) return jobFailure;
 
     const feedbackId = uuidv7();
@@ -284,7 +319,13 @@ export async function recordEndpointFeedback(
       }
 
       logger.error("Failed to insert endpoint feedback", { error: insertErr });
-      return feedbackFailure(500, "INTERNAL", "Failed to record feedback.");
+      return feedbackFailure(
+        500,
+        CommonError.UNKNOWN,
+        "Failed to record feedback.",
+        req,
+        "INTERNAL",
+      );
     }
 
     const dailyCap = dailyCapFor(options);
@@ -368,8 +409,10 @@ export async function recordEndpointFeedback(
     });
     return feedbackFailure(
       500,
-      "INTERNAL",
+      CommonError.UNKNOWN,
       error instanceof Error ? error.message : "Unknown error",
+      req,
+      "INTERNAL",
     );
   }
 }

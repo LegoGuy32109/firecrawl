@@ -7,6 +7,8 @@ import {
   SearchFeedbackResponse,
   searchFeedbackSchema,
 } from "./types";
+import { errorResponse } from "./response-enveloper";
+import { RequestError } from "../../lib/error-codes";
 import { recordEndpointFeedback } from "./feedback/record";
 import { searchFeedbackRecordOptions } from "./feedback/record-options";
 import { toSearchFeedbackInput } from "./feedback/request-input";
@@ -33,10 +35,16 @@ export async function searchFeedbackController(
   } catch (error) {
     if (error instanceof z.ZodError) {
       logger.warn("Invalid feedback body", { error: error.issues });
-      return res.status(400).json({
-        success: false,
-        error: "Invalid request body",
-        details: error.issues,
+      const envelope = errorResponse(
+        RequestError.BAD_REQUEST,
+        "Invalid request body",
+        req,
+        {
+          details: error.issues as any,
+        },
+      );
+      return res.status(envelope.httpStatus).json({
+        ...envelope.body,
         feedbackErrorCode: "INVALID_BODY",
       });
     }
@@ -51,5 +59,5 @@ export async function searchFeedbackController(
     }),
   );
 
-  return res.status(result.status).json(result.body);
+  return res.status(result.status).json(result.body as SearchFeedbackResponse);
 }

@@ -6,6 +6,12 @@ import {
   getSearchIndexClient,
   type SearchRequest,
 } from "../../lib/search-index-client";
+import { errorResponse } from "./response-enveloper";
+import {
+  CommonError,
+  DependencyError,
+  RequestError,
+} from "../../lib/error-codes";
 
 // Validation schemas
 const searchRequestSchema = z.object({
@@ -43,11 +49,15 @@ export async function realtimeSearchController(
     const validationResult = searchRequestSchema.safeParse(req.body);
 
     if (!validationResult.success) {
-      res.status(400).json({
-        success: false,
-        error: "Invalid request parameters",
-        details: validationResult.error.issues,
-      });
+      const envelope = errorResponse(
+        RequestError.BAD_REQUEST,
+        "Invalid request parameters",
+        req,
+        {
+          details: validationResult.error.issues as any,
+        },
+      );
+      res.status(envelope.httpStatus).json(envelope.body);
       return;
     }
 
@@ -64,10 +74,12 @@ export async function realtimeSearchController(
     const client = getSearchIndexClient();
 
     if (!client) {
-      res.status(503).json({
-        success: false,
-        error: "Search index service is not configured",
-      });
+      const envelope = errorResponse(
+        DependencyError.UNAVAILABLE,
+        "Search index service is not configured",
+        req,
+      );
+      res.status(envelope.httpStatus).json(envelope.body);
       return;
     }
 
@@ -96,11 +108,13 @@ export async function realtimeSearchController(
       error: (error as Error).message,
     });
 
-    res.status(500).json({
-      success: false,
-      error: "Internal server error",
-      message: (error as Error).message,
-    });
+    const envelope = errorResponse(
+      CommonError.UNKNOWN,
+      error instanceof Error ? error : "Internal server error",
+      req,
+      { httpStatus: 500 },
+    );
+    res.status(envelope.httpStatus).json(envelope.body);
   }
 }
 

@@ -4,6 +4,8 @@ import { config } from "../config";
 import { RateLimiterMode } from "../types";
 import { SEARCH_CREDITS_FEATURE_ID } from "../services/autumn/autumn.service";
 import expressWs from "express-ws";
+import { errorResponse } from "../controllers/v2/response-enveloper";
+import { RequestError } from "../lib/error-codes";
 import { searchController } from "../controllers/v2/search";
 import { feedbackController } from "../controllers/v2/feedback/controller";
 import { searchFeedbackController } from "../controllers/v2/search-feedback";
@@ -100,18 +102,20 @@ const parseUploadMiddleware: express.RequestHandler = (req, res, next) => {
     }
 
     if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
-      return res.status(400).json({
-        success: false,
-        code: "BAD_REQUEST",
-        error: "Uploaded file exceeds maximum size of 50MB.",
-      });
+      const response = errorResponse(
+        RequestError.BAD_REQUEST,
+        "Uploaded file exceeds maximum size of 50MB.",
+        req,
+      );
+      return res.status(response.httpStatus).json(response.body);
     }
 
-    return res.status(400).json({
-      success: false,
-      code: "BAD_REQUEST",
-      error: err.message || "Invalid multipart form-data request.",
-    });
+    const response = errorResponse(
+      RequestError.BAD_REQUEST,
+      err.message || "Invalid multipart form-data request.",
+      req,
+    );
+    return res.status(response.httpStatus).json(response.body);
   });
 };
 

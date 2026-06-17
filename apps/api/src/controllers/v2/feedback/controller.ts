@@ -6,6 +6,8 @@ import {
   RequestWithAuth,
   endpointFeedbackSchema,
 } from "../types";
+import { errorResponse } from "../response-enveloper";
+import { RequestError } from "../../../lib/error-codes";
 import { recordEndpointFeedback } from "./record";
 import { endpointFeedbackRecordOptions } from "./record-options";
 import { toFeedbackInput } from "./request-input";
@@ -19,10 +21,16 @@ export async function feedbackController(
     parsedBody = endpointFeedbackSchema.parse(req.body);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid request body",
-        details: error.issues,
+      const envelope = errorResponse(
+        RequestError.BAD_REQUEST,
+        "Invalid request body",
+        req,
+        {
+          details: error.issues as any,
+        },
+      );
+      return res.status(envelope.httpStatus).json({
+        ...envelope.body,
         feedbackErrorCode: "INVALID_BODY",
       });
     }
@@ -38,5 +46,7 @@ export async function feedbackController(
     }),
   );
 
-  return res.status(result.status).json(result.body);
+  return res
+    .status(result.status)
+    .json(result.body as EndpointFeedbackResponse);
 }
