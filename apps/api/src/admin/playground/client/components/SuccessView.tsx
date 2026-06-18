@@ -3,6 +3,7 @@ import { useState } from "preact/hooks";
 import { activeFeature } from "../signals";
 import { JsonView } from "./JsonView";
 import { DiagnosticsWaterfall } from "./DiagnosticsWaterfall";
+import { toImageSrc } from "../imageSrc";
 
 type Warning = { code: string; message: string; details?: unknown };
 type DiagnosticStep = {
@@ -11,6 +12,51 @@ type DiagnosticStep = {
   code?: string;
   durationMs?: number;
 };
+
+function imagePreview(value: string, alt: string) {
+  const src = toImageSrc(value);
+  return (
+    <a href={src} target="_blank" rel="noopener noreferrer">
+      <img
+        src={src}
+        alt={alt}
+        style={{
+          maxWidth: "100%",
+          border: "1px solid var(--line)",
+          display: "block",
+        }}
+      />
+    </a>
+  );
+}
+
+function renderActions(value: unknown) {
+  const actions = value as { screenshots?: unknown };
+  const screenshots = Array.isArray(actions.screenshots)
+    ? actions.screenshots.filter((x): x is string => typeof x === "string")
+    : [];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+      {screenshots.length > 0 && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+            gap: "8px",
+          }}
+        >
+          {screenshots.map((screenshot, i) => (
+            <div key={i}>
+              {imagePreview(screenshot, `action-screenshot-${i}`)}
+            </div>
+          ))}
+        </div>
+      )}
+      <JsonView value={value as object} collapsed={2} />
+    </div>
+  );
+}
 
 type Props = {
   body: Record<string, unknown>;
@@ -72,17 +118,7 @@ const FORMAT_TABS: FormatTab[] = [
     id: "screenshot",
     label: "Screenshot",
     dataKey: "screenshot",
-    render: v => (
-      <img
-        src={v as string}
-        alt="screenshot"
-        style={{
-          maxWidth: "100%",
-          border: "1px solid var(--line)",
-          display: "block",
-        }}
-      />
-    ),
+    render: v => imagePreview(v as string, "screenshot"),
   },
   {
     id: "json",
@@ -162,7 +198,7 @@ const FORMAT_TABS: FormatTab[] = [
         {(v as string[]).map((src, i) => (
           <a key={i} href={src} target="_blank" rel="noopener noreferrer">
             <img
-              src={src}
+              src={toImageSrc(src)}
               alt={`img-${i}`}
               style={{
                 width: "100%",
@@ -274,7 +310,7 @@ const FORMAT_TABS: FormatTab[] = [
     id: "actions",
     label: "Actions",
     dataKey: "actions",
-    render: v => <JsonView value={v as object} collapsed={2} />,
+    render: renderActions,
   },
 ];
 

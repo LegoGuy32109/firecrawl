@@ -18,6 +18,38 @@ const HAS_LOCAL_FIRE_ENGINE_AND_PLAYWRIGHT =
 const fixtureUrl = `${TEST_SUITE_WEBSITE}/cdp-engine`;
 const selectedEngine = (response: { metadata: Record<string, unknown> }) =>
   response.metadata.engine;
+const expectRawJpegBase64 = (value: string) => {
+  expect(value).toMatch(/^\/9j\//);
+  expect(value).not.toMatch(/^https?:\/\//);
+  expect(value).not.toMatch(/^data:image\//);
+};
+
+const jpegDimensions = (base64: string) => {
+  const bytes = Buffer.from(base64, "base64");
+  let offset = 2;
+
+  while (offset < bytes.length) {
+    if (bytes[offset] !== 0xff) break;
+    const marker = bytes[offset + 1];
+    const length = bytes.readUInt16BE(offset + 2);
+
+    if (
+      (marker >= 0xc0 && marker <= 0xc3) ||
+      (marker >= 0xc5 && marker <= 0xc7) ||
+      (marker >= 0xc9 && marker <= 0xcb) ||
+      (marker >= 0xcd && marker <= 0xcf)
+    ) {
+      return {
+        height: bytes.readUInt16BE(offset + 5),
+        width: bytes.readUInt16BE(offset + 7),
+      };
+    }
+
+    offset += 2 + length;
+  }
+
+  throw new Error("Could not read JPEG dimensions");
+};
 
 describe("playwright;cdp engine", () => {
   let identity: Identity;
@@ -45,6 +77,7 @@ describe("playwright;cdp engine", () => {
       expect(response.screenshot).toBeDefined();
       expect(typeof response.screenshot).toBe("string");
       expect(response.screenshot!.length).toBeGreaterThan(0);
+      expectRawJpegBase64(response.screenshot!);
       expect(selectedEngine(response)).toBe("playwright;cdp");
     },
     scrapeTimeout,
@@ -65,6 +98,36 @@ describe("playwright;cdp engine", () => {
       expect(response.screenshot).toBeDefined();
       expect(typeof response.screenshot).toBe("string");
       expect(response.screenshot!.length).toBeGreaterThan(0);
+      expectRawJpegBase64(response.screenshot!);
+      expect(selectedEngine(response)).toBe("playwright;cdp");
+    },
+    scrapeTimeout,
+  );
+
+  concurrentIf(HAS_LOCAL_PLAYWRIGHT_NO_FIRE_ENGINE && ALLOW_TEST_SUITE_WEBSITE)(
+    "applies screenshot viewport options without changing raw base64 contract",
+    async () => {
+      const response = await scrape(
+        {
+          url: TEST_SUITE_WEBSITE,
+          formats: [
+            {
+              type: "screenshot",
+              quality: 70,
+              viewport: { width: 800, height: 600 },
+            },
+          ],
+          maxAge: 0,
+        },
+        identity,
+      );
+
+      expect(response.screenshot).toBeDefined();
+      expectRawJpegBase64(response.screenshot!);
+      expect(jpegDimensions(response.screenshot!)).toEqual({
+        width: 800,
+        height: 600,
+      });
       expect(selectedEngine(response)).toBe("playwright;cdp");
     },
     scrapeTimeout,
@@ -163,6 +226,7 @@ describe("playwright;cdp engine", () => {
         value: { ok: true, engine: "playwright;cdp" },
       });
       expect(response.actions?.screenshots?.[0]).toEqual(expect.any(String));
+      expectRawJpegBase64(response.actions!.screenshots![0]);
       expect(selectedEngine(response)).toBe("playwright;cdp");
     },
     scrapeTimeout,

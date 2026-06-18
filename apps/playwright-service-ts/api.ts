@@ -240,6 +240,11 @@ interface UrlModel {
   skip_tls_verification?: boolean;
   screenshot?: boolean;
   full_page_screenshot?: boolean;
+  screenshot_quality?: number;
+  screenshot_viewport?: {
+    width: number;
+    height: number;
+  };
   mobile?: boolean;
   location?: {
     country?: string;
@@ -281,7 +286,11 @@ interface BrowserServiceCreateResponse {
     framesCaptured?: number;
     recordingDurationMs?: number;
     warning?: string;
-    warnings?: Array<{ code: string; message: string; details?: Record<string, unknown> }>;
+    warnings?: Array<{
+      code: string;
+      message: string;
+      details?: Record<string, unknown>;
+    }>;
   };
 }
 
@@ -311,7 +320,11 @@ interface BrowserServiceDeleteResponse {
     framesCaptured?: number;
     recordingDurationMs?: number;
     warning?: string;
-    warnings?: Array<{ code: string; message: string; details?: Record<string, unknown> }>;
+    warnings?: Array<{
+      code: string;
+      message: string;
+      details?: Record<string, unknown>;
+    }>;
   };
 }
 
@@ -351,7 +364,10 @@ type ScrapeArtifactRecord = {
 
 const browserSessions = new Map<string, LiveSessionRecord>();
 const scrapeArtifacts = new Map<string, ScrapeArtifactRecord>();
-const serviceArtifactRoot = path.join(os.tmpdir(), "firecrawl-playwright-service");
+const serviceArtifactRoot = path.join(
+  os.tmpdir(),
+  "firecrawl-playwright-service",
+);
 
 async function ensureDir(dir: string): Promise<void> {
   await mkdir(dir, { recursive: true });
@@ -407,7 +423,11 @@ function serializeValue(value: unknown): string {
 }
 
 function appendLiveWarning(
-  warnings: Array<{ code: string; message: string; details?: Record<string, unknown> }>,
+  warnings: Array<{
+    code: string;
+    message: string;
+    details?: Record<string, unknown>;
+  }>,
   code: string,
   message: string,
   details?: Record<string, unknown>,
@@ -425,8 +445,16 @@ function buildLiveMetadata(
     framesCaptured: number;
     recordingDurationMs: number;
     warning: string;
-    warnings: Array<{ code: string; message: string; details?: Record<string, unknown> }>;
-    error: { code?: string; message: string; details?: Record<string, unknown> };
+    warnings: Array<{
+      code: string;
+      message: string;
+      details?: Record<string, unknown>;
+    }>;
+    error: {
+      code?: string;
+      message: string;
+      details?: Record<string, unknown>;
+    };
   }> = {},
 ) {
   const base =
@@ -459,13 +487,20 @@ function buildLiveMetadata(
 }
 
 async function captureBrowserArtifacts(session: LiveSessionRecord) {
-  const warnings: Array<{ code: string; message: string; details?: Record<string, unknown> }> = [];
+  const warnings: Array<{
+    code: string;
+    message: string;
+    details?: Record<string, unknown>;
+  }> = [];
   let screenshotUrl: string | undefined;
   let recordingUrl: string | undefined;
   let recordingDurationMs: number | undefined;
 
   try {
-    const screenshotPath = browserSessionArtifactPath(session.sessionId, "final.jpeg");
+    const screenshotPath = browserSessionArtifactPath(
+      session.sessionId,
+      "final.jpeg",
+    );
     await session.page.screenshot({ path: screenshotPath, type: "jpeg" });
     session.screenshotPath = screenshotPath;
     screenshotUrl = apiBrowserArtifactPath(session.sessionId, "final.jpeg");
@@ -562,7 +597,12 @@ function attachBrowserSessionClient(session: LiveSessionRecord, client: any) {
 type ScrapeAction =
   | { type: "wait"; milliseconds?: number; selector?: string }
   | { type: "click"; selector: string; all?: boolean }
-  | { type: "screenshot"; fullPage?: boolean; quality?: number }
+  | {
+      type: "screenshot";
+      fullPage?: boolean;
+      quality?: number;
+      viewport?: { width: number; height: number };
+    }
   | { type: "write"; text: string }
   | { type: "press"; key: string }
   | { type: "scroll"; direction?: "up" | "down"; selector?: string }
@@ -603,15 +643,17 @@ const initializeBrowser = async () => {
 const MOBILE_USER_AGENT =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
 
-const geolocationByCountry: Record<string, { latitude: number; longitude: number }> =
-  {
-    US: { latitude: 37.7749, longitude: -122.4194 },
-    CA: { latitude: 43.6532, longitude: -79.3832 },
-    DE: { latitude: 52.52, longitude: 13.405 },
-    GB: { latitude: 51.5074, longitude: -0.1278 },
-    FR: { latitude: 48.8566, longitude: 2.3522 },
-    JP: { latitude: 35.6762, longitude: 139.6503 },
-  };
+const geolocationByCountry: Record<
+  string,
+  { latitude: number; longitude: number }
+> = {
+  US: { latitude: 37.7749, longitude: -122.4194 },
+  CA: { latitude: 43.6532, longitude: -79.3832 },
+  DE: { latitude: 52.52, longitude: 13.405 },
+  GB: { latitude: 51.5074, longitude: -0.1278 },
+  FR: { latitude: 48.8566, longitude: 2.3522 },
+  JP: { latitude: 35.6762, longitude: 139.6503 },
+};
 
 const createContext = async (
   skipTlsVerification: boolean = false,
@@ -619,15 +661,17 @@ const createContext = async (
   mobile: boolean = false,
   location?: UrlModel["location"],
   recordVideoDir?: string,
+  viewportOverride?: { width: number; height: number },
 ): Promise<{
   context: BrowserContext;
   securityState: ContextSecurityState;
 }> => {
   const userAgent =
-    userAgentOverride || (mobile ? MOBILE_USER_AGENT : new UserAgent().toString());
-  const viewport = mobile
-    ? { width: 390, height: 844 }
-    : { width: 1280, height: 800 };
+    userAgentOverride ||
+    (mobile ? MOBILE_USER_AGENT : new UserAgent().toString());
+  const viewport =
+    viewportOverride ??
+    (mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 });
   const securityState: ContextSecurityState = {
     blockedNavigationRequestUrl: null,
   };
@@ -653,11 +697,12 @@ const createContext = async (
   }
 
   if (location?.country) {
-    contextOptions.geolocation =
-      geolocationByCountry[location.country.toUpperCase()] ?? {
-        latitude: 0,
-        longitude: 0,
-      };
+    contextOptions.geolocation = geolocationByCountry[
+      location.country.toUpperCase()
+    ] ?? {
+      latitude: 0,
+      longitude: 0,
+    };
     contextOptions.permissions = ["geolocation"];
   }
 
@@ -831,7 +876,9 @@ async function runNodeCode(
   };
 
   try {
-    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    const AsyncFunction = Object.getPrototypeOf(
+      async function () {},
+    ).constructor;
     const fn = new AsyncFunction(
       "page",
       "context",
@@ -847,7 +894,12 @@ async function runNodeCode(
       session.page,
       session.context,
       browser,
-      { log: captureConsole, info: captureConsole, warn: captureConsole, error: captureConsole },
+      {
+        log: captureConsole,
+        info: captureConsole,
+        warn: captureConsole,
+        error: captureConsole,
+      },
       nodeRequire,
       process,
       __dirname,
@@ -888,7 +940,10 @@ async function runBashCode(
   }
 
   if (trimmed === "agent-browser snapshot -i") {
-    const text = await session.page.locator("body").innerText().catch(() => "");
+    const text = await session.page
+      .locator("body")
+      .innerText()
+      .catch(() => "");
     return {
       stdout: text,
       result: text,
@@ -1095,11 +1150,22 @@ const executeActions = async (
           }
           break;
         case "screenshot": {
-          const screenshotBuffer = await page.screenshot({
-            type: "jpeg",
-            quality: action.quality ?? 80,
-            fullPage: action.fullPage ?? false,
-          });
+          const originalViewport = page.viewportSize();
+          let screenshotBuffer: Buffer;
+          try {
+            if (action.viewport) {
+              await page.setViewportSize(action.viewport);
+            }
+            screenshotBuffer = await page.screenshot({
+              type: "jpeg",
+              quality: action.quality ?? 80,
+              fullPage: action.fullPage ?? false,
+            });
+          } finally {
+            if (originalViewport && action.viewport) {
+              await page.setViewportSize(originalViewport);
+            }
+          }
           results.push({
             type: "screenshot",
             screenshot: screenshotBuffer.toString("base64"),
@@ -1160,43 +1226,58 @@ const executeActions = async (
   return results;
 };
 
-app.get("/browsers/:sessionId/view", requireBrowserServiceAuth, async (req: Request, res: Response) => {
-  res.status(200).type("html").send(renderBrowserViewHtml(String(req.params.sessionId)));
-});
+app.get(
+  "/browsers/:sessionId/view",
+  requireBrowserServiceAuth,
+  async (req: Request, res: Response) => {
+    res
+      .status(200)
+      .type("html")
+      .send(renderBrowserViewHtml(String(req.params.sessionId)));
+  },
+);
 
-app.get("/browsers/:sessionId/artifacts/:name", requireBrowserServiceAuth, async (req: Request, res: Response) => {
-  const sessionId = String(req.params.sessionId);
-  const name = safeArtifactFilename(String(req.params.name));
-  if (!name) {
-    return res.status(400).json({ error: "Invalid artifact name" });
-  }
-  const artifactPath = browserSessionArtifactPath(sessionId, name);
-  try {
-    const file = await readArtifactResponse(artifactPath);
-    return res.status(200).type(file.contentType).send(file.body);
-  } catch {
-    return res.status(404).json({ error: "Artifact not found" });
-  }
-});
+app.get(
+  "/browsers/:sessionId/artifacts/:name",
+  requireBrowserServiceAuth,
+  async (req: Request, res: Response) => {
+    const sessionId = String(req.params.sessionId);
+    const name = safeArtifactFilename(String(req.params.name));
+    if (!name) {
+      return res.status(400).json({ error: "Invalid artifact name" });
+    }
+    const artifactPath = browserSessionArtifactPath(sessionId, name);
+    try {
+      const file = await readArtifactResponse(artifactPath);
+      return res.status(200).type(file.contentType).send(file.body);
+    } catch {
+      return res.status(404).json({ error: "Artifact not found" });
+    }
+  },
+);
 
-app.post("/browsers", requireBrowserServiceAuth, async (req: Request, res: Response) => {
-  const body = (req.body ?? {}) as BrowserCreateRequest;
-  const streamWebView = body.streamWebView !== false;
-  const session = await createLiveBrowserSession({
-    live: streamWebView,
-    recording: streamWebView,
-  });
+app.post(
+  "/browsers",
+  requireBrowserServiceAuth,
+  async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as BrowserCreateRequest;
+    const streamWebView = body.streamWebView !== false;
+    const session = await createLiveBrowserSession({
+      live: streamWebView,
+      recording: streamWebView,
+    });
 
-  return res.status(200).json({
-    sessionId: session.sessionId,
-    cdpUrl: browserLiveWsPath(session.sessionId),
-    viewUrl: browserLivePath(session.sessionId),
-    iframeUrl: browserLivePath(session.sessionId),
-    interactiveIframeUrl: `${browserLivePath(session.sessionId)}?interactive=1`,
-    expiresAt: new Date(Date.now() + (body.ttl ?? 600) * 1000).toISOString(),
-    live: buildLiveMetadata("browser", session.sessionId, "streaming"),
-  } satisfies BrowserServiceCreateResponse);
-});
+    return res.status(200).json({
+      sessionId: session.sessionId,
+      cdpUrl: browserLiveWsPath(session.sessionId),
+      viewUrl: browserLivePath(session.sessionId),
+      iframeUrl: browserLivePath(session.sessionId),
+      interactiveIframeUrl: `${browserLivePath(session.sessionId)}?interactive=1`,
+      expiresAt: new Date(Date.now() + (body.ttl ?? 600) * 1000).toISOString(),
+      live: buildLiveMetadata("browser", session.sessionId, "streaming"),
+    } satisfies BrowserServiceCreateResponse);
+  },
+);
 
 app.post(
   "/browsers/:sessionId/exec",
@@ -1213,43 +1294,53 @@ app.post(
       } satisfies BrowserServiceExecResponse);
     }
 
-    const execResult = await executeBrowserSessionCode(String(req.params.sessionId), {
-      code: body.code,
-      language: body.language ?? "node",
-      timeout: body.timeout ?? 30,
-    });
+    const execResult = await executeBrowserSessionCode(
+      String(req.params.sessionId),
+      {
+        code: body.code,
+        language: body.language ?? "node",
+        timeout: body.timeout ?? 30,
+      },
+    );
     return res.status(execResult.exitCode === 0 ? 200 : 422).json(execResult);
   },
 );
 
-app.delete("/browsers/:sessionId", requireBrowserServiceAuth, async (req: Request, res: Response) => {
-  const sessionId = String(req.params.sessionId);
-  const deleteResult = await finalizeBrowserSession(sessionId);
-  return res.status(200).json({
-    ...deleteResult,
-    live: buildLiveMetadata("browser", sessionId, "completed", {
-      screenshotUrl: deleteResult.screenshotUrl,
-      recordingUrl: deleteResult.recordingUrl,
-      framesCaptured: deleteResult.framesCaptured,
-      recordingDurationMs: deleteResult.recordingDurationMs,
-    }),
-  });
-});
+app.delete(
+  "/browsers/:sessionId",
+  requireBrowserServiceAuth,
+  async (req: Request, res: Response) => {
+    const sessionId = String(req.params.sessionId);
+    const deleteResult = await finalizeBrowserSession(sessionId);
+    return res.status(200).json({
+      ...deleteResult,
+      live: buildLiveMetadata("browser", sessionId, "completed", {
+        screenshotUrl: deleteResult.screenshotUrl,
+        recordingUrl: deleteResult.recordingUrl,
+        framesCaptured: deleteResult.framesCaptured,
+        recordingDurationMs: deleteResult.recordingDurationMs,
+      }),
+    });
+  },
+);
 
-app.get("/scrapes/:scrapeId/artifacts/:name", async (req: Request, res: Response) => {
-  const scrapeId = String(req.params.scrapeId);
-  const name = safeArtifactFilename(String(req.params.name));
-  if (!name) {
-    return res.status(400).json({ error: "Invalid artifact name" });
-  }
-  const artifactPath = scrapeSessionArtifactPath(scrapeId, name);
-  try {
-    const file = await readArtifactResponse(artifactPath);
-    return res.status(200).type(file.contentType).send(file.body);
-  } catch {
-    return res.status(404).json({ error: "Artifact not found" });
-  }
-});
+app.get(
+  "/scrapes/:scrapeId/artifacts/:name",
+  async (req: Request, res: Response) => {
+    const scrapeId = String(req.params.scrapeId);
+    const name = safeArtifactFilename(String(req.params.name));
+    if (!name) {
+      return res.status(400).json({ error: "Invalid artifact name" });
+    }
+    const artifactPath = scrapeSessionArtifactPath(scrapeId, name);
+    try {
+      const file = await readArtifactResponse(artifactPath);
+      return res.status(200).type(file.contentType).send(file.body);
+    } catch {
+      return res.status(404).json({ error: "Artifact not found" });
+    }
+  },
+);
 
 function safeArtifactFilename(name: string): string | null {
   const base = path.posix.basename(name);
@@ -1280,11 +1371,19 @@ async function createScrapeArtifacts(
   page: Page,
   recordingEnabled: boolean,
 ): Promise<{
-  warnings: Array<{ code: string; message: string; details?: Record<string, unknown> }>;
+  warnings: Array<{
+    code: string;
+    message: string;
+    details?: Record<string, unknown>;
+  }>;
   screenshotUrl?: string;
   recordingUrl?: string;
 }> {
-  const warnings: Array<{ code: string; message: string; details?: Record<string, unknown> }> = [];
+  const warnings: Array<{
+    code: string;
+    message: string;
+    details?: Record<string, unknown>;
+  }> = [];
   const artifactDir = path.join(serviceArtifactRoot, "scrape", scrapeId);
   await ensureDir(artifactDir);
 
@@ -1298,10 +1397,15 @@ async function createScrapeArtifacts(
     scrapeArtifacts.set(scrapeId, record);
     screenshotUrl = apiScrapeArtifactPath(scrapeId, "final.jpeg");
   } catch (error) {
-    appendLiveWarning(warnings, "LIVE_SCREENSHOT_FAILED", "Screenshot capture failed.", {
-      scrapeId,
-      reason: error instanceof Error ? error.message : String(error),
-    });
+    appendLiveWarning(
+      warnings,
+      "LIVE_SCREENSHOT_FAILED",
+      "Screenshot capture failed.",
+      {
+        scrapeId,
+        reason: error instanceof Error ? error.message : String(error),
+      },
+    );
   }
 
   if (recordingEnabled) {
@@ -1337,7 +1441,9 @@ async function createScrapeArtifacts(
 
   scrapeArtifacts.set(scrapeId, {
     artifactDir,
-    screenshotPath: screenshotUrl ? scrapeSessionArtifactPath(scrapeId, "final.jpeg") : undefined,
+    screenshotPath: screenshotUrl
+      ? scrapeSessionArtifactPath(scrapeId, "final.jpeg")
+      : undefined,
   });
 
   return {
@@ -1465,6 +1571,8 @@ async function handleScrape(req: Request, res: Response) {
     skip_tls_verification = false,
     screenshot = false,
     full_page_screenshot = false,
+    screenshot_quality,
+    screenshot_viewport,
     mobile = false,
     location,
     actions = [],
@@ -1523,7 +1631,11 @@ async function handleScrape(req: Request, res: Response) {
   let liveResponse:
     | {
         live?: ReturnType<typeof buildLiveMetadata>;
-        warnings?: Array<{ code: string; message: string; details?: Record<string, unknown> }>;
+        warnings?: Array<{
+          code: string;
+          message: string;
+          details?: Record<string, unknown>;
+        }>;
       }
     | undefined;
   let pageVideo: ReturnType<Page["video"]> | null = null;
@@ -1543,72 +1655,74 @@ async function handleScrape(req: Request, res: Response) {
       userAgentOverride,
       mobile,
       location,
-      liveCaptureEnabled ? path.join(serviceArtifactRoot, "scrape", scrapeId) : undefined,
+      liveCaptureEnabled
+        ? path.join(serviceArtifactRoot, "scrape", scrapeId)
+        : undefined,
+      screenshot_viewport,
     );
     requestContext = contextBundle.context;
     securityState = contextBundle.securityState;
     page = await requestContext.newPage();
 
     if (location) {
-      await requestContext.addInitScript(
-        locationData => {
-          const locationState = locationData as {
-            country?: string;
-            languages?: string[];
-          };
-          const coordinates = {
-            US: { latitude: 37.7749, longitude: -122.4194 },
-            CA: { latitude: 43.6532, longitude: -79.3832 },
-            DE: { latitude: 52.52, longitude: 13.405 },
-            GB: { latitude: 51.5074, longitude: -0.1278 },
-            FR: { latitude: 48.8566, longitude: 2.3522 },
-            JP: { latitude: 35.6762, longitude: 139.6503 },
-          }[locationState.country?.toUpperCase() ?? ""] ?? {
-            latitude: 0,
-            longitude: 0,
-          };
+      await requestContext.addInitScript((locationData) => {
+        const locationState = locationData as {
+          country?: string;
+          languages?: string[];
+        };
+        const coordinates = {
+          US: { latitude: 37.7749, longitude: -122.4194 },
+          CA: { latitude: 43.6532, longitude: -79.3832 },
+          DE: { latitude: 52.52, longitude: 13.405 },
+          GB: { latitude: 51.5074, longitude: -0.1278 },
+          FR: { latitude: 48.8566, longitude: 2.3522 },
+          JP: { latitude: 35.6762, longitude: 139.6503 },
+        }[locationState.country?.toUpperCase() ?? ""] ?? {
+          latitude: 0,
+          longitude: 0,
+        };
 
-          (globalThis as typeof globalThis & {
+        (
+          globalThis as typeof globalThis & {
             __firecrawlLocation?: typeof locationState;
-          }).__firecrawlLocation = locationState;
+          }
+        ).__firecrawlLocation = locationState;
 
-          Object.defineProperty(globalThis.navigator, "geolocation", {
-            configurable: true,
-            value: {
-              getCurrentPosition: (success: Function) =>
-                success({
-                  coords: {
-                    accuracy: 1,
-                    altitude: null,
-                    altitudeAccuracy: null,
-                    heading: null,
-                    latitude: coordinates.latitude,
-                    longitude: coordinates.longitude,
-                    speed: null,
-                  },
-                  timestamp: Date.now(),
-                }),
-              watchPosition: (success: Function) => {
-                success({
-                  coords: {
-                    accuracy: 1,
-                    altitude: null,
-                    altitudeAccuracy: null,
-                    heading: null,
-                    latitude: coordinates.latitude,
-                    longitude: coordinates.longitude,
-                    speed: null,
-                  },
-                  timestamp: Date.now(),
-                });
-                return 1;
-              },
-              clearWatch: () => undefined,
+        Object.defineProperty(globalThis.navigator, "geolocation", {
+          configurable: true,
+          value: {
+            getCurrentPosition: (success: Function) =>
+              success({
+                coords: {
+                  accuracy: 1,
+                  altitude: null,
+                  altitudeAccuracy: null,
+                  heading: null,
+                  latitude: coordinates.latitude,
+                  longitude: coordinates.longitude,
+                  speed: null,
+                },
+                timestamp: Date.now(),
+              }),
+            watchPosition: (success: Function) => {
+              success({
+                coords: {
+                  accuracy: 1,
+                  altitude: null,
+                  altitudeAccuracy: null,
+                  heading: null,
+                  latitude: coordinates.latitude,
+                  longitude: coordinates.longitude,
+                  speed: null,
+                },
+                timestamp: Date.now(),
+              });
+              return 1;
             },
-          });
-        },
-        location,
-      );
+            clearWatch: () => undefined,
+          },
+        });
+      }, location);
     }
 
     if (headers) {
@@ -1644,7 +1758,7 @@ async function handleScrape(req: Request, res: Response) {
     if (screenshot || full_page_screenshot) {
       const screenshotBuffer = await page.screenshot({
         type: "jpeg",
-        quality: 80,
+        quality: screenshot_quality ?? 80,
         fullPage: full_page_screenshot,
       });
       screenshotData = screenshotBuffer.toString("base64");
@@ -1654,10 +1768,13 @@ async function handleScrape(req: Request, res: Response) {
       pageVideo = page.video();
       try {
         await ensureDir(path.join(serviceArtifactRoot, "scrape", scrapeId));
-        const screenshotPath = scrapeSessionArtifactPath(scrapeId, "final.jpeg");
+        const screenshotPath = scrapeSessionArtifactPath(
+          scrapeId,
+          "final.jpeg",
+        );
         await page.screenshot({
           type: "jpeg",
-          quality: 80,
+          quality: screenshot_quality ?? 80,
           fullPage: full_page_screenshot,
           path: screenshotPath,
         });
@@ -1681,7 +1798,8 @@ async function handleScrape(req: Request, res: Response) {
                 message: "Live capture is unavailable for this request.",
                 details: {
                   dependency: "browser-service",
-                  reason: error instanceof Error ? error.message : String(error),
+                  reason:
+                    error instanceof Error ? error.message : String(error),
                 },
               },
             ],
@@ -1733,7 +1851,10 @@ async function handleScrape(req: Request, res: Response) {
       if (pageVideo) {
         try {
           const videoPath = await pageVideo.path();
-          const videoDest = scrapeSessionArtifactPath(scrapeId, "recording.webm");
+          const videoDest = scrapeSessionArtifactPath(
+            scrapeId,
+            "recording.webm",
+          );
           await rm(videoDest, { force: true }).catch(() => {});
           await copyFile(videoPath, videoDest);
           scrapeArtifacts.set(scrapeId, {
@@ -1741,10 +1862,15 @@ async function handleScrape(req: Request, res: Response) {
             screenshotPath: scrapeSessionArtifactPath(scrapeId, "final.jpeg"),
             recordingPath: videoDest,
           });
-          responseBody.live = buildLiveMetadata("scrape", scrapeId, "completed", {
-            screenshotUrl: apiScrapeArtifactPath(scrapeId, "final.jpeg"),
-            recordingUrl: apiScrapeArtifactPath(scrapeId, "recording.webm"),
-          });
+          responseBody.live = buildLiveMetadata(
+            "scrape",
+            scrapeId,
+            "completed",
+            {
+              screenshotUrl: apiScrapeArtifactPath(scrapeId, "final.jpeg"),
+              recordingUrl: apiScrapeArtifactPath(scrapeId, "recording.webm"),
+            },
+          );
         } catch (error) {
           responseBody.live = buildLiveMetadata("scrape", scrapeId, "warning", {
             screenshotUrl: apiScrapeArtifactPath(scrapeId, "final.jpeg"),
@@ -1755,7 +1881,8 @@ async function handleScrape(req: Request, res: Response) {
                 message: "Recording artifact capture failed.",
                 details: {
                   scrapeId,
-                  reason: error instanceof Error ? error.message : String(error),
+                  reason:
+                    error instanceof Error ? error.message : String(error),
                 },
               },
             ],
@@ -1818,9 +1945,7 @@ const browserLiveWsServer = new WebSocketServer({ noServer: true });
 server.on("upgrade", (req, socket, head) => {
   try {
     const requestUrl = new URL(req.url ?? "", "http://localhost");
-    const match = requestUrl.pathname.match(
-      /^\/browsers\/([^/]+)\/view\/ws$/,
-    );
+    const match = requestUrl.pathname.match(/^\/browsers\/([^/]+)\/view\/ws$/);
     if (!match) {
       socket.destroy();
       return;

@@ -31,6 +31,8 @@ export async function scrapeURLWithPlaywrightCDP(
       ...(wantsScreenshot && {
         screenshot: true,
         full_page_screenshot: wantsFullPage,
+        screenshot_quality: screenshotFormat.quality,
+        screenshot_viewport: screenshotFormat.viewport,
       }),
       actions: meta.options.actions,
     },
