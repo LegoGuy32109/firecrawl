@@ -11,9 +11,8 @@ const escapeHtml = (value: string): string =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-// __dirname at runtime is dist/src/admin/playground/
-// The bundle is at dist/playground.bundle.js (same dist root, up 3 levels)
-const bundlePath = join(__dirname, "..", "..", "..", "playground.bundle.js");
+// process.cwd() is apps/api/ in both tsx (harness) and compiled modes
+const bundlePath = join(process.cwd(), "dist", "playground.bundle.js");
 
 let bundle: string;
 try {

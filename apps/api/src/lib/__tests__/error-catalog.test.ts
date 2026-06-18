@@ -19,6 +19,7 @@ import {
   FeedbackError,
   GatingError,
   LifecycleError,
+  LiveWarning,
   LocalError,
   MapError,
   MapWarning,
@@ -61,6 +62,7 @@ const warningEnums = [
   MediaWarning,
   MapWarning,
   CrawlWarning,
+  LiveWarning,
 ];
 
 describe("error and warning catalogs", () => {

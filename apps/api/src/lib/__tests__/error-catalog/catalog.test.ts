@@ -24,6 +24,7 @@ import {
   FeedbackError,
   GatingError,
   LifecycleError,
+  LiveWarning,
   LocalError,
   MapError,
   MapWarning,
@@ -71,6 +72,7 @@ const warningEnums = [
   MediaWarning,
   MapWarning,
   CrawlWarning,
+  LiveWarning,
 ];
 
 const typedDnsDetails: ErrorDetailsFor<ScrapeError.DNS> = {
