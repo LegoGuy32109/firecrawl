@@ -16,7 +16,7 @@ export async function scrapeURLWithPlaywrightCDP(
   const wantsFullPage = screenshotFormat?.fullPage ?? false;
 
   const response = await robustFetch({
-    url: config.PLAYWRIGHT_MICROSERVICE_URL!,
+    url: (config.PLAYWRIGHT_CDP_URL ?? config.PLAYWRIGHT_MICROSERVICE_URL)!,
     headers: {
       "Content-Type": "application/json",
     },

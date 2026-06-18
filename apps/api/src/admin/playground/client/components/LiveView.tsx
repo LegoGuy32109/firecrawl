@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { sessionId, interactive } from "../signals";
 
-declare const BULL_AUTH_KEY: string;
-
 type ConnectionState = "idle" | "connecting" | "streaming" | "disconnected";
 
 export function LiveView() {
@@ -20,16 +18,18 @@ export function LiveView() {
     }
 
     setConnState("connecting");
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(
-      `${proto}//${location.host}/admin/${BULL_AUTH_KEY}/playground/session/${sid}/view`,
+    const wsUrl = new URL(
+      `./session/${encodeURIComponent(sid)}/view`,
+      location.href,
     );
+    wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(wsUrl.toString());
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
 
     ws.onopen = () => setConnState("streaming");
 
-    ws.onmessage = (event) => {
+    ws.onmessage = event => {
       const canvas = canvasRef.current;
       if (!canvas) return;
 
@@ -91,24 +91,28 @@ export function LiveView() {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-    ws.send(JSON.stringify({
-      type: "pointer",
-      eventType: e.type,
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY,
-      button: e.button,
-    }));
+    ws.send(
+      JSON.stringify({
+        type: "pointer",
+        eventType: e.type,
+        x: (e.clientX - rect.left) * scaleX,
+        y: (e.clientY - rect.top) * scaleY,
+        button: e.button,
+      }),
+    );
   }
 
   function forwardKeyEvent(e: KeyboardEvent) {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({
-      type: "key",
-      eventType: e.type,
-      key: e.key,
-      code: e.code,
-    }));
+    ws.send(
+      JSON.stringify({
+        type: "key",
+        eventType: e.type,
+        key: e.key,
+        code: e.code,
+      }),
+    );
   }
 
   const statusColors: Record<ConnectionState, string> = {
@@ -131,11 +135,20 @@ export function LiveView() {
         ) : (
           <button onClick={disconnect}>Stop</button>
         )}
-        <label style={{ display: "flex", gap: "4px", alignItems: "center", fontSize: "12px" }}>
+        <label
+          style={{
+            display: "flex",
+            gap: "4px",
+            alignItems: "center",
+            fontSize: "12px",
+          }}
+        >
           <input
             type="checkbox"
             checked={isInteractive}
-            onChange={(e) => { interactive.value = (e.target as HTMLInputElement).checked; }}
+            onChange={e => {
+              interactive.value = (e.target as HTMLInputElement).checked;
+            }}
           />
           Interactive
         </label>
@@ -148,11 +161,11 @@ export function LiveView() {
           cursor: isInteractive ? "crosshair" : "default",
           display: connState === "idle" ? "none" : "block",
         }}
-        onPointerDown={isInteractive ? forwardPointerEvent as any : undefined}
-        onPointerUp={isInteractive ? forwardPointerEvent as any : undefined}
-        onPointerMove={isInteractive ? forwardPointerEvent as any : undefined}
-        onKeyDown={isInteractive ? forwardKeyEvent as any : undefined}
-        onKeyUp={isInteractive ? forwardKeyEvent as any : undefined}
+        onPointerDown={isInteractive ? (forwardPointerEvent as any) : undefined}
+        onPointerUp={isInteractive ? (forwardPointerEvent as any) : undefined}
+        onPointerMove={isInteractive ? (forwardPointerEvent as any) : undefined}
+        onKeyDown={isInteractive ? (forwardKeyEvent as any) : undefined}
+        onKeyUp={isInteractive ? (forwardKeyEvent as any) : undefined}
         tabIndex={isInteractive ? 0 : undefined}
       />
     </div>

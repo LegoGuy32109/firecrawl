@@ -21,11 +21,12 @@ export async function createPlaygroundSession(
   }
 
   try {
-    const svcResponse = await browserServiceRequest<BrowserServiceCreateResponse>(
-      "POST",
-      "/browsers",
-      { ttl: 600, streamWebView: true },
-    );
+    const svcResponse =
+      await browserServiceRequest<BrowserServiceCreateResponse>(
+        "POST",
+        "/browsers",
+        { ttl: 600, streamWebView: true },
+      );
 
     res.status(200).json({
       sessionId: svcResponse.sessionId,
@@ -37,10 +38,12 @@ export async function createPlaygroundSession(
     });
   } catch (err) {
     if (err instanceof BrowserServiceError) {
-      res.status(err.status >= 400 && err.status < 600 ? err.status : 502).json({
-        ok: false,
-        error: err.message,
-      });
+      res
+        .status(err.status >= 400 && err.status < 600 ? err.status : 502)
+        .json({
+          ok: false,
+          error: err.message,
+        });
     } else {
       res.status(500).json({
         ok: false,
@@ -78,7 +81,12 @@ export async function deletePlaygroundSession(
     });
   } catch (err) {
     if (err instanceof BrowserServiceError) {
-      const status = err.status === 404 ? 404 : err.status >= 400 && err.status < 600 ? err.status : 502;
+      const status =
+        err.status === 404
+          ? 404
+          : err.status >= 400 && err.status < 600
+            ? err.status
+            : 502;
       res.status(status).json({
         ok: false,
         error: err.message,

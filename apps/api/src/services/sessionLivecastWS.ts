@@ -10,11 +10,11 @@ import WSWebSocket from "ws";
  */
 export function createLivecastWS(
   getTargetUrl: (req: Request) => string | null,
+  // TODO: add getHeaders?: (req: Request) => Record<string, string> | undefined
+  // so the proxy can forward Authorization: Bearer BROWSER_SERVICE_API_KEY
+  // upstream when browser service auth is enforced (Step 3 of course corrections).
 ) {
-  return function livecastWsHandler(
-    clientWs: WSWebSocket,
-    req: Request,
-  ): void {
+  return function livecastWsHandler(clientWs: WSWebSocket, req: Request): void {
     try {
       const targetUrl = getTargetUrl(req);
       if (!targetUrl) {

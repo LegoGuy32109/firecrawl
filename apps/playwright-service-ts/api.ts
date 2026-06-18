@@ -26,6 +26,25 @@ const port = process.env.PORT || 3003;
 
 app.use(express.json());
 
+const BROWSER_SERVICE_API_KEY = process.env.BROWSER_SERVICE_API_KEY || null;
+
+function isBrowserServiceAuthorized(req: Request): boolean {
+  if (!BROWSER_SERVICE_API_KEY) return true;
+  const header = req.header("authorization") ?? "";
+  return header === `Bearer ${BROWSER_SERVICE_API_KEY}`;
+}
+
+function requireBrowserServiceAuth(
+  req: Request,
+  res: Response,
+  next: Function,
+) {
+  if (!isBrowserServiceAuthorized(req)) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  next();
+}
+
 const BLOCK_MEDIA =
   (process.env.BLOCK_MEDIA || "False").toUpperCase() === "TRUE";
 const MAX_CONCURRENT_PAGES = Math.max(
@@ -1141,11 +1160,11 @@ const executeActions = async (
   return results;
 };
 
-app.get("/browsers/:sessionId/view", async (req: Request, res: Response) => {
+app.get("/browsers/:sessionId/view", requireBrowserServiceAuth, async (req: Request, res: Response) => {
   res.status(200).type("html").send(renderBrowserViewHtml(String(req.params.sessionId)));
 });
 
-app.get("/browsers/:sessionId/artifacts/:name", async (req: Request, res: Response) => {
+app.get("/browsers/:sessionId/artifacts/:name", requireBrowserServiceAuth, async (req: Request, res: Response) => {
   const sessionId = String(req.params.sessionId);
   const name = safeArtifactFilename(String(req.params.name));
   if (!name) {
@@ -1160,7 +1179,7 @@ app.get("/browsers/:sessionId/artifacts/:name", async (req: Request, res: Respon
   }
 });
 
-app.post("/browsers", async (req: Request, res: Response) => {
+app.post("/browsers", requireBrowserServiceAuth, async (req: Request, res: Response) => {
   const body = (req.body ?? {}) as BrowserCreateRequest;
   const streamWebView = body.streamWebView !== false;
   const session = await createLiveBrowserSession({
@@ -1181,6 +1200,7 @@ app.post("/browsers", async (req: Request, res: Response) => {
 
 app.post(
   "/browsers/:sessionId/exec",
+  requireBrowserServiceAuth,
   async (req: Request, res: Response) => {
     const body = (req.body ?? {}) as BrowserExecRequest;
     if (!body.code || typeof body.code !== "string") {
@@ -1202,7 +1222,7 @@ app.post(
   },
 );
 
-app.delete("/browsers/:sessionId", async (req: Request, res: Response) => {
+app.delete("/browsers/:sessionId", requireBrowserServiceAuth, async (req: Request, res: Response) => {
   const sessionId = String(req.params.sessionId);
   const deleteResult = await finalizeBrowserSession(sessionId);
   return res.status(200).json({

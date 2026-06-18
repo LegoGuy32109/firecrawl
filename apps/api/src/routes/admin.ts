@@ -124,11 +124,11 @@ adminRouter.delete(
 
 (adminRouter as any).ws(
   `/admin/${config.BULL_AUTH_KEY}/playground/session/:id/view`,
-  createLivecastWS((req) => {
+  createLivecastWS(req => {
     if (!config.BROWSER_SERVICE_URL) return null;
     const upstream = new URL(config.BROWSER_SERVICE_URL);
     upstream.protocol = upstream.protocol === "https:" ? "wss:" : "ws:";
-    upstream.pathname = `/browsers/${req.params.id}/view`;
+    upstream.pathname = `/browsers/${req.params.id}/view/ws`;
     return upstream.toString();
   }),
 );
