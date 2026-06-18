@@ -1,5 +1,5 @@
 import { h } from "preact";
-import { response, inflight } from "../signals";
+import { response, inflight, activeFeature } from "../signals";
 import { StatusPill } from "./StatusPill";
 import { SuccessView } from "./SuccessView";
 import { ErrorView } from "./ErrorView";
@@ -53,11 +53,24 @@ export function ResponsePane() {
   const legacyWarning =
     typeof body.warning === "string" ? body.warning : undefined;
 
+  // SuccessView renders warnings as a banner for scrape; avoid duplicating
+  const isScrapeSuccess = activeFeature.value === "scrape" && !isError;
+
   return (
     <div>
       <StatusPill httpStatus={status} code={code} />
-      {isError ? <ErrorView body={body} /> : <SuccessView body={body} />}
-      <WarningList warnings={warnings} legacyWarning={legacyWarning} />
+      {isError ? (
+        <ErrorView body={body} />
+      ) : (
+        <SuccessView
+          body={body}
+          warnings={isScrapeSuccess ? warnings : undefined}
+          legacyWarning={isScrapeSuccess ? legacyWarning : undefined}
+        />
+      )}
+      {!isScrapeSuccess && (
+        <WarningList warnings={warnings} legacyWarning={legacyWarning} />
+      )}
     </div>
   );
 }

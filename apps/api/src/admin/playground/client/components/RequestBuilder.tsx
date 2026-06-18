@@ -9,6 +9,7 @@ import {
 } from "../signals";
 import type { Feature } from "../signals";
 import { JsonView } from "./JsonView";
+import { ScrapeRequestBuilder } from "./scrape/ScrapeRequestBuilder";
 
 type FieldDef = {
   key: string;
@@ -61,6 +62,11 @@ const FEATURE_ENDPOINT: Record<Feature, string> = {
 
 export function RequestBuilder() {
   const feature = activeFeature.value;
+
+  if (feature === "scrape") {
+    return <ScrapeRequestBuilder />;
+  }
+
   const fields = FEATURE_FIELDS[feature];
   const [rawMode, setRawMode] = useState(false);
   const [rawJson, setRawJson] = useState("{}");
