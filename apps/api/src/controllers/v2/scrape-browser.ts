@@ -124,7 +124,7 @@ async function captureFailureContext(
 }
 
 function buildPlaygroundLiveViewUrl(browserId: string): string {
-  return `./session/${encodeURIComponent(browserId)}/view`;
+  return `/admin/${config.BULL_AUTH_KEY}/playground/session/${encodeURIComponent(browserId)}/view`;
 }
 
 // The replay script (buildReplayScript) throws errors prefixed

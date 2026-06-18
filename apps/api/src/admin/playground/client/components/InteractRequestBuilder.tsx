@@ -21,8 +21,11 @@ import {
   normalizeWarnings,
 } from "../history";
 import { extractInteractResponseContext } from "../lib/interact-response";
-
-const LANGUAGES = ["node", "bash", "python"] as const;
+import {
+  buildInteractRequestBody,
+  getInteractRequestValidationError,
+} from "../lib/interact-request";
+import { INTERACT_LANGUAGES } from "../lib/interact-types";
 
 function buildEndpoint(jobId: string): string {
   return `/v2/scrape/${encodeURIComponent(jobId)}/interact`;
@@ -32,36 +35,17 @@ export function InteractRequestBuilder() {
   const body = requestBody.value;
   const [rawMode, setRawMode] = useState(false);
   const [rawJson, setRawJson] = useState("{}");
-
-  const buildBody = (): Record<string, unknown> => {
-    if (rawMode) {
-      try {
-        return JSON.parse(rawJson);
-      } catch {
-        return {};
-      }
-    }
-
-    const jobId = typeof body.jobId === "string" ? body.jobId.trim() : "";
-    const code = typeof body.code === "string" ? body.code : "";
-    const language =
-      typeof body.language === "string" &&
-      (LANGUAGES as readonly string[]).includes(body.language)
-        ? body.language
-        : "node";
-    const timeout =
-      typeof body.timeout === "number" && body.timeout > 0 ? body.timeout : 30;
-
-    return {
-      ...(jobId ? { jobId } : {}),
-      ...(code ? { code } : {}),
-      language,
-      timeout,
-    };
-  };
+  const validationError = getInteractRequestValidationError(
+    body,
+    rawMode,
+    rawJson,
+  );
+  const canRun = !inflight.value && !validationError;
 
   const send = async () => {
-    const nextBody = buildBody();
+    if (validationError) return;
+    const nextBody = buildInteractRequestBody(body, rawMode, rawJson);
+    if (!nextBody) return;
     requestBody.value = nextBody;
     inflight.value = true;
     sessionId.value = null;
@@ -197,7 +181,7 @@ export function InteractRequestBuilder() {
               }
               className="playground-input"
             >
-              {LANGUAGES.map(language => (
+              {INTERACT_LANGUAGES.map(language => (
                 <option key={language} value={language}>
                   {language}
                 </option>
@@ -233,8 +217,12 @@ export function InteractRequestBuilder() {
         </Fragment>
       )}
 
+      {validationError && (
+        <div className="playground-warning__text">{validationError}</div>
+      )}
+
       <div className="playground-row playground-row--between">
-        <Button type="button" onClick={send} disabled={inflight.value}>
+        <Button type="button" onClick={send} disabled={!canRun}>
           Run interact
         </Button>
       </div>

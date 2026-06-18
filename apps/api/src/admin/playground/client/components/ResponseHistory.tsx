@@ -260,6 +260,7 @@ function EntryBody({
           ) : (
             <SuccessView
               body={body}
+              feature={entry.feature}
               warnings={entry.feature === "scrape" ? warnings : undefined}
               legacyWarning={
                 entry.feature === "scrape" ? legacyWarning : undefined

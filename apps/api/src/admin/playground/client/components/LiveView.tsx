@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { liveViewUrl, interactive } from "../signals";
 import { Button } from "./ui/Button";
+import { resolvePlaygroundLiveViewUrl } from "../lib/live-view-url";
 
 type ConnectionState = "idle" | "connecting" | "streaming" | "disconnected";
 
@@ -19,7 +20,7 @@ export function LiveView() {
     }
 
     setConnState("connecting");
-    const wsUrl = new URL(url, location.href);
+    const wsUrl = new URL(resolvePlaygroundLiveViewUrl(url));
     wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(wsUrl.toString());
     ws.binaryType = "arraybuffer";

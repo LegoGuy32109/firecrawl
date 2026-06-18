@@ -18,6 +18,7 @@ export function FeatureNav() {
             active={active}
             onClick={() => {
               activeFeature.value = f.id;
+              activeView.value = f.id;
             }}
           >
             {f.label}

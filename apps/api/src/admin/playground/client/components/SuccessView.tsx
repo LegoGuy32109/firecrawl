@@ -1,6 +1,6 @@
 import { h } from "preact";
 import { useState } from "preact/hooks";
-import { activeFeature } from "../signals";
+import { activeFeature, type Feature } from "../signals";
 import { JsonView } from "./JsonView";
 import { DiagnosticsWaterfall } from "./DiagnosticsWaterfall";
 import { toImageSrc } from "../imageSrc";
@@ -17,6 +17,7 @@ type Props = {
   body: Record<string, unknown>;
   warnings?: Warning[];
   legacyWarning?: string;
+  feature?: Feature;
   activeTab?: string;
   onActiveTabChange?: (tab: string) => void;
 };
@@ -269,10 +270,11 @@ export function SuccessView({
   body,
   warnings,
   legacyWarning,
+  feature: featureProp,
   activeTab: controlledActiveTab,
   onActiveTabChange,
 }: Props) {
-  const feature = activeFeature.value;
+  const feature = featureProp ?? activeFeature.value;
 
   if (feature !== "scrape") {
     if ((feature === "crawl" || feature === "agent") && body.id) {

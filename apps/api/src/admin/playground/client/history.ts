@@ -94,6 +94,10 @@ function isFeature(value: unknown): value is Feature {
   );
 }
 
+function isVisibleFeature(value: unknown): value is Feature {
+  return value === "scrape" || value === "interact";
+}
+
 function isDockMode(value: unknown): value is DockMode {
   return value === "left" || value === "right" || value === "hide";
 }
@@ -360,10 +364,10 @@ export function normalizeHistory(value: unknown): PersistedWorkspaceState {
   return {
     version: 1,
     activeView:
-      isFeature(state.activeView) || state.activeView === "history"
+      isVisibleFeature(state.activeView) || state.activeView === "history"
         ? (state.activeView as PlaygroundView)
         : "scrape",
-    activeFeature: isFeature(state.activeFeature)
+    activeFeature: isVisibleFeature(state.activeFeature)
       ? state.activeFeature
       : "scrape",
     requestDockMode: isDockMode(state.requestDockMode)
