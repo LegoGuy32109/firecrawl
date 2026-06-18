@@ -402,6 +402,47 @@ body {
   max-height: 100px;
 }
 
+.playground-failure__headline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.playground-failure__headline-text {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.playground-failure__screenshot {
+  max-width: 100%;
+  max-height: 400px;
+  object-fit: contain;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  display: block;
+}
+
+.playground-failure__screenshot-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+  border: 1px dashed var(--line);
+}
+
+.playground-failure__url {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
 .playground-diagnostics {
   margin-top: 12px;
 }
@@ -792,6 +833,28 @@ body {
 
 .playground-response__banner-text {
   color: var(--ink);
+  font-size: 12px;
+}
+
+.playground-seam-button {
+  position: sticky;
+  bottom: 16px;
+  align-self: flex-end;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 10px 14px;
+  background: var(--field);
+  border: 1px solid var(--accent);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.playground-seam-button__id {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
 }
 

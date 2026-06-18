@@ -326,6 +326,12 @@ export function ScrapeRequestBuilder() {
         setRawError(null);
       }
 
+      // In form mode, always force origin "website" so scrape_id appears in the response.
+      // In raw mode, an explicit origin in the JSON takes precedence over the default.
+      body = rawMode
+        ? { origin: "website", ...body }
+        : { ...body, origin: "website" };
+
       entryId = makeEntryId();
       const endpoint = "/v2/scrape";
       const pending = createPendingEntry({

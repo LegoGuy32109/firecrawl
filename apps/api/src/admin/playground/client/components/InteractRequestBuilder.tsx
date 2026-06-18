@@ -1,7 +1,9 @@
 import { h, Fragment } from "preact";
 import { useState } from "preact/hooks";
 import {
+  activeInteractJobId,
   apiKey,
+  clearLiveSession,
   inflight,
   liveViewUrl,
   historyEntries,
@@ -35,6 +37,7 @@ export function InteractRequestBuilder() {
   const body = requestBody.value;
   const [rawMode, setRawMode] = useState(false);
   const [rawJson, setRawJson] = useState("{}");
+  const [stopError, setStopError] = useState<string | null>(null);
   const validationError = getInteractRequestValidationError(
     body,
     rawMode,
@@ -48,13 +51,13 @@ export function InteractRequestBuilder() {
     if (!nextBody) return;
     requestBody.value = nextBody;
     inflight.value = true;
-    sessionId.value = null;
-    liveViewUrl.value = null;
+    clearLiveSession();
 
     const startedAt = Date.now();
     const id = makeEntryId();
     const jobId =
       typeof nextBody.jobId === "string" ? nextBody.jobId : "interact";
+    activeInteractJobId.value = jobId; // lock in before fetch so Stop hits the right endpoint
     const endpoint = buildEndpoint(jobId);
 
     const pending = createPendingEntry({
@@ -91,6 +94,7 @@ export function InteractRequestBuilder() {
       const responseContext = extractInteractResponseContext(data);
       sessionId.value = responseContext.sessionId;
       liveViewUrl.value = responseContext.liveViewUrl;
+      if (!responseContext.sessionId) activeInteractJobId.value = null;
 
       const warnings = normalizeWarnings(data);
       const creditsUsed = extractCreditsUsed(data);
@@ -113,6 +117,7 @@ export function InteractRequestBuilder() {
             : undefined,
       });
     } catch (err: unknown) {
+      activeInteractJobId.value = null;
       const completedAt = Date.now();
       historyEntries.value = finalizeHistoryEntry(historyEntries.value, id, {
         status: 0,
@@ -125,6 +130,27 @@ export function InteractRequestBuilder() {
       });
     } finally {
       inflight.value = false;
+    }
+  };
+
+  const stop = async () => {
+    const jobId = activeInteractJobId.value;
+    if (!jobId) return;
+    try {
+      const res = await fetch(
+        `/v2/scrape/${encodeURIComponent(jobId)}/interact`,
+        {
+          method: "DELETE",
+          headers: apiKey.value
+            ? { Authorization: `Bearer ${apiKey.value}` }
+            : {},
+        },
+      );
+      if (!res.ok) throw new Error(`DELETE ${res.status}`);
+      setStopError(null);
+      clearLiveSession();
+    } catch {
+      setStopError("Stop failed — try again");
     }
   };
 
@@ -221,9 +247,18 @@ export function InteractRequestBuilder() {
         <div className="playground-warning__text">{validationError}</div>
       )}
 
+      {stopError && <div className="playground-warning__text">{stopError}</div>}
+
       <div className="playground-row playground-row--between">
         <Button type="button" onClick={send} disabled={!canRun}>
           Run interact
+        </Button>
+        <Button
+          type="button"
+          onClick={() => void stop()}
+          disabled={!sessionId.value}
+        >
+          Stop
         </Button>
       </div>
     </div>

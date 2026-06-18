@@ -57,10 +57,28 @@ export const requestRailWidth = signal<number>(420);
 export const inflight = signal<boolean>(false);
 export const sessionId = signal<string | null>(null);
 export const liveViewUrl = signal<string | null>(null);
+export const activeInteractJobId = signal<string | null>(null);
 export const interactive = signal<boolean>(false);
 export const recording = signal<boolean>(false);
 export const actions = signal<FirecrawlAction[]>([]);
 export const recordingUrl = signal<string | null>(null);
+
+export function clearLiveSession(): void {
+  liveViewUrl.value = null;
+  sessionId.value = null;
+  activeInteractJobId.value = null;
+}
+
+export function openInInteract(scrapeId: string): void {
+  const newDraft = { jobId: scrapeId };
+  requestDrafts.value = { ...requestDrafts.value, interact: newDraft };
+  clearLiveSession();
+  // Switch feature BEFORE writing requestBody so the draft-persistence
+  // effect saves into drafts.interact, not drafts.scrape.
+  activeFeature.value = "interact";
+  activeView.value = "interact";
+  requestBody.value = newDraft;
+}
 
 const hasWindow = typeof window !== "undefined";
 const storage = hasWindow ? window.localStorage : null;

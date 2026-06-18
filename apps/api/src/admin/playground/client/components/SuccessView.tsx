@@ -1,9 +1,10 @@
 import { h } from "preact";
 import { useState } from "preact/hooks";
-import { activeFeature, type Feature } from "../signals";
+import { activeFeature, openInInteract, type Feature } from "../signals";
 import { JsonView } from "./JsonView";
 import { DiagnosticsWaterfall } from "./DiagnosticsWaterfall";
 import { toImageSrc } from "../imageSrc";
+import { Button } from "./ui/Button";
 
 type Warning = { code: string; message: string; details?: unknown };
 type DiagnosticStep = {
@@ -332,7 +333,7 @@ export function SuccessView({
   const activeFormatTab = FORMAT_TABS.find(t => t.id === validTab);
 
   return (
-    <div>
+    <div style={{ display: "flex", flexDirection: "column" }}>
       <div className="playground-response-tabs">
         {activeFormatTabs.map(tab => (
           <button
@@ -406,6 +407,23 @@ export function SuccessView({
             <div className="playground-muted">No data for this tab</div>
           )}
       </div>
+
+      {typeof body.scrape_id === "string" && body.scrape_id && (
+        <div className="playground-seam-button">
+          <div className="playground-seam-button__id">
+            <span className="playground-muted">scrape:</span>
+            <code>{(body.scrape_id as string).slice(0, 8)}…</code>
+          </div>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            onClick={() => openInInteract(body.scrape_id as string)}
+          >
+            Open in Interact →
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

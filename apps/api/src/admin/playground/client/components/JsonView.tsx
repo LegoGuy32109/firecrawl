@@ -26,10 +26,22 @@ interface JsonViewProps {
   style?: h.JSX.CSSProperties;
   className?: string;
   collapsed?: number | boolean;
+  maxStringLength?: number;
 }
 
-export function JsonView({ value, style, className = "" }: JsonViewProps) {
-  const json = JSON.stringify(value, null, 2) ?? "null";
+export function JsonView({
+  value,
+  style,
+  className = "",
+  maxStringLength,
+}: JsonViewProps) {
+  const replacer = maxStringLength
+    ? (_: string, v: unknown) =>
+        typeof v === "string" && v.length > maxStringLength
+          ? `${v.slice(0, maxStringLength)}… [${v.length} chars]`
+          : v
+    : undefined;
+  const json = JSON.stringify(value, replacer, 2) ?? "null";
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {

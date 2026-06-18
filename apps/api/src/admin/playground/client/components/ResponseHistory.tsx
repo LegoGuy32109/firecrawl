@@ -3,6 +3,7 @@ import { useState } from "preact/hooks";
 import {
   activeFeature,
   activeView,
+  clearLiveSession,
   historyEntries,
   requestBody,
   requestDockMode,
@@ -23,6 +24,7 @@ import { WarningList } from "./WarningList";
 import { EmptyState } from "./ui/EmptyState";
 import { Button } from "./ui/Button";
 import { JsonView } from "./JsonView";
+import { LiveView } from "./LiveView";
 
 type ModalState = { type: "delete"; id: string } | { type: "clear" } | null;
 
@@ -65,6 +67,9 @@ function isErrorEntry(entry: PlaygroundHistoryEntry): boolean {
 }
 
 function restoreEntry(entry: PlaygroundHistoryEntry) {
+  if (activeFeature.value === "interact" && entry.feature !== "interact") {
+    clearLiveSession();
+  }
   activeFeature.value = entry.feature;
   activeView.value = entry.feature;
   if (requestDockMode.value === "hide") {
@@ -356,6 +361,8 @@ export function ResponseHistory() {
 
   return (
     <div className="playground-stack">
+      {feature === "interact" && view !== "history" && <LiveView />}
+
       <div className="playground-row playground-row--between">
         <div className="playground-panel__label" style={{ marginBottom: 0 }}>
           {headerLabel}

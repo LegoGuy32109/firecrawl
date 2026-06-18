@@ -1,5 +1,10 @@
 import { h } from "preact";
-import { activeFeature, activeView, type Feature } from "../signals";
+import {
+  activeFeature,
+  activeView,
+  clearLiveSession,
+  type Feature,
+} from "../signals";
 import { Tab } from "./ui/Tabs";
 
 const FEATURES: { id: Feature; label: string }[] = [
@@ -17,6 +22,12 @@ export function FeatureNav() {
             key={f.id}
             active={active}
             onClick={() => {
+              if (
+                activeFeature.value !== f.id &&
+                activeFeature.value === "interact"
+              ) {
+                clearLiveSession();
+              }
               activeFeature.value = f.id;
               activeView.value = f.id;
             }}

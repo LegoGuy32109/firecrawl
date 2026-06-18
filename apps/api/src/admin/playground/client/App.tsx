@@ -10,7 +10,6 @@ import { Header } from "./components/Header";
 import { FeatureNav } from "./components/FeatureNav";
 import { RequestBuilder } from "./components/RequestBuilder";
 import { ResponseHistory } from "./components/ResponseHistory";
-import { LiveView } from "./components/LiveView";
 import { Panel } from "./components/ui/Panel";
 import { Button } from "./components/ui/Button";
 
@@ -220,12 +219,6 @@ export function App() {
             </Panel>
 
             {dockMode === "right" && requestPane}
-          </div>
-
-          <div className="playground-grid playground-grid--wide-left">
-            <Panel label="Live view">
-              <LiveView />
-            </Panel>
           </div>
         </>
       )}
