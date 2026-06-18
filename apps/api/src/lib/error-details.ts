@@ -120,6 +120,7 @@ export interface ErrorDetailsMap {
   [BrowserError.SESSION_EXPIRED]: { expiredAt: string };
   [BrowserError.SESSION_LIMIT_EXCEEDED]: { active: number; limit: number };
   [BrowserError.EXECUTION_FAILED]: {
+    sessionId?: string;
     exitCode?: number;
     killed?: boolean;
     timedOut?: boolean;

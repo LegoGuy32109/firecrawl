@@ -6,6 +6,7 @@ import {
   requestBody,
   inflight,
   apiKey,
+  sessionId,
 } from "../signals";
 import type { Feature } from "../signals";
 import { JsonView } from "./JsonView";
@@ -70,6 +71,26 @@ const FEATURE_ENDPOINT: Record<Feature, string> = {
   extract: "/v2/extract",
   agent: "/v2/agent",
 };
+
+export function extractReturnedSessionId(
+  data: Record<string, unknown>,
+): string | null {
+  if (typeof data.sessionId === "string") {
+    return data.sessionId;
+  }
+
+  const details = data.details;
+  if (
+    details &&
+    typeof details === "object" &&
+    !Array.isArray(details) &&
+    typeof (details as Record<string, unknown>).sessionId === "string"
+  ) {
+    return (details as Record<string, unknown>).sessionId as string;
+  }
+
+  return null;
+}
 
 export function RequestBuilder() {
   const feature = activeFeature.value;
@@ -162,6 +183,10 @@ export function RequestBuilder() {
           error: text.slice(0, 2048),
           success: false,
         };
+      }
+      const returnedSessionId = extractReturnedSessionId(data);
+      if (returnedSessionId) {
+        sessionId.value = returnedSessionId;
       }
       const warnings = normalizeWarnings(data);
       const creditsUsed = extractCreditsUsed(data);

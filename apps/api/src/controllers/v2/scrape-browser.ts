@@ -195,6 +195,7 @@ type BrowserExecuteRequest = z.infer<typeof browserExecuteRequestSchema>;
 
 interface BrowserExecuteResponse {
   success: boolean;
+  sessionId?: string;
   output?: string;
   stdout?: string;
   result?: string;
@@ -491,6 +492,7 @@ export async function scrapeInteractController(
       !zdrForced && stderr ? stderr.slice(0, 500) : undefined;
     return r.fail(BrowserError.EXECUTION_FAILED, stderr || "Execution failed", {
       details: {
+        sessionId: session.id,
         exitCode: execResult.exitCode,
         killed: execResult.killed,
         ...(capture.pageUrl !== undefined ? { pageUrl: capture.pageUrl } : {}),
@@ -504,6 +506,7 @@ export async function scrapeInteractController(
   }
 
   return r.ok({
+    sessionId: session.id,
     ...(agentOutput ? { output: agentOutput } : {}),
     stdout: execResult.stdout,
     result: execResult.result,
