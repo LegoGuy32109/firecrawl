@@ -148,7 +148,19 @@ codex exec --json \
 - `--ignore-user-config`: avoid defaulting back to `xhigh` reasoning effort
 - `model_reasoning_effort="low"`: ~42 reasoning tokens vs 14+ for `xhigh`. Cannot go lower — `minimal` is blocked by hardcoded `web_search` tool in Codex.
 - `gpt-5.4-mini` **rejected** — ChatGPT subscription only supports ChatGPT-specific models (`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini` not available via subscription)
-- Measured latency: ~5-6s/call, irreducible. 12k input token overhead on first call (cached on subsequent).
+- Measured latency: ~3.7s/call (cached). 12k input tokens on first call (~2.4k cached on subsequent).
+
+**Codex `--json` output format** (verified 2026-06-18):
+
+```jsonl
+{"type":"thread.started","thread_id":"..."}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"<response text>"}}
+{"type":"turn.completed","usage":{"input_tokens":12144,"cached_input_tokens":2432,"output_tokens":5,"reasoning_output_tokens":0}}
+```
+
+Extract: `item.text` where `item.type === "agent_message"` from `type === "item.completed"` lines.
+Auth error detection: look for `"401 Unauthorized"` or `"Missing bearer or basic authentication"` in output.
 
 **Claude backend** — same subprocess pattern:
 

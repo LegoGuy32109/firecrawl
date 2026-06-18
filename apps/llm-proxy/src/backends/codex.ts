@@ -14,45 +14,22 @@ function serializeMessages(messages: Message[]): string {
 }
 
 function extractTextFromJsonl(lines: string[]): string | null {
-  // Try to find assistant message in JSON lines (last wins)
+  // Codex --json emits JSONL events. The assistant response is in:
+  //   {"type":"item.completed","item":{"type":"agent_message","text":"..."}}
+  // Collect all agent_message texts in order (last wins for multi-part).
   let found: string | null = null;
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
       const obj = JSON.parse(trimmed);
-      // Codex emits various event shapes; look for text in common locations
-      const candidates: string[] = [];
-
-      // output[].content[].text
-      if (Array.isArray(obj.output)) {
-        for (const o of obj.output) {
-          if (Array.isArray(o.content)) {
-            for (const c of o.content) {
-              if (typeof c.text === "string" && c.text.trim()) {
-                candidates.push(c.text.trim());
-              }
-            }
-          }
-        }
-      }
-
-      // content[].text
-      if (Array.isArray(obj.content)) {
-        for (const c of obj.content) {
-          if (typeof c.text === "string" && c.text.trim()) {
-            candidates.push(c.text.trim());
-          }
-        }
-      }
-
-      // top-level text
-      if (typeof obj.text === "string" && obj.text.trim()) {
-        candidates.push(obj.text.trim());
-      }
-
-      if (candidates.length > 0) {
-        found = candidates[candidates.length - 1];
+      if (
+        obj.type === "item.completed" &&
+        obj.item?.type === "agent_message" &&
+        typeof obj.item?.text === "string" &&
+        obj.item.text.trim()
+      ) {
+        found = obj.item.text.trim();
       }
     } catch {
       // not JSON — skip
@@ -63,9 +40,9 @@ function extractTextFromJsonl(lines: string[]): string | null {
 
 function isAuthError(output: string): boolean {
   return (
-    output.includes("not authenticated") ||
-    output.includes("Login required") ||
-    output.includes("ENOENT")
+    output.includes("401 Unauthorized") ||
+    output.includes("Missing bearer or basic authentication") ||
+    output.includes("Not logged in")
   );
 }
 
