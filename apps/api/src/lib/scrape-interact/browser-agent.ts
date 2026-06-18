@@ -15,6 +15,7 @@ import {
   traceInteract,
   InteractTraceMetadata,
 } from "./langsmith";
+import { DiagnosticStep, DiagnosticStatus } from "../../controllers/v2/types";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -205,6 +206,7 @@ export async function executePromptViaBrowserAgent(
   stepTimeout: number,
   logger: typeof _logger,
   trace?: BrowserAgentTraceContext,
+  onStep?: (step: DiagnosticStep) => void,
 ): Promise<AgentResult> {
   const debugLog = new AgentDebugLog(browserId);
   debugLog.add(`=== AGENT RUN ===`);
@@ -249,12 +251,25 @@ export async function executePromptViaBrowserAgent(
       }
 
       try {
+        const stepStart = Date.now();
         const result = await execInBrowser(
           browserId,
           code,
           stepTimeout,
           "agent_action",
         );
+        onStep?.({
+          name: "browser-action",
+          status:
+            result.exitCode !== 0 || result.killed
+              ? DiagnosticStatus.Failed
+              : DiagnosticStatus.Ok,
+          durationMs: Date.now() - stepStart,
+          details: {
+            code,
+            result: result.result || result.stderr || undefined,
+          },
+        });
         const output = (result.stdout || result.result || "").trim();
 
         // Ensure only one tab exists and it's in the foreground for live view

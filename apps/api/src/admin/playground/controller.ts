@@ -24,6 +24,7 @@ try {
 }
 
 const safeEnv = escapeHtml(config.ENV ?? "unknown");
+const safeLlmProxyUrl = escapeHtml(config.LOCAL_LLM_PROXY_URL ?? "");
 
 const html = `<!doctype html>
 <html lang="en">
@@ -66,7 +67,7 @@ const html = `<!doctype html>
   </style>
 </head>
 <body>
-  <div id="root" data-env="${safeEnv}"></div>
+  <div id="root" data-env="${safeEnv}" data-llm-proxy-url="${safeLlmProxyUrl}"></div>
 <script>${bundle}</script>
 </body>
 </html>`;

@@ -1,5 +1,6 @@
 import { h } from "preact";
 import { apiKey } from "../signals";
+import { LLMProxyStatus } from "./LLMProxyStatus";
 
 export function Header() {
   const env = document.getElementById("root")?.dataset.env ?? "";
@@ -15,9 +16,18 @@ export function Header() {
         borderBottom: "1px solid var(--line)",
       }}
     >
-      <h1 style={{ margin: 0, fontSize: "18px", letterSpacing: "-0.02em" }}>
-        Firecrawl Playground
-      </h1>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <h1 style={{ margin: 0, fontSize: "18px", letterSpacing: "-0.02em" }}>
+          Firecrawl Playground
+        </h1>
+        <LLMProxyStatus />
+      </div>
       <div
         style={{
           display: "grid",

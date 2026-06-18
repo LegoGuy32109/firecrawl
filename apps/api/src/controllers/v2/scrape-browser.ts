@@ -311,6 +311,7 @@ export async function scrapeInteractController(
           zeroDataRetention: zdrForced,
           ...traceScrapeContext,
         },
+        step => r.step(step, "actions"),
       );
     } catch (err) {
       logger.error("Agent loop failed", { error: err });

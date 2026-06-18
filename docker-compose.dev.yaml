@@ -15,3 +15,7 @@ services:
   playwright-service:
     ports:
       - "3000:3000"
+
+  llm-proxy:
+    ports:
+      - "3001:3001"

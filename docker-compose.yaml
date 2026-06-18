@@ -43,6 +43,7 @@ x-common-env: &common-env
   MODEL_NAME: ${MODEL_NAME}
   MODEL_EMBEDDING_NAME: ${MODEL_EMBEDDING_NAME}
   OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
+  LOCAL_LLM_PROXY_URL: ${LOCAL_LLM_PROXY_URL:-}
   AUTUMN_SECRET_KEY: ${AUTUMN_SECRET_KEY}
   SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
   BULL_AUTH_KEY: ${BULL_AUTH_KEY}
@@ -197,6 +198,18 @@ services:
         max-file: "3"
         compress: "true"
 
+  llm-proxy:
+    build:
+      context: ./apps/llm-proxy
+    environment:
+      PROXY_BACKEND: ${PROXY_BACKEND:-codex}
+      PROXY_TIMEOUT_MS: ${PROXY_TIMEOUT_MS:-30000}
+    volumes:
+      - codex-auth:/root/.codex
+    restart: unless-stopped
+    networks:
+      - backend
+
   # one-shot: creates the database on first boot (no-op afterwards)
   foundationdb-init:
     image: foundationdb/foundationdb:7.3.63
@@ -219,3 +232,4 @@ networks:
 volumes:
   fdb-data:
   fdb-cluster-file:
+  codex-auth:
