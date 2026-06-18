@@ -30,6 +30,17 @@ import {
 } from "./error-codes";
 import type { ZodIssue } from "zod";
 
+export type ActionStatus = {
+  name: string;
+  status: "ok" | "failed" | "skipped" | "timed_out";
+  code?: string;
+  message?: string;
+  durationMs?: number;
+  startedAt?: string;
+  endedAt?: string;
+  details?: Record<string, unknown>;
+};
+
 export interface ErrorDetailsMap {
   [AuthError.INVALID_API_KEY]: { reason?: string };
   [AuthError.OAUTH_TOKEN_EXPIRED]: { provider?: string; expiredAt?: string };
@@ -85,6 +96,8 @@ export interface ErrorDetailsMap {
     selector?: string;
     pageUrl?: string;
     screenshot?: string;
+    actionType?: string;
+    actionStatuses?: ActionStatus[];
   };
   [ScrapeError.RACED_REDIRECT]: { url?: string };
   [ScrapeError.SITEMAP]: { sitemapUrl?: string; cause?: unknown };

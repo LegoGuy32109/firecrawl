@@ -7,6 +7,20 @@ import { getInnerJson } from "@mendable/firecrawl-rs";
 import { hasFormatOfType } from "../../../../lib/format-utils";
 import { ActionError } from "../../error";
 import type { LiveMetadata } from "../../../../controllers/v2/types";
+import type { ActionStatus } from "../../../../lib/error-details";
+
+const actionStatusValues = new Set<ActionStatus["status"]>([
+  "ok",
+  "failed",
+  "skipped",
+  "timed_out",
+]);
+
+function normalizeActionStatus(status: string): ActionStatus["status"] {
+  return actionStatusValues.has(status as ActionStatus["status"])
+    ? (status as ActionStatus["status"])
+    : "failed";
+}
 
 export async function scrapeURLWithPlaywrightCDP(
   meta: Meta,
@@ -76,7 +90,23 @@ export async function scrapeURLWithPlaywrightCDP(
         .object({
           actionIndex: z.number().optional(),
           selector: z.string().optional(),
+          type: z.string().optional(),
+          actionType: z.string().optional(),
           message: z.string().optional(),
+          actionStatuses: z
+            .array(
+              z.object({
+                name: z.string(),
+                status: z.string(),
+                code: z.string().optional(),
+                message: z.string().optional(),
+                durationMs: z.number().optional(),
+                startedAt: z.string().optional(),
+                endedAt: z.string().optional(),
+                details: z.record(z.string(), z.any()).optional(),
+              }),
+            )
+            .optional(),
           pageUrl: z.string().optional(),
           screenshot: z.string().optional(),
         })
@@ -110,12 +140,19 @@ export async function scrapeURLWithPlaywrightCDP(
   });
 
   if (response.actionError) {
+    const actionType =
+      response.actionError.actionType ?? response.actionError.type;
     throw new ActionError(
       response.actionError.message ?? "PLAYWRIGHT_ACTION_FAILED",
       response.actionError.actionIndex,
       response.actionError.selector,
       response.actionError.pageUrl,
       response.actionError.screenshot,
+      actionType,
+      response.actionError.actionStatuses?.map(status => ({
+        ...status,
+        status: normalizeActionStatus(status.status),
+      })),
     );
   }
 

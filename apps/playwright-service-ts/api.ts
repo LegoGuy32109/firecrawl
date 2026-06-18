@@ -614,10 +614,22 @@ type ActionResult =
   | { type: "screenshot"; screenshot: string }
   | { type: "executeJavascript"; value: unknown };
 
+type ActionStatus = {
+  name: string;
+  status: "ok" | "failed" | "skipped" | "timed_out";
+  code?: string;
+  message?: string;
+  durationMs?: number;
+  startedAt?: string;
+  endedAt?: string;
+  details?: Record<string, unknown>;
+};
+
 class ScrapeActionError extends Error {
   constructor(
     public readonly actionIndex: number,
     public readonly action: ScrapeAction,
+    public readonly actionStatuses: ActionStatus[] | undefined,
     cause: unknown,
   ) {
     super(cause instanceof Error ? cause.message : String(cause));
@@ -1127,9 +1139,12 @@ const executeActions = async (
   timeout: number,
 ): Promise<ActionResult[]> => {
   const results: ActionResult[] = [];
+  const actionStatuses: ActionStatus[] = [];
 
   for (let actionIndex = 0; actionIndex < actions.length; actionIndex++) {
     const action = actions[actionIndex];
+    const startedAt = Date.now();
+    const startedAtIso = new Date(startedAt).toISOString();
     try {
       switch (action.type) {
         case "wait":
@@ -1218,8 +1233,36 @@ const executeActions = async (
             `Unsupported action type: ${(action as { type?: string }).type}`,
           );
       }
+      actionStatuses.push({
+        name: `Action ${actionIndex} (${action.type})`,
+        status: "ok",
+        durationMs: Date.now() - startedAt,
+        startedAt: startedAtIso,
+        endedAt: new Date().toISOString(),
+      });
     } catch (error) {
-      throw new ScrapeActionError(actionIndex, action, error);
+      actionStatuses.push({
+        name: `Action ${actionIndex} (${action.type})`,
+        status: "failed",
+        code: "SCRAPE_ACTION_ERROR",
+        message: error instanceof Error ? error.message : String(error),
+        durationMs: Date.now() - startedAt,
+        startedAt: startedAtIso,
+        endedAt: new Date().toISOString(),
+      });
+      for (
+        let skippedIndex = actionIndex + 1;
+        skippedIndex < actions.length;
+        skippedIndex++
+      ) {
+        const skippedAction = actions[skippedIndex];
+        actionStatuses.push({
+          name: `Action ${skippedIndex} (${skippedAction.type})`,
+          status: "skipped",
+          startedAt: startedAtIso,
+        });
+      }
+      throw new ScrapeActionError(actionIndex, action, actionStatuses, error);
     }
   }
 
@@ -1930,9 +1973,13 @@ async function handleScrape(req: Request, res: Response) {
         actionError: {
           actionIndex: error.actionIndex,
           type: error.action.type,
+          actionType: error.action.type,
           selector:
             "selector" in error.action ? error.action.selector : undefined,
           message: error.message,
+          ...(error.actionStatuses !== undefined
+            ? { actionStatuses: error.actionStatuses }
+            : {}),
           ...(failurePageUrl !== undefined ? { pageUrl: failurePageUrl } : {}),
           ...(failureScreenshot !== undefined
             ? { screenshot: failureScreenshot }

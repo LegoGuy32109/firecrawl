@@ -20,7 +20,7 @@ import {
   RequestError,
   ScrapeError,
 } from "../../lib/error-codes";
-import { errorCodeToHttpStatus } from "../../lib/error-catalog";
+import { errorCodeToHttpStatus, parseErrorCode } from "../../lib/error-catalog";
 import { NuQJob } from "../../services/worker/nuq";
 import { checkPermissions } from "../../lib/permissions";
 import { withSpan, setSpanAttributes, SpanKind } from "../../lib/otel-tracer";
@@ -42,8 +42,26 @@ import {
 } from "../../lib/keyless";
 import { projectScrapeCredits } from "../../lib/keyless-credit-projection";
 import { applyAgentAuthDiscoveryHeader } from "../../lib/agent-auth-discovery";
+import type { ActionStatus } from "../../lib/error-details";
 
 const AGENT_INTEROP_CONCURRENCY_BOOST = 3;
+
+function coerceDiagnosticStatus(
+  status: ActionStatus["status"],
+): DiagnosticStatus {
+  switch (status) {
+    case "ok":
+      return DiagnosticStatus.Ok;
+    case "failed":
+      return DiagnosticStatus.Failed;
+    case "skipped":
+      return DiagnosticStatus.Skipped;
+    case "timed_out":
+      return DiagnosticStatus.TimedOut;
+    default:
+      return DiagnosticStatus.Failed;
+  }
+}
 
 export async function scrapeController(
   req: RequestWithAuth<{}, ScrapeResponse, ScrapeRequest>,
@@ -341,6 +359,48 @@ export async function scrapeController(
               version: "v2",
               error: e,
             });
+          }
+          const actionStatuses = (
+            e.details as
+              | {
+                  actionStatuses?: ActionStatus[];
+                }
+              | undefined
+          )?.actionStatuses;
+          if (e.code === ScrapeError.ACTION && Array.isArray(actionStatuses)) {
+            for (const status of actionStatuses) {
+              const parsedCode =
+                status.code !== undefined
+                  ? parseErrorCode(status.code)
+                  : undefined;
+              r.step(
+                {
+                  name: status.name,
+                  status: coerceDiagnosticStatus(status.status),
+                  ...(status.message !== undefined
+                    ? { message: status.message }
+                    : {}),
+                  ...(status.startedAt !== undefined
+                    ? { startedAt: status.startedAt }
+                    : {}),
+                  ...(status.endedAt !== undefined
+                    ? { endedAt: status.endedAt }
+                    : {}),
+                  ...(status.details !== undefined
+                    ? { details: status.details }
+                    : {}),
+                  ...(status.durationMs !== undefined
+                    ? { durationMs: status.durationMs }
+                    : {}),
+                  ...(parsedCode !== undefined
+                    ? { code: parsedCode }
+                    : status.status === DiagnosticStatus.Failed
+                      ? { code: ScrapeError.ACTION }
+                      : {}),
+                },
+                "actions",
+              );
+            }
           }
           // Status (incl. DNS=200) is driven by the error catalog; no manual ladder.
           setSpanAttributes(span, {

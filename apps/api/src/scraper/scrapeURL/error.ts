@@ -4,6 +4,7 @@ import {
   restoreTransportableError,
 } from "../../lib/error";
 import { AgentError, ScrapeError } from "../../lib/error-codes";
+import type { ActionStatus } from "../../lib/error-details";
 import { Meta } from ".";
 import { Engine, FeatureFlag } from "./engines";
 import { isSelfHosted } from "../../lib/deployment";
@@ -212,6 +213,8 @@ export class ActionError extends TransportableError {
     public selector?: string,
     public pageUrl?: string,
     public screenshot?: string,
+    public actionType?: string,
+    public actionStatuses?: ActionStatus[],
   ) {
     super(
       ScrapeError.ACTION,
@@ -223,6 +226,8 @@ export class ActionError extends TransportableError {
           ...(selector !== undefined ? { selector } : {}),
           ...(pageUrl !== undefined ? { pageUrl } : {}),
           ...(screenshot !== undefined ? { screenshot } : {}),
+          ...(actionType !== undefined ? { actionType } : {}),
+          ...(actionStatuses !== undefined ? { actionStatuses } : {}),
         },
       },
     );
@@ -236,6 +241,8 @@ export class ActionError extends TransportableError {
       selector: this.selector,
       pageUrl: this.pageUrl,
       screenshot: this.screenshot,
+      actionType: this.actionType,
+      actionStatuses: this.actionStatuses,
     };
   }
 
@@ -249,6 +256,8 @@ export class ActionError extends TransportableError {
       data.selector,
       data.pageUrl,
       data.screenshot,
+      data.actionType,
+      data.actionStatuses,
     );
     return restoreTransportableError(x, data);
   }

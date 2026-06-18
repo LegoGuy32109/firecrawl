@@ -15,7 +15,7 @@ export default defineConfig({
   output: 'static',
   vite: {
     preview: {
-      allowedHosts: ["host.docker.internal"],
+      allowedHosts: ["host.docker.internal", "test-site"],
     },
   },
   integrations: [mdx(), sitemap()],

@@ -46,12 +46,22 @@ export const url = z.preprocess(
         ) {
           return true;
         }
+        if (/^https?:\/\/test-site(:\d+)?([\/?#]|$)/i.test(x as string)) {
+          return true;
+        }
       }
       return /(\.[a-zA-Z0-9-\u0400-\u04FF\u0500-\u052F\u2DE0-\u2DFF\uA640-\uA69F]{2,}|\.xn--[a-zA-Z0-9-]{1,})(:\d+)?([\/?#]|$)/i.test(
         x,
       );
     }, "URL must have a valid top-level domain or be a valid path")
     .refine(x => {
+      if (
+        config.TEST_SUITE_SELF_HOSTED &&
+        config.ALLOW_LOCAL_WEBHOOKS &&
+        /^https?:\/\/test-site(:\d+)?([\/?#]|$)/i.test(x as string)
+      ) {
+        return true;
+      }
       try {
         checkUrl(x as string);
         return true;

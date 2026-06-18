@@ -198,6 +198,29 @@ describe("playwright;cdp engine", () => {
   );
 
   concurrentIf(HAS_LOCAL_PLAYWRIGHT_NO_FIRE_ENGINE && ALLOW_TEST_SUITE_WEBSITE)(
+    "runs a longer successful action chain before scrape output is captured",
+    async () => {
+      const response = await scrape(
+        {
+          url: fixtureUrl,
+          formats: ["markdown"],
+          actions: [
+            { type: "wait", selector: "#action-state" },
+            { type: "click", selector: "#reveal-action" },
+            { type: "wait", selector: '#action-state[data-ready="true"]' },
+          ],
+          maxAge: 0,
+        },
+        identity,
+      );
+
+      expect(response.markdown).toContain("post-click playwright cdp state");
+      expect(selectedEngine(response)).toBe("playwright;cdp");
+    },
+    scrapeTimeout,
+  );
+
+  concurrentIf(HAS_LOCAL_PLAYWRIGHT_NO_FIRE_ENGINE && ALLOW_TEST_SUITE_WEBSITE)(
     "runs executeJavascript actions and returns structured values",
     async () => {
       const response = await scrape(
@@ -228,6 +251,106 @@ describe("playwright;cdp engine", () => {
       expect(response.actions?.screenshots?.[0]).toEqual(expect.any(String));
       expectRawJpegBase64(response.actions!.screenshots![0]);
       expect(selectedEngine(response)).toBe("playwright;cdp");
+    },
+    scrapeTimeout,
+  );
+
+  itIf(HAS_LOCAL_PLAYWRIGHT_NO_FIRE_ENGINE && ALLOW_TEST_SUITE_WEBSITE)(
+    "includes action statuses for failed actions and skipped tail actions",
+    async () => {
+      const raw = await scrapeRaw(
+        {
+          url: fixtureUrl,
+          formats: ["markdown"],
+          actions: [
+            { type: "wait", selector: "#action-state" },
+            { type: "click", selector: "#reveal-action" },
+            { type: "wait", selector: '#action-state[data-ready="true"]' },
+            { type: "click", selector: "#selector-that-will-not-exist" },
+            { type: "scroll", direction: "down" },
+            { type: "click", selector: "#reveal-action" },
+          ],
+          maxAge: 0,
+        },
+        identity,
+      );
+
+      expect(raw.statusCode).toBe(errorCodeToHttpStatus(ScrapeError.ACTION));
+      expect(raw.body.success).toBe(false);
+      expect(raw.body.code).toBe(ScrapeError.ACTION);
+      expect(raw.body.details).toEqual(
+        expect.objectContaining({
+          actionIndex: 3,
+          selector: "#selector-that-will-not-exist",
+          actionType: "click",
+          actionStatuses: [
+            expect.objectContaining({
+              name: "Action 0 (wait)",
+              status: "ok",
+            }),
+            expect.objectContaining({
+              name: "Action 1 (click)",
+              status: "ok",
+            }),
+            expect.objectContaining({
+              name: "Action 2 (wait)",
+              status: "ok",
+            }),
+            expect.objectContaining({
+              name: "Action 3 (click)",
+              status: "failed",
+              code: "SCRAPE_ACTION_ERROR",
+            }),
+            expect.objectContaining({
+              name: "Action 4 (scroll)",
+              status: "skipped",
+            }),
+            expect.objectContaining({
+              name: "Action 5 (click)",
+              status: "skipped",
+            }),
+          ],
+        }),
+      );
+
+      const diagnosticsActions = raw.body.diagnostics?.actions as
+        | Array<{
+            name: string;
+            status: string;
+            code?: string;
+            durationMs?: number;
+          }>
+        | undefined;
+
+      expect(diagnosticsActions).toHaveLength(6);
+      expect(diagnosticsActions).toEqual([
+        expect.objectContaining({
+          name: "Action 0 (wait)",
+          status: "ok",
+        }),
+        expect.objectContaining({
+          name: "Action 1 (click)",
+          status: "ok",
+        }),
+        expect.objectContaining({
+          name: "Action 2 (wait)",
+          status: "ok",
+        }),
+        expect.objectContaining({
+          name: "Action 3 (click)",
+          status: "failed",
+          code: "SCRAPE_ACTION_ERROR",
+        }),
+        expect.objectContaining({
+          name: "Action 4 (scroll)",
+          status: "skipped",
+        }),
+        expect.objectContaining({
+          name: "Action 5 (click)",
+          status: "skipped",
+        }),
+      ]);
+      expect(diagnosticsActions?.[3].durationMs).toEqual(expect.any(Number));
     },
     scrapeTimeout,
   );
