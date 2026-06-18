@@ -64,6 +64,8 @@ export async function scrapeURLWithPlaywrightCDP(
           actionIndex: z.number().optional(),
           selector: z.string().optional(),
           message: z.string().optional(),
+          pageUrl: z.string().optional(),
+          screenshot: z.string().optional(),
         })
         .optional(),
       live: z
@@ -99,6 +101,8 @@ export async function scrapeURLWithPlaywrightCDP(
       response.actionError.message ?? "PLAYWRIGHT_ACTION_FAILED",
       response.actionError.actionIndex,
       response.actionError.selector,
+      response.actionError.pageUrl,
+      response.actionError.screenshot,
     );
   }
 

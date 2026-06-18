@@ -75,6 +75,67 @@ import {
 import type { ErrorDetails } from "../../lib/error-details";
 
 // ---------------------------------------------------------------------------
+// Failure-context capture — best-effort URL + screenshot from a live browser
+// session, used to enrich BROWSER_EXECUTION_FAILED responses so devs can see
+// what page the session was on and what it looked like when execution failed.
+// Screenshot is omitted under forced ZDR.
+// ---------------------------------------------------------------------------
+
+const SCREENSHOT_CAPTURE_SCRIPT =
+  "const __b=await page.screenshot({type:'jpeg',quality:70});console.log(__b.toString('base64'));";
+
+async function captureFailureContext(
+  browserId: string,
+  zdrForced: boolean,
+): Promise<{ pageUrl?: string; screenshot?: string }> {
+  let pageUrl: string | undefined;
+  let screenshot: string | undefined;
+  try {
+    const r = await browserServiceRequest<BrowserServiceExecResponse>(
+      "POST",
+      `/browsers/${browserId}/exec`,
+      {
+        code: "agent-browser get url",
+        language: "bash",
+        timeout: 5,
+        origin: "interact_failure_capture",
+      },
+    );
+    const url = (r.stdout || r.result || "").trim();
+    if (url) pageUrl = url;
+  } catch {}
+  if (!zdrForced) {
+    try {
+      const r = await browserServiceRequest<BrowserServiceExecResponse>(
+        "POST",
+        `/browsers/${browserId}/exec`,
+        {
+          code: SCREENSHOT_CAPTURE_SCRIPT,
+          language: "node",
+          timeout: 10,
+          origin: "interact_failure_capture",
+        },
+      );
+      const b64 = (r.stdout || "").trim();
+      if (b64) screenshot = b64;
+    } catch {}
+  }
+  return { pageUrl, screenshot };
+}
+
+// The replay script (buildReplayScript) throws errors prefixed
+// `Replay action #N (type):`. Parsing this lets BROWSER_EXECUTION_FAILED carry
+// the same step-index shape as SCRAPE_ACTION on replay failures.
+function parseReplayFailure(
+  stderr: string | undefined,
+): { actionIndex: number; actionType: string } | undefined {
+  if (!stderr) return undefined;
+  const m = stderr.match(/Replay action #(\d+) \((\w+)\):/);
+  if (!m) return undefined;
+  return { actionIndex: parseInt(m[1], 10), actionType: m[2] };
+}
+
+// ---------------------------------------------------------------------------
 // Schemas
 // ---------------------------------------------------------------------------
 
@@ -386,12 +447,27 @@ export async function scrapeInteractController(
   const agentOutput = "output" in execResult ? execResult.output : undefined;
 
   if (hasError) {
-    // CHANGED: was 200 + success:false + no code; now 422 + EXECUTION_FAILED.
-    return r.fail(
-      BrowserError.EXECUTION_FAILED,
-      execResult.stderr || "Execution failed",
-      { details: { exitCode: execResult.exitCode, killed: execResult.killed } },
-    );
+    // CHANGED: was 200 + success:false + no code; now 422 + EXECUTION_FAILED
+    // with rich diagnostic envelope: page URL + screenshot at the moment of
+    // failure, the failed replay action index if the failure came from the
+    // replay script, and a truncated stderr snippet (privacy-gated).
+    const capture = await captureFailureContext(session.browser_id, zdrForced);
+    const stderr = execResult.stderr ?? "";
+    const replayFailedAt = parseReplayFailure(stderr);
+    const stderrSnippet =
+      !zdrForced && stderr ? stderr.slice(0, 500) : undefined;
+    return r.fail(BrowserError.EXECUTION_FAILED, stderr || "Execution failed", {
+      details: {
+        exitCode: execResult.exitCode,
+        killed: execResult.killed,
+        ...(capture.pageUrl !== undefined ? { pageUrl: capture.pageUrl } : {}),
+        ...(capture.screenshot !== undefined
+          ? { screenshot: capture.screenshot }
+          : {}),
+        ...(replayFailedAt ? { replayFailedAt } : {}),
+        ...(stderrSnippet ? { stderrSnippet } : {}),
+      },
+    });
   }
 
   return r.ok({
@@ -754,6 +830,18 @@ async function createSessionForScrape(
       );
     }
   } catch (err) {
+    // Capture failure context BEFORE deleting the session — the page won't
+    // exist anymore after the DELETE.
+    const zdrForcedInit = getScrapeZDR(req.acuc?.flags) === "forced";
+    const capture = await captureFailureContext(
+      svcResponse.sessionId,
+      zdrForcedInit,
+    );
+    const stderr = err instanceof Error ? err.message : String(err ?? "");
+    const replayFailedAt = parseReplayFailure(stderr);
+    const stderrSnippet =
+      !zdrForcedInit && stderr ? stderr.slice(0, 500) : undefined;
+
     adjustKeylessCredits(req.auth.team_id, -keylessReserved).catch(() => {});
     logger.error("Failed to initialize scrape browser session context", {
       error: err,
@@ -767,6 +855,14 @@ async function createSessionForScrape(
       code: BrowserError.EXECUTION_FAILED,
       message:
         "Failed to initialize browser session from the original scrape context. Please rerun the scrape and try again.",
+      details: {
+        ...(capture.pageUrl !== undefined ? { pageUrl: capture.pageUrl } : {}),
+        ...(capture.screenshot !== undefined
+          ? { screenshot: capture.screenshot }
+          : {}),
+        ...(replayFailedAt ? { replayFailedAt } : {}),
+        ...(stderrSnippet ? { stderrSnippet } : {}),
+      },
     };
   }
 

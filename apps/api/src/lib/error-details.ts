@@ -83,6 +83,8 @@ export interface ErrorDetailsMap {
     errorCode: string;
     actionIndex?: number;
     selector?: string;
+    pageUrl?: string;
+    screenshot?: string;
   };
   [ScrapeError.RACED_REDIRECT]: { url?: string };
   [ScrapeError.SITEMAP]: { sitemapUrl?: string; cause?: unknown };
@@ -108,6 +110,10 @@ export interface ErrorDetailsMap {
     exitCode?: number;
     killed?: boolean;
     timedOut?: boolean;
+    pageUrl?: string;
+    screenshot?: string;
+    replayFailedAt?: { actionIndex: number; actionType: string };
+    stderrSnippet?: string;
   };
   [BrowserError.SERVICE_UNAVAILABLE]: { dependency: "browser-service" };
   [MonitorError.EMAIL_TOKEN_EXPIRED]: { expiredAt: string };

@@ -210,6 +210,8 @@ export class ActionError extends TransportableError {
     public errorCode: string,
     public actionIndex?: number,
     public selector?: string,
+    public pageUrl?: string,
+    public screenshot?: string,
   ) {
     super(
       ScrapeError.ACTION,
@@ -219,6 +221,8 @@ export class ActionError extends TransportableError {
           errorCode,
           ...(actionIndex !== undefined ? { actionIndex } : {}),
           ...(selector !== undefined ? { selector } : {}),
+          ...(pageUrl !== undefined ? { pageUrl } : {}),
+          ...(screenshot !== undefined ? { screenshot } : {}),
         },
       },
     );
@@ -230,6 +234,8 @@ export class ActionError extends TransportableError {
       errorCode: this.errorCode,
       actionIndex: this.actionIndex,
       selector: this.selector,
+      pageUrl: this.pageUrl,
+      screenshot: this.screenshot,
     };
   }
 
@@ -237,7 +243,13 @@ export class ActionError extends TransportableError {
     _: ErrorCodes,
     data: ReturnType<typeof this.prototype.serialize>,
   ) {
-    const x = new ActionError(data.errorCode, data.actionIndex, data.selector);
+    const x = new ActionError(
+      data.errorCode,
+      data.actionIndex,
+      data.selector,
+      data.pageUrl,
+      data.screenshot,
+    );
     return restoreTransportableError(x, data);
   }
 }

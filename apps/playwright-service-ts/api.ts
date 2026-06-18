@@ -1912,6 +1912,17 @@ async function handleScrape(req: Request, res: Response) {
       });
     }
     if (error instanceof ScrapeActionError) {
+      let failurePageUrl: string | undefined;
+      let failureScreenshot: string | undefined;
+      if (page) {
+        try {
+          failurePageUrl = page.url();
+        } catch {}
+        try {
+          const buf = await page.screenshot({ type: "jpeg", quality: 70 });
+          failureScreenshot = buf.toString("base64");
+        } catch {}
+      }
       return res.status(422).json({
         content: "",
         pageStatusCode: 422,
@@ -1922,6 +1933,10 @@ async function handleScrape(req: Request, res: Response) {
           selector:
             "selector" in error.action ? error.action.selector : undefined,
           message: error.message,
+          ...(failurePageUrl !== undefined ? { pageUrl: failurePageUrl } : {}),
+          ...(failureScreenshot !== undefined
+            ? { screenshot: failureScreenshot }
+            : {}),
         },
       });
     }
