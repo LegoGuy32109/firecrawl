@@ -1,0 +1,4 @@
+services:
+  playwright-service:
+    ports:
+      - "3000:3000"

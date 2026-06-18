@@ -6,6 +6,7 @@
   "scripts": {
     "start": "tsc && node dist/src/harness.js --start-built",
     "dev": "tsx src/harness.ts --start",
+    "dev:local": "docker compose -f ../../docker-compose.yaml -f ../../docker-compose.dev.yaml up -d redis rabbitmq playwright-service && PLAYWRIGHT_MICROSERVICE_URL=http://localhost:3000/scrape PLAYWRIGHT_CDP_URL=http://localhost:3000/scrape BROWSER_SERVICE_URL=http://localhost:3000 tsx src/harness.ts --start",
     "server": "tsc-watch --onSuccess \"node dist/src/index.js\"",
     "server:production": "tsc && node dist/src/index.js",
     "server:production:nobuild": "node dist/src/index.js",
