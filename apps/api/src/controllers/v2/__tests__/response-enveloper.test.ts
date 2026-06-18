@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  FeedbackError,
   RateError,
   ScrapeError,
   ScrapeWarning,
 } from "../../../lib/error-codes";
+import { errorCodeToHttpStatus } from "../../../lib/error-catalog";
+import type { RequestPrivacy } from "../types";
 import { DiagnosticStatus, JobState, ResponseStatus } from "../types";
 import {
   asyncJobFailureResponse,
@@ -228,5 +231,95 @@ describe("v2 response enveloper", () => {
       mode: "disabled",
       reduced: false,
     });
+  });
+});
+
+// RB — makeResponder send-style tests from SPEC-RESPONDER-IMPL.md
+function mockRes() {
+  const sent = { status: 0 as number, body: undefined as any };
+  const res: any = {
+    status(code: number) {
+      sent.status = code;
+      return res;
+    },
+    json(body: any) {
+      sent.body = body;
+      return res;
+    },
+  };
+  return { res, sent };
+}
+const reqWith = (privacy?: RequestPrivacy): any => ({
+  privacy,
+  header: () => undefined,
+});
+
+describe("makeResponder (RB)", () => {
+  it("derives HTTP status from the catalog, never an override", () => {
+    const { res, sent } = mockRes();
+    makeResponder(reqWith(), res).fail(ScrapeError.TIMEOUT, "timed out");
+    expect(sent.status).toBe(errorCodeToHttpStatus(ScrapeError.TIMEOUT)); // 408
+    expect(sent.body).toMatchObject({
+      success: false,
+      status: "failed",
+      code: ScrapeError.TIMEOUT,
+    });
+  });
+
+  it("defaults to safe privacy when req.privacy is unset (pre-auth)", () => {
+    const { res, sent } = mockRes();
+    makeResponder(reqWith(undefined), res).fail(
+      FeedbackError.DB_UNAVAILABLE,
+      "db down",
+    );
+    expect(sent.body.diagnostics.privacy).toEqual({
+      zeroDataRetention: false,
+      mode: "disabled",
+      reduced: false,
+    });
+  });
+
+  it("strips step details + raw message under reduced privacy", () => {
+    const { res, sent } = mockRes();
+    const r = makeResponder(
+      reqWith({ zeroDataRetention: true, mode: "forced", reduced: true }),
+      res,
+    );
+    r.step({
+      name: "scrape",
+      status: DiagnosticStatus.Failed,
+      message: "https://secret.example/path",
+      messageTemplate: "scrape failed",
+      details: { url: "https://secret.example/path" },
+    });
+    r.fail(ScrapeError.SITE, "site error");
+    const s = sent.body.diagnostics.steps[0];
+    expect(s.details).toBeUndefined();
+    expect(s.message).toBe("scrape failed"); // template kept, raw dropped
+  });
+
+  it("ok() flips to status:'warning' when warnings present; warn() always does", () => {
+    const { res, sent } = mockRes();
+    makeResponder(reqWith(), res).ok({
+      data: {},
+      warnings: [{ code: "X", message: "m" } as any],
+    });
+    expect(sent.body.status).toBe("warning");
+  });
+
+  it("accumulated steps appear on the terminal response", () => {
+    const { res, sent } = mockRes();
+    const r = makeResponder(reqWith(), res);
+    r.step({ name: "auth", status: DiagnosticStatus.Ok });
+    r.step({ name: "scrape", status: DiagnosticStatus.Ok });
+    r.ok({ data: {} });
+    expect(sent.body.diagnostics.steps).toHaveLength(2);
+  });
+
+  it("r.processing() returns status:'processing'", () => {
+    const { res, sent } = mockRes();
+    makeResponder(reqWith(), res).processing({ data: {} });
+    expect(sent.body.status).toBe("processing");
+    expect(sent.status).toBe(200);
   });
 });

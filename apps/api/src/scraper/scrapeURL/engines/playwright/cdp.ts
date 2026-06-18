@@ -33,9 +33,6 @@ export async function scrapeURLWithPlaywrightCDP(
         full_page_screenshot: wantsFullPage,
       }),
       actions: meta.options.actions,
-      __playgroundLive:
-        (meta.options as { __playgroundLive?: boolean }).__playgroundLive ===
-        true,
     },
     method: "POST",
     logger: meta.logger.child("scrapeURLWithPlaywrightCDP/robustFetch"),

@@ -2,6 +2,7 @@ import { Response } from "express";
 import { config } from "../../config";
 import { logger as _logger } from "../../lib/logger";
 import {
+  DiagnosticStatus,
   Document,
   FormatObject,
   RequestWithAuth,
@@ -16,11 +17,9 @@ import {
   AgentError,
   BillingError,
   CommonError,
-  LiveWarning,
   RequestError,
   ScrapeError,
 } from "../../lib/error-codes";
-import { makeWarning } from "../../lib/error-catalog";
 import { errorCodeToHttpStatus } from "../../lib/error-catalog";
 import { NuQJob } from "../../services/worker/nuq";
 import { checkPermissions } from "../../lib/permissions";
@@ -446,19 +445,9 @@ export async function scrapeController(
         | import("./types").LiveMetadata
         | undefined;
       const liveWarnings =
-        req.body.__playgroundLive && !live
-          ? [
-              makeWarning(
-                LiveWarning.CAPTURE_UNAVAILABLE,
-                "Live capture is unavailable for this request.",
-                {
-                  dependency: "browser-service",
-                },
-              ),
-            ]
-          : live?.warnings?.length
-            ? live.warnings
-            : [];
+        live?.warnings?.length
+          ? live.warnings
+          : [];
 
       logger.info("Request metrics", {
         version: "v2",
@@ -475,6 +464,22 @@ export async function scrapeController(
         concurrencyLimited,
         concurrencyQueueDurationMs: lockTime || undefined,
       });
+
+      // Emit engine waterfall steps for the diagnostics waterfall.
+      for (const attempt of doc?.metadata?.engineAttempts ?? []) {
+        r.step(
+          {
+            name: "source",
+            status: attempt.success
+              ? DiagnosticStatus.Ok
+              : DiagnosticStatus.Failed,
+            message: attempt.engine,
+            details: attempt.error ? { error: attempt.error } : undefined,
+          },
+          "sources",
+          attempt.engine,
+        );
+      }
 
       return r.ok({
         data: {

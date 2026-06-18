@@ -1,31 +1,46 @@
-import JsonViewBase from "@uiw/react-json-view";
-import { darkTheme } from "@uiw/react-json-view/dark";
+import { h } from "preact";
 
-type Props = {
+function syntaxHighlight(json: string): string {
+  return json.replace(
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+    (match) => {
+      let cls = "color:#ce9178"; // string
+      if (/^"/.test(match)) {
+        if (/:$/.test(match)) cls = "color:#9cdcfe"; // key
+      } else if (/true|false/.test(match)) {
+        cls = "color:#4fc1ff"; // boolean
+      } else if (/null/.test(match)) {
+        cls = "color:#808080"; // null
+      } else {
+        cls = "color:#b5cea8"; // number
+      }
+      return `<span style="${cls}">${match}</span>`;
+    },
+  );
+}
+
+interface JsonViewProps {
   value: unknown;
-  collapsed?: number | boolean;
-};
+  style?: h.JSX.CSSProperties;
+}
 
-const baseStyle: React.CSSProperties = {
-  ...darkTheme,
-  background: "var(--field)",
-  fontSize: "12px",
-  fontFamily: "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
-  padding: "10px",
-  border: "1px solid var(--line)",
-  overflow: "auto",
-  maxHeight: "500px",
-};
-
-export function JsonView({ value, collapsed = 3 }: Props) {
+export function JsonView({ value, style }: JsonViewProps) {
+  const json = JSON.stringify(value, null, 2) ?? "null";
   return (
-    <JsonViewBase
-      value={value as object}
-      style={baseStyle}
-      collapsed={collapsed}
-      displayDataTypes={false}
-      displayObjectSize={false}
-      enableClipboard
+    <pre
+      style={{
+        margin: 0,
+        padding: "12px",
+        overflowX: "auto",
+        fontFamily: "ui-monospace, monospace",
+        fontSize: "13px",
+        lineHeight: 1.5,
+        background: "var(--field, #0b1017)",
+        color: "var(--ink, #eef3f8)",
+        borderRadius: "4px",
+        ...style,
+      }}
+      dangerouslySetInnerHTML={{ __html: syntaxHighlight(json) }}
     />
   );
 }

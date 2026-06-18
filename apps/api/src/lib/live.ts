@@ -1,14 +1,14 @@
-export function browserLiveViewPath(sessionId: string): string {
-  return `/v2/live/browser/${encodeURIComponent(sessionId)}/view`;
+export function adminBrowserLiveViewPath(
+  basePath: string,
+  sessionId: string,
+): string {
+  return `${basePath}/session/${encodeURIComponent(sessionId)}/view`;
 }
 
-export function browserLiveWsPath(sessionId: string): string {
-  return `/v2/live/browser/${encodeURIComponent(sessionId)}/ws`;
-}
-
-export function browserLiveArtifactPath(
+export function adminBrowserLiveArtifactPath(
+  basePath: string,
   sessionId: string,
   name: string,
 ): string {
-  return `/v2/live/browser/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(name)}`;
+  return `${basePath}/session/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(name)}`;
 }

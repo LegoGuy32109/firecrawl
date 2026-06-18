@@ -24,6 +24,7 @@ import { RateLimiterMode } from "../types";
 import {
   createPlaygroundSession,
   deletePlaygroundSession,
+  getPlaygroundSession,
 } from "../admin/playground/session";
 import { createLivecastWS } from "../services/sessionLivecastWS";
 
@@ -115,6 +116,11 @@ adminRouter.post(
 adminRouter.post(
   `/admin/${config.BULL_AUTH_KEY}/playground/session`,
   wrap(createPlaygroundSession),
+);
+
+adminRouter.get(
+  `/admin/${config.BULL_AUTH_KEY}/playground/session/:id`,
+  wrap(getPlaygroundSession),
 );
 
 adminRouter.delete(
