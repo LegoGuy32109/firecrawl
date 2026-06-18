@@ -18,7 +18,12 @@ services:
       ALLOW_LOCAL_WEBHOOKS: "true"
       TEST_SUITE_SELF_HOSTED: "true"
       TEST_SUITE_WEBSITE: http://test-site:4321
+      USE_DB_AUTHENTICATION: "true"
+      DATABASE_URL: postgresql://postgres:postgres@nuq-postgres:5432/postgres
+      DATABASE_REPLICA_URL: postgresql://postgres:postgres@nuq-postgres:5432/postgres
+      INDEX_DATABASE_URL: postgresql://postgres:postgres@nuq-postgres:5432/postgres
       FIRE_ENGINE_BETA_URL: ""
+      DISABLE_BLOCKLIST: "true"
       PLAYWRIGHT_MICROSERVICE_URL: http://playwright-service:3000/scrape
       BROWSER_SERVICE_URL: http://playwright-service:3000
     depends_on:
@@ -50,6 +55,9 @@ services:
       start_period: 5s
 
   nuq-postgres:
+    volumes:
+      - ./apps/api/drizzle/20260618153654_cynical_hannibal_king/migration.sql:/docker-entrypoint-initdb.d/020-firecrawl-schema.sql:ro
+      - ./apps/api/scripts/local-db-setup.sql:/docker-entrypoint-initdb.d/030-firecrawl-local.sql:ro
     healthcheck:
       test:
         [
