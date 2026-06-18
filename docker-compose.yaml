@@ -25,7 +25,9 @@ x-common-env: &common-env
   REDIS_URL: ${REDIS_URL:-redis://redis:6379}
   REDIS_RATE_LIMIT_URL: ${REDIS_URL:-redis://redis:6379}
   PLAYWRIGHT_MICROSERVICE_URL: ${PLAYWRIGHT_MICROSERVICE_URL:-http://playwright-service:3000/scrape}
+  PLAYWRIGHT_CDP_URL: ${PLAYWRIGHT_CDP_URL:-http://playwright-service:3000/scrape-cdp}
   BROWSER_SERVICE_URL: ${BROWSER_SERVICE_URL:-http://playwright-service:3000}
+  BROWSER_SERVICE_API_KEY: ${BROWSER_SERVICE_API_KEY:-local-browser-service-secret}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
   POSTGRES_DB: ${POSTGRES_DB:-postgres}
@@ -73,6 +75,7 @@ services:
       PROXY_PASSWORD: ${PROXY_PASSWORD}
       ALLOW_LOCAL_WEBHOOKS: ${ALLOW_LOCAL_WEBHOOKS}
       BLOCK_MEDIA: ${BLOCK_MEDIA}
+      BROWSER_SERVICE_API_KEY: ${BROWSER_SERVICE_API_KEY:-local-browser-service-secret}
       # Configure maximum concurrent pages for Playwright browser instances
       MAX_CONCURRENT_PAGES: ${CRAWL_CONCURRENT_REQUESTS:-10}
     networks:
