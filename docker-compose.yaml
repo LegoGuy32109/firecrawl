@@ -181,7 +181,9 @@ services:
   # FoundationDB queue backend (experimental). Enable by setting
   # NUQ_BACKEND=fdb; the api container reads the shared cluster file from the
   # fdb-cluster-file volume. Replaces nuq-postgres once stable.
+  # Profile-gated: only starts under `--profile full`.
   foundationdb:
+    profiles: ["full"]
     image: foundationdb/foundationdb:7.3.63
     environment:
       FDB_NETWORKING_MODE: container
@@ -198,7 +200,11 @@ services:
         max-file: "3"
         compress: "true"
 
+  # Local LLM proxy (Codex/Claude enterprise OAuth) — useful for testing AI
+  # features without a paid OpenAI key. Profile-gated: only starts under
+  # `--profile full`. Demo paths don't depend on it.
   llm-proxy:
+    profiles: ["full"]
     build:
       context: ./apps/llm-proxy
     environment:
@@ -211,7 +217,9 @@ services:
       - backend
 
   # one-shot: creates the database on first boot (no-op afterwards)
+  # Profile-gated alongside foundationdb.
   foundationdb-init:
+    profiles: ["full"]
     image: foundationdb/foundationdb:7.3.63
     depends_on:
       - foundationdb

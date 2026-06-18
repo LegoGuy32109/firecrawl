@@ -18,7 +18,7 @@ pnpm db:local
 This runs two things in sequence:
 
 1. Applies the Drizzle-generated migration (`drizzle/20260618153654_cynical_hannibal_king/migration.sql`) — creates all 44 app tables.
-2. Applies `scripts/local-db-setup.sql` — creates stub Supabase RPC functions so auth and billing work without a cloud DB.
+2. Applies `scripts/local-db-setup.sql` — creates stub Supabase RPC functions so auth, billing, and local OMCE/index work without a cloud DB.
 
 If the postgres container isn't running yet, start it first:
 
@@ -86,7 +86,8 @@ curl -s "http://localhost:3002/v2/scrape/${SCRAPE_ID}/interact" \
 | -------------------------------------- | --------------------------------------------------------- |
 | `auth_credit_usage_chunk_47`           | Accepts any API key; returns 99 999 999 credits remaining |
 | `auth_credit_usage_chunk_47_from_team` | Same but keyed by team_id                                 |
-| `bill_team_6`                          | No-op — credits are not deducted locally                  |
+| `bill_team_6`                          | No-op billing stub that returns a local API key           |
+| `insert_omce_job_if_needed`            | No-op — local dev does not enqueue OMCE index jobs        |
 | `change_tracking_insert_scrape`        | No-op — no Supabase realtime needed locally               |
 
 The billing emulation is intentional: you can test credit-gated code paths without depleting a real quota.

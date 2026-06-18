@@ -135,6 +135,31 @@ function parseReplayFailure(
   return { actionIndex: parseInt(m[1], 10), actionType: m[2] };
 }
 
+function parseBrowserExecFailure(
+  err: unknown,
+): BrowserServiceExecResponse | undefined {
+  if (!(err instanceof BrowserServiceError) || err.status !== 422) {
+    return undefined;
+  }
+
+  const raw = err.bodyText?.trim() || "";
+  if (!raw) return undefined;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<BrowserServiceExecResponse>;
+    if (typeof parsed.exitCode !== "number") return undefined;
+    return {
+      stdout: parsed.stdout ?? "",
+      result: parsed.result ?? "",
+      stderr: parsed.stderr ?? "",
+      exitCode: parsed.exitCode,
+      killed: parsed.killed ?? false,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Schemas
 // ---------------------------------------------------------------------------
@@ -376,13 +401,17 @@ export async function scrapeInteractController(
       );
     } catch (err) {
       logger.error("Agent loop failed", { error: err });
-      // CHANGED: was EXECUTION_FAILED (422); now SERVICE_UNAVAILABLE (503) —
-      // an upstream browser-service failure, not the caller's fault.
-      return r.fail(
-        BrowserError.SERVICE_UNAVAILABLE,
-        "Browser agent failed to execute the task.",
-        { details: { dependency: "browser-service" } },
-      );
+      const browserExecFailure = parseBrowserExecFailure(err);
+      if (browserExecFailure) {
+        execResult = browserExecFailure;
+      } else {
+        // Browser service dependency failure, not the caller's fault.
+        return r.fail(
+          BrowserError.SERVICE_UNAVAILABLE,
+          "Browser agent failed to execute the task.",
+          { details: { dependency: "browser-service" } },
+        );
+      }
     }
 
     enqueueBrowserSessionActivity({
@@ -414,13 +443,17 @@ export async function scrapeInteractController(
       logger.error("Failed to execute code via browser service", {
         error: err,
       });
-      // CHANGED: was EXECUTION_FAILED (422); now SERVICE_UNAVAILABLE (503) —
-      // an upstream browser-service failure, not the caller's fault.
-      return r.fail(
-        BrowserError.SERVICE_UNAVAILABLE,
-        "Failed to execute code in browser session.",
-        { details: { dependency: "browser-service" } },
-      );
+      const browserExecFailure = parseBrowserExecFailure(err);
+      if (browserExecFailure) {
+        execResult = browserExecFailure;
+      } else {
+        // Browser service dependency failure, not the caller's fault.
+        return r.fail(
+          BrowserError.SERVICE_UNAVAILABLE,
+          "Failed to execute code in browser session.",
+          { details: { dependency: "browser-service" } },
+        );
+      }
     }
 
     enqueueBrowserSessionActivity({

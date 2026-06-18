@@ -124,7 +124,7 @@ $$;
 -- Same as above but keyed by team_id instead of API key.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION auth_credit_usage_chunk_47_from_team(
-  i_team_id uuid,
+  input_team uuid,
   i_is_extract boolean DEFAULT false,
   tally_untallied_credits boolean DEFAULT false
 ) RETURNS TABLE (
@@ -154,7 +154,7 @@ CREATE OR REPLACE FUNCTION auth_credit_usage_chunk_47_from_team(
   SELECT
     'local-key'::text,
     0::bigint,
-    i_team_id,
+    input_team,
     'local-sub',
     now() - interval '30 days',
     now() + interval '30 days',
@@ -181,12 +181,23 @@ $$;
 -- No-op billing stub — local dev doesn't deduct credits.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION bill_team_6(
-  i_team_id uuid,
-  i_credits numeric,
-  i_job_id text DEFAULT null,
-  i_api_key text DEFAULT null,
-  i_job_type text DEFAULT null,
-  i_sub_user_id text DEFAULT null
+  _team_id uuid,
+  credits numeric,
+  sub_id text DEFAULT null,
+  fetch_subscription boolean DEFAULT false,
+  i_api_key_id bigint DEFAULT null,
+  is_extract_param boolean DEFAULT false
+) RETURNS TABLE (api_key text) LANGUAGE sql AS $$
+  SELECT 'local-key'::text;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- insert_omce_job_if_needed
+-- No-op OMCE stub — local dev doesn't enqueue index jobs in Supabase.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION insert_omce_job_if_needed(
+  i_domain_level integer,
+  i_domain_hash bytea
 ) RETURNS void LANGUAGE sql AS $$
   -- no-op
 $$;
@@ -196,11 +207,11 @@ $$;
 -- No-op change-tracking stub — no Supabase realtime needed locally.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION change_tracking_insert_scrape(
-  i_team_id uuid,
-  i_url text,
-  i_scrape_id uuid,
-  i_content_hash text DEFAULT null,
-  i_metadata jsonb DEFAULT null
+  p_team_id uuid,
+  p_url text,
+  p_job_id uuid,
+  p_date_added timestamptz,
+  p_change_tracking_tag text DEFAULT null
 ) RETURNS void LANGUAGE sql AS $$
   -- no-op
 $$;

@@ -32,9 +32,11 @@ export interface BrowserServiceDeleteResponse {
 
 export class BrowserServiceError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  bodyText: string;
+  constructor(status: number, message: string, bodyText = "") {
     super(message);
     this.status = status;
+    this.bodyText = bodyText;
   }
 }
 
@@ -76,6 +78,7 @@ export async function browserServiceRequest<T>(
     throw new BrowserServiceError(
       res.status,
       `Browser service ${method} ${path} failed (${res.status}): ${text}`,
+      text,
     );
   }
 
