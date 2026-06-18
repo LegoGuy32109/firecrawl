@@ -1032,24 +1032,23 @@ export const batchScrapeRequestSchema = strictWithMessage(
   .refine(waitForRefine, waitForRefineOpts)
   .transform(extractTransformRequired);
 
-const batchScrapeRequestSchemaNoURLValidationBase =
-  baseScrapeOptions.extend({
-    urls: z.string().array().min(1),
-    origin: z.string().optional().prefault("api"),
-    integration: integrationSchema.optional().transform(val => val || null),
-    webhook: webhookSchema.optional(),
-    appendToId: z.uuid().optional(),
-    ignoreInvalidURLs: z.boolean().prefault(true),
-    maxConcurrency: z.int().positive().optional(),
-    zeroDataRetention: z.boolean().optional(),
-    __agentInterop: z
-      .object({
-        auth: z.string(),
-        requestId: z.string(),
-        shouldBill: z.boolean(),
-      })
-      .optional(),
-  });
+const batchScrapeRequestSchemaNoURLValidationBase = baseScrapeOptions.extend({
+  urls: z.string().array().min(1),
+  origin: z.string().optional().prefault("api"),
+  integration: integrationSchema.optional().transform(val => val || null),
+  webhook: webhookSchema.optional(),
+  appendToId: z.uuid().optional(),
+  ignoreInvalidURLs: z.boolean().prefault(true),
+  maxConcurrency: z.int().positive().optional(),
+  zeroDataRetention: z.boolean().optional(),
+  __agentInterop: z
+    .object({
+      auth: z.string(),
+      requestId: z.string(),
+      shouldBill: z.boolean(),
+    })
+    .optional(),
+});
 
 export const batchScrapeRequestSchemaNoURLValidation = strictWithMessage(
   batchScrapeRequestSchemaNoURLValidationBase,
@@ -1116,9 +1115,7 @@ const crawlRequestSchemaBase = crawlerOptions.extend({
   url: URL,
   origin: z.string().optional().prefault("api"),
   integration: integrationSchema.optional().transform(val => val || null),
-  scrapeOptions: baseScrapeOptions.prefault(() =>
-    baseScrapeOptions.parse({}),
-  ),
+  scrapeOptions: baseScrapeOptions.prefault(() => baseScrapeOptions.parse({})),
   webhook: webhookSchema.optional(),
   limit: z.number().prefault(10000),
   maxConcurrency: z.int().positive().optional(),

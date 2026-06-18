@@ -239,7 +239,6 @@ describe("Scrape browser interact replay", () => {
     scrapeTimeout,
   );
 
-
   itIf(canRunReplayHappyPath)(
     "keeps a non-blank replay tab in the foreground for follow-up execs",
     async () => {

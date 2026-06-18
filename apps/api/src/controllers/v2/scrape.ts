@@ -444,10 +444,7 @@ export async function scrapeController(
       const live = (doc as any)?.metadata?.live as
         | import("./types").LiveMetadata
         | undefined;
-      const liveWarnings =
-        live?.warnings?.length
-          ? live.warnings
-          : [];
+      const liveWarnings = live?.warnings?.length ? live.warnings : [];
 
       logger.info("Request metrics", {
         version: "v2",
