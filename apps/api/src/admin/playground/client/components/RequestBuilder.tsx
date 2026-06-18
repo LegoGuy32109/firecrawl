@@ -8,6 +8,7 @@ import {
   apiKey,
 } from "../signals";
 import type { Feature } from "../signals";
+import { JsonView } from "./JsonView";
 
 type FieldDef = {
   key: string;
@@ -168,20 +169,30 @@ export function RequestBuilder() {
       </div>
 
       {rawMode ? (
-        <textarea
-          value={rawJson}
-          onInput={e => setRawJson((e.target as HTMLTextAreaElement).value)}
-          style={{
-            width: "100%",
-            height: "220px",
-            padding: "10px",
-            background: "var(--field)",
-            border: "1px solid var(--line)",
-            color: "var(--ink)",
-            font: "13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
-            resize: "vertical",
-          }}
-        />
+        <Fragment>
+          <textarea
+            value={rawJson}
+            onInput={e => setRawJson((e.target as HTMLTextAreaElement).value)}
+            style={{
+              width: "100%",
+              height: "160px",
+              padding: "10px",
+              background: "var(--field)",
+              border: "1px solid var(--line)",
+              color: "var(--ink)",
+              font: "13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
+              resize: "vertical",
+            }}
+          />
+          {(() => {
+            try {
+              const parsed = JSON.parse(rawJson);
+              return <JsonView value={parsed} collapsed={false} />;
+            } catch {
+              return null;
+            }
+          })()}
+        </Fragment>
       ) : (
         <Fragment>
           {fields.map(f => (

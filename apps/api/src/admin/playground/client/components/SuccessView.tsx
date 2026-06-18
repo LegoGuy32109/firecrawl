@@ -1,5 +1,6 @@
 import { h } from "preact";
 import { activeFeature } from "../signals";
+import { JsonView } from "./JsonView";
 
 type Props = {
   body: Record<string, unknown>;
@@ -58,20 +59,7 @@ export function SuccessView({ body }: Props) {
             >
               Metadata
             </div>
-            <pre
-              style={{
-                margin: 0,
-                padding: "10px",
-                background: "var(--field)",
-                border: "1px solid var(--line)",
-                color: "var(--ink)",
-                fontSize: "12px",
-                overflow: "auto",
-                maxHeight: "200px",
-              }}
-            >
-              {JSON.stringify(data.metadata, null, 2)}
-            </pre>
+            <JsonView value={data.metadata} collapsed={1} />
           </div>
         )}
       </div>
@@ -114,20 +102,5 @@ export function SuccessView({ body }: Props) {
     );
   }
 
-  return (
-    <pre
-      style={{
-        margin: 0,
-        padding: "10px",
-        background: "var(--field)",
-        border: "1px solid var(--line)",
-        color: "var(--ink)",
-        fontSize: "12px",
-        overflow: "auto",
-        maxHeight: "500px",
-      }}
-    >
-      {JSON.stringify(body, null, 2)}
-    </pre>
-  );
+  return <JsonView value={body} />;
 }

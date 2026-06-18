@@ -1,6 +1,7 @@
 import { h } from "preact";
 import { explainError, parseErrorCode } from "../../../../lib/error-catalog";
 import { DiagnosticsWaterfall } from "./DiagnosticsWaterfall";
+import { JsonView } from "./JsonView";
 
 type DiagnosticStep = {
   name: string;
@@ -45,21 +46,7 @@ function renderDetails(code: string, details: unknown) {
     );
   }
 
-  return (
-    <pre
-      style={{
-        margin: 0,
-        padding: "8px",
-        background: "var(--field)",
-        color: "var(--ink)",
-        fontSize: "11px",
-        overflow: "auto",
-        maxHeight: "150px",
-      }}
-    >
-      {JSON.stringify(details, null, 2)}
-    </pre>
-  );
+  return <JsonView value={details as object} collapsed={2} />;
 }
 
 export function ErrorView({ body }: Props) {
