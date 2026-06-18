@@ -15,6 +15,19 @@ export async function scrapeURLWithPlaywrightCDP(
   const wantsScreenshot = !!screenshotFormat;
   const wantsFullPage = screenshotFormat?.fullPage ?? false;
 
+  // Reserve a small buffer between the action-engine's budget and the outer
+  // scrape abort so an action-level failure (selector miss, wait timeout,
+  // executeJavascript throw) has time to be caught by playwright-service,
+  // serialized with its rich SCRAPE_ACTION_ERROR envelope, and received here
+  // BEFORE the outer abort collapses everything into SCRAPE_TIMEOUT. Without
+  // this, when scrapeTimeout and the action timeout race they expire together
+  // and the outer signal wins, losing the step-level diagnostic.
+  const scrapeTimeoutMs = meta.abort.scrapeTimeout();
+  const actionEngineTimeoutMs =
+    scrapeTimeoutMs !== undefined
+      ? Math.max(1000, scrapeTimeoutMs - 3000)
+      : undefined;
+
   const response = await robustFetch({
     url: (config.PLAYWRIGHT_CDP_URL ?? config.PLAYWRIGHT_MICROSERVICE_URL)!,
     headers: {
@@ -23,7 +36,7 @@ export async function scrapeURLWithPlaywrightCDP(
     body: {
       url: meta.rewrittenUrl ?? meta.url,
       wait_after_load: meta.options.waitFor,
-      timeout: meta.abort.scrapeTimeout(),
+      timeout: actionEngineTimeoutMs,
       headers: meta.options.headers,
       skip_tls_verification: meta.options.skipTlsVerification,
       mobile: meta.options.mobile,
