@@ -3,7 +3,7 @@ import { h } from "preact";
 function syntaxHighlight(json: string): string {
   return json.replace(
     /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
-    (match) => {
+    match => {
       let cls = "color:#ce9178"; // string
       if (/^"/.test(match)) {
         if (/:$/.test(match)) cls = "color:#9cdcfe"; // key
@@ -22,24 +22,15 @@ function syntaxHighlight(json: string): string {
 interface JsonViewProps {
   value: unknown;
   style?: h.JSX.CSSProperties;
+  className?: string;
 }
 
-export function JsonView({ value, style }: JsonViewProps) {
+export function JsonView({ value, style, className = "" }: JsonViewProps) {
   const json = JSON.stringify(value, null, 2) ?? "null";
   return (
     <pre
-      style={{
-        margin: 0,
-        padding: "12px",
-        overflowX: "auto",
-        fontFamily: "ui-monospace, monospace",
-        fontSize: "13px",
-        lineHeight: 1.5,
-        background: "var(--field, #0b1017)",
-        color: "var(--ink, #eef3f8)",
-        borderRadius: "4px",
-        ...style,
-      }}
+      className={["playground-pre", className].filter(Boolean).join(" ")}
+      style={style}
       dangerouslySetInnerHTML={{ __html: syntaxHighlight(json) }}
     />
   );

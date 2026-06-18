@@ -13,19 +13,29 @@ type DiagnosticStep = {
   durationMs?: number;
 };
 
+type Props = {
+  body: Record<string, unknown>;
+  warnings?: Warning[];
+  legacyWarning?: string;
+};
+
+type FormatTab = {
+  id: string;
+  label: string;
+  dataKey: string;
+  render: (value: unknown) => h.JSX.Element;
+};
+
 function imagePreview(value: string, alt: string) {
   const src = toImageSrc(value);
   return (
-    <a href={src} target="_blank" rel="noopener noreferrer">
-      <img
-        src={src}
-        alt={alt}
-        style={{
-          maxWidth: "100%",
-          border: "1px solid var(--line)",
-          display: "block",
-        }}
-      />
+    <a
+      className="playground-media-tile"
+      href={src}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      <img className="playground-media-image" src={src} alt={alt} />
     </a>
   );
 }
@@ -37,15 +47,9 @@ function renderActions(value: unknown) {
     : [];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+    <div className="playground-stack">
       {screenshots.length > 0 && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-            gap: "8px",
-          }}
-        >
+        <div className="playground-media-grid playground-media-grid--actions">
           {screenshots.map((screenshot, i) => (
             <div key={i}>
               {imagePreview(screenshot, `action-screenshot-${i}`)}
@@ -58,40 +62,9 @@ function renderActions(value: unknown) {
   );
 }
 
-type Props = {
-  body: Record<string, unknown>;
-  warnings?: Warning[];
-  legacyWarning?: string;
-};
-
-// ── Format tab definitions ─────────────────────────────────────────────────
-
-type FormatTab = {
-  id: string;
-  label: string;
-  dataKey: string;
-  render: (value: unknown) => h.JSX.Element;
-};
-
 function pre(content: string) {
   return (
-    <pre
-      style={{
-        margin: 0,
-        padding: "10px",
-        background: "var(--field)",
-        border: "1px solid var(--line)",
-        color: "var(--ink)",
-        fontSize: "12px",
-        overflow: "auto",
-        maxHeight: "420px",
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
-        fontFamily: "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
-      }}
-    >
-      {content}
-    </pre>
+    <pre className="playground-pre playground-pre--compact">{content}</pre>
   );
 }
 
@@ -102,12 +75,7 @@ const FORMAT_TABS: FormatTab[] = [
     dataKey: "markdown",
     render: v => pre(v as string),
   },
-  {
-    id: "html",
-    label: "HTML",
-    dataKey: "html",
-    render: v => pre(v as string),
-  },
+  { id: "html", label: "HTML", dataKey: "html", render: v => pre(v as string) },
   {
     id: "rawHtml",
     label: "Raw HTML",
@@ -137,43 +105,22 @@ const FORMAT_TABS: FormatTab[] = [
     label: "Links",
     dataKey: "links",
     render: v => (
-      <div
-        style={{
-          padding: "10px",
-          background: "var(--field)",
-          border: "1px solid var(--line)",
-          maxHeight: "400px",
-          overflow: "auto",
-        }}
-      >
+      <div className="playground-link-list">
         {(v as string[]).map((link, i) => (
-          <div
-            key={i}
-            style={{ padding: "3px 0", borderBottom: "1px solid var(--line)" }}
-          >
+          <div key={i} className="playground-link-list__item">
             <a
+              className="playground-link"
               href={link}
               target="_blank"
               rel="noopener noreferrer"
-              style={{
-                color: "var(--accent)",
-                fontSize: "12px",
-                textDecoration: "none",
-                fontFamily:
-                  "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
-                wordBreak: "break-all",
-              }}
             >
               {link}
             </a>
           </div>
         ))}
         <div
-          style={{
-            marginTop: "6px",
-            fontSize: "11px",
-            color: "var(--muted)",
-          }}
+          className="playground-muted"
+          style={{ marginTop: "6px", fontSize: "11px" }}
         >
           {(v as string[]).length} link{(v as string[]).length === 1 ? "" : "s"}
         </div>
@@ -185,34 +132,28 @@ const FORMAT_TABS: FormatTab[] = [
     label: "Images",
     dataKey: "images",
     render: v => (
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
-          gap: "8px",
-          maxHeight: "400px",
-          overflow: "auto",
-          padding: "4px",
-        }}
-      >
-        {(v as string[]).map((src, i) => (
-          <a key={i} href={src} target="_blank" rel="noopener noreferrer">
-            <img
-              src={toImageSrc(src)}
-              alt={`img-${i}`}
-              style={{
-                width: "100%",
-                height: "80px",
-                objectFit: "cover",
-                border: "1px solid var(--line)",
-                display: "block",
-              }}
-              onError={(e: Event) => {
-                (e.target as HTMLImageElement).style.display = "none";
-              }}
-            />
-          </a>
-        ))}
+      <div className="playground-media-grid">
+        {(v as string[]).map((src, i) => {
+          const imageSrc = toImageSrc(src);
+          return (
+            <a
+              key={i}
+              className="playground-media-tile"
+              href={imageSrc}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <img
+                className="playground-media-image playground-media-image--small"
+                src={imageSrc}
+                alt={`img-${i}`}
+                onError={(e: Event) => {
+                  (e.target as HTMLImageElement).style.display = "none";
+                }}
+              />
+            </a>
+          );
+        })}
       </div>
     ),
   },
@@ -241,29 +182,18 @@ const FORMAT_TABS: FormatTab[] = [
     render: v => {
       const ct = v as Record<string, unknown>;
       return (
-        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          <div
-            style={{
-              display: "flex",
-              gap: "12px",
-              padding: "8px 12px",
-              background: "var(--field)",
-              border: "1px solid var(--line)",
-              fontSize: "12px",
-            }}
-          >
-            <span style={{ color: "var(--muted)" }}>Status:</span>
-            <strong style={{ color: "var(--ink)" }}>
-              {String(ct.changeStatus ?? "—")}
-            </strong>
-            {ct.previousScrapeAt && (
-              <>
-                <span style={{ color: "var(--muted)" }}>Previous:</span>
-                <span style={{ color: "var(--ink)" }}>
-                  {String(ct.previousScrapeAt)}
-                </span>
-              </>
-            )}
+        <div className="playground-stack">
+          <div className="playground-surface">
+            <div className="playground-row">
+              <span className="playground-muted">Status:</span>
+              <strong>{String(ct.changeStatus ?? "—")}</strong>
+              {ct.previousScrapeAt && (
+                <>
+                  <span className="playground-muted">Previous:</span>
+                  <span>{String(ct.previousScrapeAt)}</span>
+                </>
+              )}
+            </div>
           </div>
           {ct.diff && <JsonView value={ct.diff as object} collapsed={1} />}
         </div>
@@ -287,11 +217,7 @@ const FORMAT_TABS: FormatTab[] = [
     label: "Audio",
     dataKey: "audio",
     render: v => (
-      <audio
-        controls
-        src={v as string}
-        style={{ width: "100%", marginTop: "4px" }}
-      />
+      <audio controls src={v as string} className="playground-media-audio" />
     ),
   },
   {
@@ -299,11 +225,7 @@ const FORMAT_TABS: FormatTab[] = [
     label: "Video",
     dataKey: "video",
     render: v => (
-      <video
-        controls
-        src={v as string}
-        style={{ width: "100%", maxHeight: "300px", background: "#000" }}
-      />
+      <video controls src={v as string} className="playground-media-video" />
     ),
   },
   {
@@ -314,31 +236,6 @@ const FORMAT_TABS: FormatTab[] = [
   },
 ];
 
-// ── Tab bar styles ─────────────────────────────────────────────────────────
-
-const TAB_STYLE_BASE = {
-  padding: "6px 12px",
-  background: "transparent",
-  border: "none",
-  borderBottom: "2px solid transparent",
-  cursor: "pointer",
-  font: "700 11px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
-  letterSpacing: "0.06em",
-  textTransform: "uppercase" as const,
-  whiteSpace: "nowrap" as const,
-  marginBottom: "-1px",
-};
-
-function tabStyle(active: boolean) {
-  return {
-    ...TAB_STYLE_BASE,
-    color: active ? "var(--ink)" : "var(--muted)",
-    borderBottomColor: active ? "var(--accent)" : "transparent",
-  };
-}
-
-// ── Warning banner ─────────────────────────────────────────────────────────
-
 function WarningBanner({
   warnings,
   legacyWarning,
@@ -348,33 +245,17 @@ function WarningBanner({
 }) {
   if (!warnings?.length && !legacyWarning) return null;
   const all = warnings ?? [];
+
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "4px",
-        padding: "8px 12px",
-        background: "var(--accent-soft)",
-        border: "1px solid #573121",
-        borderBottom: "none",
-      }}
-    >
+    <div className="playground-response__banner">
       {all.map((w, i) => (
-        <div
-          key={i}
-          style={{ display: "flex", gap: "8px", alignItems: "baseline" }}
-        >
-          <code style={{ color: "#ffb196", fontSize: "11px", flexShrink: 0 }}>
-            {w.code}
-          </code>
-          <span style={{ color: "var(--ink)", fontSize: "12px" }}>
-            {w.message}
-          </span>
+        <div key={i} className="playground-response__banner-row">
+          <code className="playground-response__banner-code">{w.code}</code>
+          <span className="playground-response__banner-text">{w.message}</span>
         </div>
       ))}
       {!all.length && legacyWarning && (
-        <span style={{ color: "#ffb196", fontSize: "12px" }}>
+        <span className="playground-response__banner-code">
           {legacyWarning}
         </span>
       )}
@@ -382,61 +263,39 @@ function WarningBanner({
   );
 }
 
-// ── Main ───────────────────────────────────────────────────────────────────
-
 export function SuccessView({ body, warnings, legacyWarning }: Props) {
   const feature = activeFeature.value;
 
-  // Non-scrape features: simple fallback
   if (feature !== "scrape") {
     if ((feature === "crawl" || feature === "agent") && body.id) {
       return (
-        <div
-          style={{
-            padding: "12px",
-            background: "var(--field)",
-            border: "1px solid var(--line)",
-          }}
-        >
-          <div
-            style={{
-              color: "var(--muted)",
-              fontSize: "11px",
-              marginBottom: "4px",
-            }}
+        <div className="playground-surface">
+          <div className="playground-surface__label">Job ID</div>
+          <code
+            className="playground-code"
+            style={{ color: "var(--accent)", fontSize: "14px" }}
           >
-            JOB ID
-          </div>
-          <code style={{ color: "var(--accent)", fontSize: "14px" }}>
             {String(body.id)}
           </code>
           {body.status && (
-            <div
-              style={{
-                color: "var(--muted)",
-                fontSize: "12px",
-                marginTop: "6px",
-              }}
-            >
+            <div className="playground-response__job-status">
               Status: {String(body.status)}
             </div>
           )}
         </div>
       );
     }
+
     return <JsonView value={body} />;
   }
 
-  // Scrape: tabbed view
   const data =
     body.data && typeof body.data === "object"
       ? (body.data as Record<string, unknown>)
       : {};
   const diagnostics = body.diagnostics as Record<string, unknown> | undefined;
   const steps = (diagnostics?.steps as DiagnosticStep[] | undefined) ?? [];
-  const metadata = data.metadata ?? body.metadata;
 
-  // Find which format tabs have data
   const activeFormatTabs = FORMAT_TABS.filter(t => {
     const v = data[t.dataKey];
     if (v === null || v === undefined || v === "") return false;
@@ -444,7 +303,6 @@ export function SuccessView({ body, warnings, legacyWarning }: Props) {
     return true;
   });
 
-  // Default to markdown tab if present, otherwise first available, else meta
   const defaultTab =
     activeFormatTabs.find(t => t.id === "markdown")?.id ??
     activeFormatTabs[0]?.id ??
@@ -452,7 +310,6 @@ export function SuccessView({ body, warnings, legacyWarning }: Props) {
 
   const [activeTab, setActiveTab] = useState(defaultTab);
 
-  // Ensure tab is valid when data changes
   const validTab =
     activeFormatTabs.some(t => t.id === activeTab) ||
     activeTab === "meta" ||
@@ -463,114 +320,78 @@ export function SuccessView({ body, warnings, legacyWarning }: Props) {
   const activeFormatTab = FORMAT_TABS.find(t => t.id === validTab);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column" }}>
-      {/* Tab bar */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-end",
-          borderBottom: "1px solid var(--line)",
-          flexWrap: "wrap" as const,
-          rowGap: 0,
-        }}
-      >
-        {/* Dynamic format tabs */}
+    <div>
+      <div className="playground-response-tabs">
         {activeFormatTabs.map(tab => (
           <button
             key={tab.id}
+            type="button"
             onClick={() => setActiveTab(tab.id)}
-            style={tabStyle(validTab === tab.id)}
+            className={[
+              "playground-tab",
+              validTab === tab.id && "playground-tab--active",
+            ]
+              .filter(Boolean)
+              .join(" ")}
           >
             {tab.label}
           </button>
         ))}
 
-        {/* Separator if both groups present */}
         {activeFormatTabs.length > 0 && (
-          <span
-            style={{
-              borderLeft: "1px solid var(--line)",
-              height: "20px",
-              margin: "0 4px 2px",
-              alignSelf: "center",
-            }}
-          />
+          <span className="playground-response-tabs__separator" />
         )}
 
-        {/* Fixed tabs */}
         <button
+          type="button"
           onClick={() => setActiveTab("meta")}
-          style={tabStyle(validTab === "meta")}
+          className={[
+            "playground-tab",
+            validTab === "meta" && "playground-tab--active",
+          ]
+            .filter(Boolean)
+            .join(" ")}
         >
           Meta
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab("diagnostics")}
-          style={tabStyle(validTab === "diagnostics")}
+          className={[
+            "playground-tab",
+            validTab === "diagnostics" && "playground-tab--active",
+          ]
+            .filter(Boolean)
+            .join(" ")}
         >
           Diag{steps.length > 0 ? ` (${steps.length})` : ""}
         </button>
       </div>
 
-      {/* Warning banner */}
       <WarningBanner warnings={warnings} legacyWarning={legacyWarning} />
 
-      {/* Tab content */}
-      <div style={{ paddingTop: "12px" }}>
+      <div className="playground-response__content">
         {validTab === "meta" && (
-          <div
-            style={{ display: "flex", flexDirection: "column", gap: "10px" }}
-          >
-            {metadata ? (
-              <JsonView value={metadata as object} collapsed={1} />
-            ) : (
-              <div
-                style={{
-                  fontSize: "12px",
-                  color: "var(--muted)",
-                  fontStyle: "italic",
-                }}
-              >
-                No metadata
-              </div>
+          <div className="playground-stack">
+            {body.metadata && (
+              <JsonView value={body.metadata as object} collapsed={2} />
+            )}
+            {!body.metadata && data.metadata && (
+              <JsonView value={data.metadata as object} collapsed={2} />
             )}
           </div>
         )}
 
-        {validTab === "diagnostics" && (
-          <div>
-            {steps.length > 0 ? (
-              <DiagnosticsWaterfall steps={steps} />
-            ) : (
-              <div
-                style={{
-                  fontSize: "12px",
-                  color: "var(--muted)",
-                  fontStyle: "italic",
-                }}
-              >
-                No diagnostic steps
-              </div>
-            )}
-          </div>
-        )}
+        {validTab === "diagnostics" && <DiagnosticsWaterfall steps={steps} />}
 
         {activeFormatTab &&
-          data[activeFormatTab.dataKey] !== undefined &&
+          activeFormatTabs.some(t => t.id === validTab) &&
           activeFormatTab.render(data[activeFormatTab.dataKey])}
 
-        {!activeFormatTab &&
+        {!activeFormatTabs.some(t => t.id === validTab) &&
           validTab !== "meta" &&
           validTab !== "diagnostics" && (
-            <div
-              style={{
-                fontSize: "12px",
-                color: "var(--muted)",
-                fontStyle: "italic",
-              }}
-            >
-              No data for this format
-            </div>
+            <div className="playground-muted">No data for this tab</div>
           )}
       </div>
     </div>

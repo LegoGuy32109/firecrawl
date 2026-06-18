@@ -9,11 +9,11 @@ type Props = {
 
 export function StatusPill({ httpStatus, code }: Props) {
   const isOk = httpStatus >= 200 && httpStatus < 300;
-  const bg = isOk
-    ? "var(--get)"
+  const className = isOk
+    ? "playground-chip playground-chip--success"
     : httpStatus >= 400
-      ? "#8b1a1a"
-      : "var(--post)";
+      ? "playground-chip playground-chip--danger"
+      : "playground-chip playground-chip--warning";
 
   let mismatch: string | null = null;
   if (code) {
@@ -24,37 +24,11 @@ export function StatusPill({ httpStatus, code }: Props) {
   }
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "6px",
-        marginBottom: "12px",
-      }}
-    >
-      <span
-        style={{
-          display: "inline-block",
-          padding: "4px 10px",
-          background: bg,
-          color: "#fff",
-          font: "700 13px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
-          alignSelf: "flex-start",
-        }}
-      >
-        HTTP {httpStatus || "—"}
-      </span>
+    <div className="playground-status">
+      <span className={className}>HTTP {httpStatus || "—"}</span>
       {mismatch && (
-        <span
-          style={{
-            color: "#ffb196",
-            fontSize: "12px",
-            background: "var(--accent-soft)",
-            padding: "6px 10px",
-            border: "1px solid #573121",
-          }}
-        >
-          ⚠ Status mismatch: {mismatch}
+        <span className="playground-status__mismatch">
+          Status mismatch: {mismatch}
         </span>
       )}
     </div>

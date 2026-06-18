@@ -1,4 +1,5 @@
 import { actions, recordingUrl, type FirecrawlAction } from "../signals";
+import { Button } from "./ui/Button";
 
 function buildCurlSnippet(acts: FirecrawlAction[], url: string): string {
   const body = JSON.stringify({ url, actions: acts }, null, 2);
@@ -71,10 +72,13 @@ function ActionRow({
     <div style={rowStyle}>
       <select
         value={action.type}
-        onChange={(e) =>
-          update({ type: (e.target as HTMLSelectElement).value as FirecrawlAction["type"] })
+        onChange={e =>
+          update({
+            type: (e.target as HTMLSelectElement)
+              .value as FirecrawlAction["type"],
+          })
         }
-        style={{ fontSize: "12px" }}
+        className="playground-select playground-select--tight"
       >
         <option value="click">click</option>
         <option value="write">write</option>
@@ -87,10 +91,10 @@ function ActionRow({
         <input
           placeholder="selector"
           value={action.selector ?? ""}
-          onInput={(e) =>
+          onInput={e =>
             update({ selector: (e.target as HTMLInputElement).value })
           }
-          style={{ fontSize: "12px" }}
+          className="playground-input playground-input--tight"
         />
       )}
 
@@ -98,10 +102,8 @@ function ActionRow({
         <input
           placeholder="text"
           value={action.text ?? ""}
-          onInput={(e) =>
-            update({ text: (e.target as HTMLInputElement).value })
-          }
-          style={{ fontSize: "12px" }}
+          onInput={e => update({ text: (e.target as HTMLInputElement).value })}
+          className="playground-input playground-input--tight"
         />
       )}
 
@@ -109,10 +111,9 @@ function ActionRow({
         <input
           placeholder="key (e.g. Enter)"
           value={action.key ?? ""}
-          onInput={(e) =>
-            update({ key: (e.target as HTMLInputElement).value })
-          }
-          style={{ gridColumn: "2 / 4", fontSize: "12px" }}
+          onInput={e => update({ key: (e.target as HTMLInputElement).value })}
+          className="playground-input playground-input--tight"
+          style={{ gridColumn: "2 / 4" }}
         />
       )}
 
@@ -120,12 +121,14 @@ function ActionRow({
         <>
           <select
             value={action.direction ?? "down"}
-            onChange={(e) =>
+            onChange={e =>
               update({
-                direction: (e.target as HTMLSelectElement).value as "up" | "down",
+                direction: (e.target as HTMLSelectElement).value as
+                  | "up"
+                  | "down",
               })
             }
-            style={{ fontSize: "12px" }}
+            className="playground-select playground-select--tight"
           >
             <option value="down">down</option>
             <option value="up">up</option>
@@ -134,10 +137,10 @@ function ActionRow({
             type="number"
             placeholder="amount"
             value={action.amount ?? ""}
-            onInput={(e) =>
+            onInput={e =>
               update({ amount: Number((e.target as HTMLInputElement).value) })
             }
-            style={{ fontSize: "12px" }}
+            className="playground-input playground-input--tight"
           />
         </>
       )}
@@ -147,25 +150,32 @@ function ActionRow({
           type="number"
           placeholder="ms"
           value={action.milliseconds ?? ""}
-          onInput={(e) =>
+          onInput={e =>
             update({
               milliseconds: Number((e.target as HTMLInputElement).value),
             })
           }
-          style={{ gridColumn: "2 / 4", fontSize: "12px" }}
+          className="playground-input playground-input--tight"
+          style={{ gridColumn: "2 / 4" }}
         />
       )}
 
-      <div style={{ display: "flex", gap: "2px" }}>
-        <button title="Move up" onClick={moveUp} style={{ padding: "2px 4px" }}>
+      <div className="playground-row">
+        <Button type="button" title="Move up" onClick={moveUp} size="xs">
           ↑
-        </button>
-        <button title="Move down" onClick={moveDown} style={{ padding: "2px 4px" }}>
+        </Button>
+        <Button type="button" title="Move down" onClick={moveDown} size="xs">
           ↓
-        </button>
-        <button title="Delete" onClick={remove} style={{ padding: "2px 4px", color: "#f87171" }}>
+        </Button>
+        <Button
+          type="button"
+          title="Delete"
+          onClick={remove}
+          size="xs"
+          variant="danger"
+        >
           ✕
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -192,31 +202,29 @@ export function RecorderPanel() {
   }
 
   return (
-    <div style={{ fontFamily: "monospace", fontSize: "12px" }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "8px",
-        }}
-      >
-        <span style={{ fontWeight: "bold" }}>Recorded actions ({acts.length})</span>
-        <div style={{ display: "flex", gap: "4px" }}>
-          <button onClick={copyJson} disabled={acts.length === 0}>
+    <div className="playground-stack" style={{ fontSize: "12px" }}>
+      <div className="playground-row playground-row--between">
+        <span style={{ fontWeight: "bold" }}>
+          Recorded actions ({acts.length})
+        </span>
+        <div className="playground-row">
+          <Button type="button" onClick={copyJson} disabled={acts.length === 0}>
             Copy JSON
-          </button>
-          <button onClick={copyCurl} disabled={acts.length === 0}>
+          </Button>
+          <Button type="button" onClick={copyCurl} disabled={acts.length === 0}>
             Copy curl
-          </button>
-          <button onClick={copySdk} disabled={acts.length === 0}>
+          </Button>
+          <Button type="button" onClick={copySdk} disabled={acts.length === 0}>
             Copy SDK
-          </button>
+          </Button>
         </div>
       </div>
 
       {acts.length === 0 && (
-        <div style={{ color: "var(--ink)", opacity: 0.5, padding: "8px 0" }}>
+        <div
+          className="playground-muted"
+          style={{ opacity: 0.5, padding: "8px 0" }}
+        >
           No actions recorded yet.
         </div>
       )}
@@ -227,7 +235,7 @@ export function RecorderPanel() {
 
       {recUrl && (
         <div style={{ marginTop: "12px" }}>
-          <a href={recUrl} download style={{ color: "var(--accent)" }}>
+          <a href={recUrl} download className="playground-link">
             Download recording (.webm)
           </a>
         </div>

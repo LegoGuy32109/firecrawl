@@ -14,7 +14,7 @@
     "flyio": "node dist/src/index.js",
     "start:dev": "tsc-watch --onSuccess \"node dist/src/index.js\"",
     "build": "tsc && pnpm build:playground",
-    "build:playground": "esbuild src/admin/playground/client/index.tsx --bundle --platform=browser --jsx=automatic --jsx-import-source=preact --format=iife --minify --alias:react=preact/compat --alias:react-dom=preact/compat --alias:react-dom/jsx-runtime=preact/jsx-runtime --outfile=dist/playground.bundle.js",
+    "build:playground": "tsx src/admin/playground/build.ts",
     "branding:print": "node src/scraper/scrapeURL/engines/fire-engine/branding-script/print-script.js",
     "build:nosentry": "tsc",
     "test": "vitest run --exclude='**/__tests__/e2e_noAuth/**'",

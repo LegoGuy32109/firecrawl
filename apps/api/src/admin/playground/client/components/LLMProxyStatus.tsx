@@ -71,25 +71,16 @@ export function LLMProxyStatus() {
   return (
     <div
       title={tooltip}
+      className="playground-row playground-muted"
       style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "6px",
         fontSize: "11px",
-        color: "var(--muted)",
         cursor: tooltip ? "help" : "default",
         userSelect: "none",
       }}
     >
       <span
-        style={{
-          width: "7px",
-          height: "7px",
-          borderRadius: "50%",
-          background: dotColor,
-          flexShrink: 0,
-          display: "inline-block",
-        }}
+        className="playground-diagnostics__dot"
+        style={{ width: "7px", height: "7px", background: dotColor }}
       />
       {labelText}
     </div>

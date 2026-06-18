@@ -10,6 +10,8 @@ import {
 import type { Feature } from "../signals";
 import { JsonView } from "./JsonView";
 import { ScrapeRequestBuilder } from "./scrape/ScrapeRequestBuilder";
+import { Button } from "./ui/Button";
+import { Field } from "./ui/Field";
 
 type FieldDef = {
   key: string;
@@ -140,38 +142,14 @@ export function RequestBuilder() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
-        <span
-          style={{
-            color: "var(--muted)",
-            fontSize: "11px",
-            fontWeight: 700,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-          }}
-        >
+    <div className="playground-stack">
+      <div className="playground-row playground-row--between">
+        <span className="playground-panel__label" style={{ marginBottom: 0 }}>
           {feature} — {FEATURE_ENDPOINT[feature]}
         </span>
-        <button
-          onClick={() => setRawMode(m => !m)}
-          style={{
-            padding: "4px 10px",
-            background: "transparent",
-            color: "var(--muted)",
-            border: "1px solid var(--line)",
-            cursor: "pointer",
-            font: "11px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
-          }}
-        >
+        <Button type="button" onClick={() => setRawMode(m => !m)} size="sm">
           {rawMode ? "Form" : "Raw JSON"}
-        </button>
+        </Button>
       </div>
 
       {rawMode ? (
@@ -179,16 +157,7 @@ export function RequestBuilder() {
           <textarea
             value={rawJson}
             onInput={e => setRawJson((e.target as HTMLTextAreaElement).value)}
-            style={{
-              width: "100%",
-              height: "160px",
-              padding: "10px",
-              background: "var(--field)",
-              border: "1px solid var(--line)",
-              color: "var(--ink)",
-              font: "13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
-              resize: "vertical",
-            }}
+            className="playground-textarea playground-textarea--panel"
           />
           {(() => {
             try {
@@ -202,19 +171,7 @@ export function RequestBuilder() {
       ) : (
         <Fragment>
           {fields.map(f => (
-            <label
-              key={f.key}
-              style={{
-                display: "grid",
-                gap: "6px",
-                color: "var(--muted)",
-                fontSize: "11px",
-                fontWeight: 700,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-              }}
-            >
-              {f.label}
+            <Field key={f.key} label={f.label}>
               {f.type === "textarea" ? (
                 <textarea
                   value={formValues[f.key] ?? ""}
@@ -222,15 +179,7 @@ export function RequestBuilder() {
                     setField(f.key, (e.target as HTMLTextAreaElement).value)
                   }
                   rows={3}
-                  style={{
-                    width: "100%",
-                    padding: "10px 11px",
-                    background: "var(--field)",
-                    border: "1px solid var(--line)",
-                    color: "var(--ink)",
-                    font: "13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
-                    resize: "vertical",
-                  }}
+                  className="playground-textarea"
                 />
               ) : f.type === "checkbox" ? (
                 <input
@@ -242,7 +191,7 @@ export function RequestBuilder() {
                       (e.target as HTMLInputElement).checked ? "true" : "false",
                     )
                   }
-                  style={{ width: "18px", height: "18px" }}
+                  className="playground-switch"
                 />
               ) : (
                 <input
@@ -251,37 +200,22 @@ export function RequestBuilder() {
                   onInput={e =>
                     setField(f.key, (e.target as HTMLInputElement).value)
                   }
-                  style={{
-                    width: "100%",
-                    padding: "10px 11px",
-                    background: "var(--field)",
-                    border: "1px solid var(--line)",
-                    color: "var(--ink)",
-                    font: "13px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
-                  }}
+                  className="playground-input"
                 />
               )}
-            </label>
+            </Field>
           ))}
         </Fragment>
       )}
 
-      <button
+      <Button
+        type="button"
         onClick={send}
         disabled={inflight.value}
-        style={{
-          padding: "10px 20px",
-          background: inflight.value ? "var(--muted)" : "var(--accent)",
-          color: "#fff",
-          border: "none",
-          cursor: inflight.value ? "not-allowed" : "pointer",
-          font: "700 13px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
-          letterSpacing: "0.04em",
-          alignSelf: "flex-start",
-        }}
+        variant="primary"
       >
         {inflight.value ? "Sending…" : "Send"}
-      </button>
+      </Button>
     </div>
   );
 }

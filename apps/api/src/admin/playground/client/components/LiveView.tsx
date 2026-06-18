@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { sessionId, interactive } from "../signals";
+import { Button } from "./ui/Button";
 
 type ConnectionState = "idle" | "connecting" | "streaming" | "disconnected";
 
@@ -123,26 +124,21 @@ export function LiveView() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+    <div className="playground-stack">
+      <div className="playground-row">
         <span style={{ color: statusColors[connState], fontSize: "12px" }}>
           ● {connState}
         </span>
         {connState === "idle" || connState === "disconnected" ? (
-          <button onClick={connect} disabled={!sid}>
+          <Button type="button" onClick={connect} disabled={!sid}>
             Start live view
-          </button>
+          </Button>
         ) : (
-          <button onClick={disconnect}>Stop</button>
+          <Button type="button" onClick={disconnect}>
+            Stop
+          </Button>
         )}
-        <label
-          style={{
-            display: "flex",
-            gap: "4px",
-            alignItems: "center",
-            fontSize: "12px",
-          }}
-        >
+        <label className="playground-switch">
           <input
             type="checkbox"
             checked={isInteractive}
@@ -150,14 +146,14 @@ export function LiveView() {
               interactive.value = (e.target as HTMLInputElement).checked;
             }}
           />
-          Interactive
+          <span className="playground-switch__label">Interactive</span>
         </label>
       </div>
       <canvas
         ref={canvasRef}
+        className="playground-media-tile"
         style={{
           width: "100%",
-          border: "1px solid var(--panel)",
           cursor: isInteractive ? "crosshair" : "default",
           display: connState === "idle" ? "none" : "block",
         }}

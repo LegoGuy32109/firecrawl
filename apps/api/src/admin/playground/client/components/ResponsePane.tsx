@@ -4,40 +4,15 @@ import { StatusPill } from "./StatusPill";
 import { SuccessView } from "./SuccessView";
 import { ErrorView } from "./ErrorView";
 import { WarningList } from "./WarningList";
+import { EmptyState } from "./ui/EmptyState";
 
 export function ResponsePane() {
   if (inflight.value) {
-    return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "200px",
-          color: "var(--muted)",
-          fontSize: "14px",
-        }}
-      >
-        Sending…
-      </div>
-    );
+    return <EmptyState>Sending…</EmptyState>;
   }
 
   if (!response.value) {
-    return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "200px",
-          color: "var(--muted)",
-          fontSize: "14px",
-        }}
-      >
-        Response will appear here
-      </div>
-    );
+    return <EmptyState>Response will appear here</EmptyState>;
   }
 
   const { status, body } = response.value;

@@ -1,5 +1,6 @@
 import { h } from "preact";
 import { useState, useEffect, useRef } from "preact/hooks";
+import { Button } from "./ui/Button";
 
 const ENGINE_UNSUPPORTED = new Set(["proxy", "blockAds"]);
 
@@ -73,7 +74,11 @@ export function JsonEditor({ value, onChange }: Props) {
     setRawText(text);
     try {
       const parsed = JSON.parse(text);
-      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        !Array.isArray(parsed)
+      ) {
         setParseError(null);
         onChange(parsed as Record<string, unknown>);
       } else {
@@ -98,20 +103,14 @@ export function JsonEditor({ value, onChange }: Props) {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+    <div className="playground-stack">
       {unsupportedKeys.length > 0 && (
-        <div
-          style={{
-            padding: "8px 12px",
-            background: "var(--accent-soft)",
-            border: "1px solid #573121",
-            color: "#ffb196",
-            fontSize: "12px",
-          }}
-        >
-          ⚠ <code>{unsupportedKeys.join(", ")}</code>{" "}
+        <div className="playground-warning">
+          <code className="playground-warning__code">
+            {unsupportedKeys.join(", ")}
+          </code>{" "}
           {unsupportedKeys.length === 1 ? "is" : "are"} not supported by the
-          local CDP engine — expect <code>FEATURE_UNSUPPORTED_LOCALLY</code>
+          local CDP engine - expect <code>FEATURE_UNSUPPORTED_LOCALLY</code>
         </div>
       )}
 
@@ -119,67 +118,50 @@ export function JsonEditor({ value, onChange }: Props) {
         <textarea
           value={rawText}
           onInput={handleTextChange}
+          className="playground-textarea"
           style={{
-            width: "100%",
-            minHeight: "80px",
-            maxHeight: "400px",
-            background: "var(--field)",
             color: parseError ? "#ff6b6b" : "var(--ink)",
-            border: `1px solid ${parseError ? "#ff6b6b" : "var(--line)"}`,
-            fontSize: "12px",
-            fontFamily: "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
-            padding: "10px",
-            resize: "vertical",
-            boxSizing: "border-box",
+            borderColor: parseError ? "#ff6b6b" : "var(--line)",
+            maxHeight: "400px",
           }}
           spellCheck={false}
         />
         {parseError && (
-          <div
-            style={{
-              fontSize: "11px",
-              color: "#ff6b6b",
-              marginTop: "2px",
-            }}
-          >
+          <div style={{ fontSize: "11px", color: "#ff6b6b", marginTop: "2px" }}>
             {parseError}
           </div>
         )}
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+      <div className="playground-row">
         <span
-          style={{ fontSize: "11px", color: "var(--muted)" }}
           ref={dropdownRef}
+          className="playground-muted"
+          style={{ fontSize: "11px" }}
         >
-          <button
+          <Button
+            type="button"
             onClick={(e: MouseEvent) => {
               e.stopPropagation();
               setAddOpen(o => !o);
             }}
             title="Add parameter"
-            style={{
-              padding: "1px 7px",
-              background: "transparent",
-              color: "var(--muted)",
-              border: "1px solid var(--line)",
-              cursor: "pointer",
-              font: "11px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
-            }}
+            size="xs"
+            variant="ghost"
           >
             + Add param
-          </button>
+          </Button>
           {addOpen && (
             <div
+              className="playground-panel"
               style={{
                 position: "absolute",
                 zIndex: 200,
-                background: "var(--panel)",
-                border: "1px solid var(--line)",
                 minWidth: "220px",
                 maxHeight: "220px",
                 overflow: "auto",
                 boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+                padding: "0",
               }}
             >
               {availableParams.length === 0 && (
@@ -197,17 +179,14 @@ export function JsonEditor({ value, onChange }: Props) {
                 <button
                   key={p.key}
                   onClick={() => addParam(p)}
+                  className="playground-button playground-button--ghost"
                   style={{
                     display: "block",
                     width: "100%",
+                    textAlign: "left",
                     padding: "6px 12px",
-                    background: "transparent",
-                    color: "var(--ink)",
                     border: "none",
                     borderBottom: "1px solid var(--line)",
-                    cursor: "pointer",
-                    font: "12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
-                    textAlign: "left",
                   }}
                 >
                   {p.label}
@@ -215,16 +194,14 @@ export function JsonEditor({ value, onChange }: Props) {
               ))}
               <button
                 onClick={addCustom}
+                className="playground-button playground-button--ghost"
                 style={{
                   display: "block",
                   width: "100%",
-                  padding: "6px 12px",
-                  background: "transparent",
-                  color: "var(--muted)",
-                  border: "none",
-                  cursor: "pointer",
-                  font: "italic 12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
                   textAlign: "left",
+                  padding: "6px 12px",
+                  border: "none",
+                  fontStyle: "italic",
                 }}
               >
                 + Custom key…

@@ -24,41 +24,15 @@ export function DiagnosticsWaterfall({ steps }: Props) {
   if (!steps.length) return null;
 
   return (
-    <div style={{ marginTop: "12px" }}>
-      <div
-        style={{
-          color: "var(--muted)",
-          fontSize: "11px",
-          fontWeight: 700,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          marginBottom: "8px",
-        }}
-      >
-        Diagnostics
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+    <div className="playground-diagnostics">
+      <div className="playground-panel__label">Diagnostics</div>
+      <div className="playground-stack">
         {steps.map((step, i) => (
-          <div
-            key={i}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
-              padding: "7px 10px",
-              background: "var(--panel-strong)",
-              border: "1px solid var(--line)",
-              fontSize: "12px",
-            }}
-          >
+          <div key={i} className="playground-diagnostics__row">
             <span
+              className="playground-diagnostics__dot"
               style={{
-                display: "inline-block",
-                width: "8px",
-                height: "8px",
-                borderRadius: "50%",
                 background: STATUS_COLOR[step.status] ?? "var(--muted)",
-                flexShrink: 0,
               }}
             />
             <span style={{ flex: 1, color: "var(--ink)" }}>{step.name}</span>
@@ -70,11 +44,9 @@ export function DiagnosticsWaterfall({ steps }: Props) {
             >
               {step.status}
             </span>
-            {step.code && (
-              <span style={{ color: "var(--muted)" }}>{step.code}</span>
-            )}
+            {step.code && <span className="playground-muted">{step.code}</span>}
             {step.durationMs != null && (
-              <span style={{ color: "var(--muted)" }}>{step.durationMs}ms</span>
+              <span className="playground-muted">{step.durationMs}ms</span>
             )}
           </div>
         ))}

@@ -2,6 +2,7 @@ import { h } from "preact";
 import { explainError, parseErrorCode } from "../../../../lib/error-catalog";
 import { DiagnosticsWaterfall } from "./DiagnosticsWaterfall";
 import { JsonView } from "./JsonView";
+import { Button } from "./ui/Button";
 
 type DiagnosticStep = {
   name: string;
@@ -20,7 +21,7 @@ function renderDetails(code: string, details: unknown) {
 
   if (code === "INSUFFICIENT_CREDITS") {
     return (
-      <div style={{ color: "var(--ink)", fontSize: "13px" }}>
+      <div className="playground-warning__text">
         Needs <strong>{String(d.required)}</strong> credits, have{" "}
         <strong>{String(d.balance)}</strong> (short {String(d.shortfall)})
       </div>
@@ -29,7 +30,7 @@ function renderDetails(code: string, details: unknown) {
 
   if (code === "RATE_LIMIT_EXCEEDED") {
     return (
-      <div style={{ color: "var(--ink)", fontSize: "13px" }}>
+      <div className="playground-warning__text">
         Limit: {String(d.limit)} · Remaining: {String(d.remaining)} · Resets:{" "}
         {String(d.reset_at)}
         {d.scope && <span> · Scope: {String(d.scope)}</span>}
@@ -39,7 +40,7 @@ function renderDetails(code: string, details: unknown) {
 
   if (code === "FEATURE_UNSUPPORTED_LOCALLY") {
     return (
-      <div style={{ color: "var(--ink)", fontSize: "13px" }}>
+      <div className="playground-warning__text">
         Feature <strong>{String(d.feature)}</strong> requires engine:{" "}
         <strong>{String(d.requiresEngine)}</strong>
       </div>
@@ -65,28 +66,12 @@ export function ErrorView({ body }: Props) {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+    <div className="playground-stack">
       {code && (
-        <div
-          style={{
-            padding: "12px",
-            background: "var(--field)",
-            border: "1px solid var(--line)",
-          }}
-        >
-          <div
-            style={{
-              color: "var(--muted)",
-              fontSize: "11px",
-              fontWeight: 700,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              marginBottom: "6px",
-            }}
-          >
-            Error Code
-          </div>
+        <div className="playground-surface">
+          <div className="playground-surface__label">Error Code</div>
           <code
+            className="playground-code"
             style={{
               color: "var(--accent)",
               fontSize: "14px",
@@ -98,16 +83,13 @@ export function ErrorView({ body }: Props) {
           {catalog && (
             <div style={{ marginTop: "8px" }}>
               <div
-                style={{
-                  color: "var(--ink)",
-                  fontSize: "13px",
-                  marginBottom: "4px",
-                }}
+                className="playground-warning__text"
+                style={{ marginBottom: "4px" }}
               >
                 {catalog.explanation}
               </div>
-              <div style={{ color: "var(--muted)", fontSize: "12px" }}>
-                Fix: <span style={{ fontStyle: "italic" }}>{catalog.fix}</span>
+              <div className="playground-warning__meta">
+                Fix: <span>{catalog.fix}</span>
               </div>
             </div>
           )}
@@ -115,78 +97,23 @@ export function ErrorView({ body }: Props) {
       )}
 
       {errorMsg && (
-        <div
-          style={{
-            padding: "12px",
-            background: "var(--field)",
-            border: "1px solid var(--line)",
-          }}
-        >
-          <div
-            style={{
-              color: "var(--muted)",
-              fontSize: "11px",
-              fontWeight: 700,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              marginBottom: "6px",
-            }}
-          >
-            Message
-          </div>
-          <div style={{ color: "var(--ink)", fontSize: "13px" }}>
-            {errorMsg}
-          </div>
+        <div className="playground-surface">
+          <div className="playground-surface__label">Message</div>
+          <div className="playground-warning__text">{errorMsg}</div>
         </div>
       )}
 
       {errorId && (
-        <div
-          style={{
-            padding: "12px",
-            background: "var(--field)",
-            border: "1px solid var(--line)",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: "6px",
-            }}
-          >
-            <div
-              style={{
-                color: "var(--muted)",
-                fontSize: "11px",
-                fontWeight: 700,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-              }}
-            >
-              Error ID
-            </div>
-            <button
-              onClick={copyErrorId}
-              style={{
-                padding: "2px 8px",
-                background: "transparent",
-                color: "var(--muted)",
-                border: "1px solid var(--line)",
-                cursor: "pointer",
-                font: "11px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
-              }}
-            >
+        <div className="playground-surface">
+          <div className="playground-row playground-row--between">
+            <div className="playground-surface__label">Error ID</div>
+            <Button type="button" onClick={copyErrorId} size="xs">
               Copy
-            </button>
+            </Button>
           </div>
           <code
-            style={{
-              color: "var(--ink)",
-              fontSize: "12px",
-              wordBreak: "break-all",
-            }}
+            className="playground-code"
+            style={{ fontSize: "12px", wordBreak: "break-all" }}
           >
             {errorId}
           </code>
@@ -194,25 +121,8 @@ export function ErrorView({ body }: Props) {
       )}
 
       {details && code && (
-        <div
-          style={{
-            padding: "12px",
-            background: "var(--field)",
-            border: "1px solid var(--line)",
-          }}
-        >
-          <div
-            style={{
-              color: "var(--muted)",
-              fontSize: "11px",
-              fontWeight: 700,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              marginBottom: "8px",
-            }}
-          >
-            Details
-          </div>
+        <div className="playground-surface">
+          <div className="playground-surface__label">Details</div>
           {renderDetails(code, details)}
         </div>
       )}

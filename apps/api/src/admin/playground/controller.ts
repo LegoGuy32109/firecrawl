@@ -13,13 +13,16 @@ const escapeHtml = (value: string): string =>
 
 // process.cwd() is apps/api/ in both tsx (harness) and compiled modes
 const bundlePath = join(process.cwd(), "dist", "playground.bundle.js");
+const cssPath = join(process.cwd(), "dist", "playground.css");
 
 let bundle: string;
+let css: string;
 try {
   bundle = readFileSync(bundlePath, "utf8");
+  css = readFileSync(cssPath, "utf8");
 } catch {
   throw new Error(
-    `Playground bundle not found at ${bundlePath}\nRun \`pnpm build:playground\` then restart.`,
+    `Playground bundle not found at ${bundlePath} or ${cssPath}\nRun \`pnpm build:playground\` then restart.`,
   );
 }
 
@@ -32,39 +35,7 @@ const html = `<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Firecrawl Playground</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #080a0f;
-      --panel: #10151d;
-      --panel-strong: #151c26;
-      --ink: #eef3f8;
-      --muted: #8995a3;
-      --line: #26313d;
-      --accent: #ff6a3d;
-      --accent-soft: #26150f;
-      --get: #187a52;
-      --post: #a66516;
-      --field: #0b1017;
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      background: linear-gradient(180deg, #0d1219 0%, var(--bg) 42%, #05070a 100%);
-      color: var(--ink);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      line-height: 1.45;
-    }
-
-    #root {
-      width: min(1400px, calc(100vw - 24px));
-      margin: 0 auto;
-      padding: 16px 0;
-    }
-  </style>
+  <style>${css}</style>
 </head>
 <body>
   <div id="root" data-env="${safeEnv}" data-llm-proxy-url="${safeLlmProxyUrl}"></div>

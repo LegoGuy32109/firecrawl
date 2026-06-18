@@ -5,62 +5,29 @@ import { RequestBuilder } from "./components/RequestBuilder";
 import { ResponsePane } from "./components/ResponsePane";
 import { LiveView } from "./components/LiveView";
 import { RecorderPanel } from "./components/RecorderPanel";
-
-const panelStyle = {
-  padding: "16px",
-  background: "var(--panel)",
-  border: "1px solid var(--line)",
-};
-
-const panelLabelStyle = {
-  color: "var(--muted)",
-  fontSize: "11px",
-  fontWeight: 700,
-  letterSpacing: "0.08em",
-  textTransform: "uppercase" as const,
-  marginBottom: "14px",
-};
+import { Panel } from "./components/ui/Panel";
 
 export function App() {
   return (
-    <div>
+    <div className="playground-shell">
       <Header />
       <FeatureNav />
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: "24px",
-          alignItems: "start",
-        }}
-      >
-        <div style={panelStyle}>
-          <div style={panelLabelStyle}>Request</div>
+      <div className="playground-grid playground-grid--two">
+        <Panel label="Request">
           <RequestBuilder />
-        </div>
-        <div style={panelStyle}>
-          <div style={panelLabelStyle}>Response</div>
+        </Panel>
+        <Panel label="Response">
           <ResponsePane />
-        </div>
+        </Panel>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "2fr 1fr",
-          gap: "24px",
-          alignItems: "start",
-          marginTop: "24px",
-        }}
-      >
-        <div style={panelStyle}>
-          <div style={panelLabelStyle}>Live view</div>
+      <div className="playground-grid playground-grid--wide-left">
+        <Panel label="Live view">
           <LiveView />
-        </div>
-        <div style={panelStyle}>
-          <div style={panelLabelStyle}>Actions</div>
+        </Panel>
+        <Panel label="Actions">
           <RecorderPanel />
-        </div>
+        </Panel>
       </div>
     </div>
   );
