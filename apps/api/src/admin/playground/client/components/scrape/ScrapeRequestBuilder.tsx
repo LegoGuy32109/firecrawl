@@ -3,7 +3,6 @@ import { useState } from "preact/hooks";
 import { requestBody, inflight, response, apiKey } from "../../signals";
 import { FormatsPanel } from "./FormatsPanel";
 import { ActionsBuilder, type Action } from "./ActionsBuilder";
-import { JsonEditor } from "../JsonEditor";
 
 type FormatObj = { type: string; [k: string]: unknown };
 type KVPair = { key: string; value: string };
@@ -275,12 +274,48 @@ function Section({
 
 export function ScrapeRequestBuilder() {
   const [rawMode, setRawMode] = useState(false);
+  const [rawJson, setRawJson] = useState(() =>
+    JSON.stringify(requestBody.value, null, 2),
+  );
+  const [rawError, setRawError] = useState<string | null>(null);
   const rb = requestBody.value;
+
+  const openRawMode = () => {
+    setRawJson(JSON.stringify(requestBody.value, null, 2));
+    setRawError(null);
+    setRawMode(true);
+  };
+
+  const updateRawJson = (text: string) => {
+    setRawJson(text);
+    try {
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        setRawError("Request body must be a JSON object.");
+        return;
+      }
+      requestBody.value = parsed as Record<string, unknown>;
+      setRawError(null);
+    } catch (error) {
+      setRawError(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   const send = async () => {
     inflight.value = true;
     response.value = null;
     try {
+      let body = requestBody.value;
+      if (rawMode) {
+        const parsed = JSON.parse(rawJson);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new Error("Request body must be a JSON object.");
+        }
+        body = parsed as Record<string, unknown>;
+        requestBody.value = body;
+        setRawError(null);
+      }
+
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
       };
@@ -288,7 +323,7 @@ export function ScrapeRequestBuilder() {
       const res = await fetch("/v2/scrape", {
         method: "POST",
         headers,
-        body: JSON.stringify(requestBody.value),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       response.value = { status: res.status, body: data };
@@ -315,7 +350,7 @@ export function ScrapeRequestBuilder() {
       >
         <span style={sectionLabel}>scrape — /v2/scrape</span>
         <button
-          onClick={() => setRawMode(m => !m)}
+          onClick={() => (rawMode ? setRawMode(false) : openRawMode())}
           style={{
             padding: "4px 10px",
             background: "transparent",
@@ -330,12 +365,49 @@ export function ScrapeRequestBuilder() {
       </div>
 
       {rawMode ? (
-        <JsonEditor
-          value={rb}
-          onChange={v => {
-            requestBody.value = v;
-          }}
-        />
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          <textarea
+            value={rawJson}
+            spellcheck={false}
+            onInput={e =>
+              updateRawJson((e.target as HTMLTextAreaElement).value)
+            }
+            style={{
+              width: "100%",
+              minHeight: "360px",
+              padding: "10px",
+              background: "var(--field)",
+              border: `1px solid ${rawError ? "#8a3a2a" : "var(--line)"}`,
+              color: "var(--ink)",
+              font: "12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
+              resize: "vertical",
+              tabSize: 2,
+            }}
+          />
+          {rawError && (
+            <div
+              style={{
+                color: "#ffb196",
+                fontSize: "12px",
+                border: "1px solid #573121",
+                background: "var(--accent-soft)",
+                padding: "8px 10px",
+              }}
+            >
+              {rawError}
+            </div>
+          )}
+          <div
+            style={{
+              color: "var(--muted)",
+              fontSize: "11px",
+              fontFamily:
+                "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
+            }}
+          >
+            Valid JSON updates the request body immediately.
+          </div>
+        </div>
       ) : (
         <Fragment>
           {/* Basic */}

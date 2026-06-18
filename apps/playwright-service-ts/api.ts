@@ -1455,7 +1455,7 @@ app.get("/health", async (req: Request, res: Response) => {
   }
 });
 
-app.post("/scrape", async (req: Request, res: Response) => {
+async function handleScrape(req: Request, res: Response) {
   const {
     url,
     wait_after_load = 0,
@@ -1807,7 +1807,10 @@ app.post("/scrape", async (req: Request, res: Response) => {
     if (requestContext) await requestContext.close();
     pageSemaphore.release();
   }
-});
+}
+
+app.post("/scrape", handleScrape);
+app.post("/scrape-cdp", handleScrape);
 
 const server = http.createServer(app);
 const browserLiveWsServer = new WebSocketServer({ noServer: true });
