@@ -21,6 +21,9 @@ type Provider =
   | "deepinfra"
   | "vertex";
 const defaultProvider: Provider = config.OLLAMA_BASE_URL ? "ollama" : "openai";
+const localProxyUrl =
+  config.LOCAL_LLM_PROXY_URL ??
+  (config.ENV === "local" ? "http://llm-proxy:3001" : undefined);
 
 const providerList: Record<Provider, any> = {
   openai: createOpenAI({
@@ -179,8 +182,8 @@ function createLocalProxyProvider(proxyUrl: string) {
 }
 
 export function getModel(name: string, provider: Provider = defaultProvider) {
-  if (config.LOCAL_LLM_PROXY_URL) {
-    return createLocalProxyProvider(config.LOCAL_LLM_PROXY_URL)(name);
+  if (localProxyUrl) {
+    return createLocalProxyProvider(localProxyUrl)(name);
   }
   if (name === "gemini-2.5-pro") {
     name = "gemini-2.5-pro";

@@ -79,6 +79,8 @@ describe("monitoring scheduler", () => {
     id: "monitor-1",
     team_id: "team-1",
     current_check_id: null,
+    schedule_cron: "*/5 * * * *",
+    schedule_timezone: "UTC",
     next_run_at: "2026-05-05T18:45:00.000Z",
   } as any;
   const check = { id: "check-1" } as any;

@@ -356,6 +356,15 @@ body {
   word-break: break-word;
 }
 
+.playground-json-view {
+  display: grid;
+  gap: 6px;
+}
+
+.playground-json-view__toolbar {
+  min-height: 20px;
+}
+
 .playground-pre--compact {
   padding: 10px;
   font-size: 12px;

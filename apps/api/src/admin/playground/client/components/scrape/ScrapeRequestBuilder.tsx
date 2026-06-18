@@ -550,7 +550,12 @@ export function ScrapeRequestBuilder() {
               >
                 <Toggle
                   checked={(rb.onlyMainContent as boolean) !== false}
-                  onChange={v => set("onlyMainContent", v ? true : false)}
+                  onChange={v =>
+                    (requestBody.value = {
+                      ...requestBody.value,
+                      onlyMainContent: v,
+                    })
+                  }
                   label="Only main content"
                 />
                 <Toggle

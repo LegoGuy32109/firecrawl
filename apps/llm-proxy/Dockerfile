@@ -1,3 +1,14 @@
+FROM node:20-slim AS build
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build
+
 FROM node:20-slim
 
 # Install codex CLI
@@ -8,7 +19,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install --production
 
-COPY dist/ ./dist/
+COPY --from=build /app/dist ./dist
 
 ENV PROXY_BACKEND=codex
 ENV PROXY_TIMEOUT_MS=30000

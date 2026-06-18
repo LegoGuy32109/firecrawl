@@ -49,7 +49,6 @@ const SIMPLE_FORMATS: SimpleFormatDef[] = [
   { type: "links", label: "Links" },
   { type: "images", label: "Images" },
   { type: "summary", label: "Summary" },
-  { type: "highlights", label: "Highlights" },
   { type: "branding", label: "Branding" },
   { type: "audio", label: "Audio" },
   { type: "video", label: "Video" },
@@ -253,6 +252,11 @@ function ChangeTrackingOptions({
   fmt: FormatObj;
   onChange: (patch: Partial<FormatObj>) => void;
 }) {
+  const currentMode =
+    Array.isArray(fmt.modes) && fmt.modes.length > 0
+      ? String(fmt.modes[0])
+      : "json";
+
   return (
     <div
       style={{
@@ -265,9 +269,11 @@ function ChangeTrackingOptions({
       <label style={{ display: "grid", gap: "4px" }}>
         <span style={labelStyle}>Mode</span>
         <select
-          value={(fmt.mode as string) ?? "json"}
+          value={currentMode}
           onChange={e =>
-            onChange({ mode: (e.target as HTMLSelectElement).value })
+            onChange({
+              modes: [(e.target as HTMLSelectElement).value],
+            })
           }
           style={inputStyle}
         >
@@ -416,14 +422,39 @@ function QuestionOptions({
   return (
     <div style={{ marginTop: "10px" }}>
       <label style={{ display: "grid", gap: "4px" }}>
-        <span style={labelStyle}>Question prompt</span>
+        <span style={labelStyle}>Question</span>
         <textarea
-          value={(fmt.prompt as string) ?? ""}
+          value={(fmt.question as string) ?? ""}
           onInput={e =>
-            onChange({ prompt: (e.target as HTMLTextAreaElement).value })
+            onChange({ question: (e.target as HTMLTextAreaElement).value })
           }
           rows={2}
           placeholder="What is the main product price?"
+          style={{ ...inputStyle, resize: "vertical" }}
+        />
+      </label>
+    </div>
+  );
+}
+
+function HighlightsOptions({
+  fmt,
+  onChange,
+}: {
+  fmt: FormatObj;
+  onChange: (patch: Partial<FormatObj>) => void;
+}) {
+  return (
+    <div style={{ marginTop: "10px" }}>
+      <label style={{ display: "grid", gap: "4px" }}>
+        <span style={labelStyle}>Query</span>
+        <textarea
+          value={(fmt.query as string) ?? ""}
+          onInput={e =>
+            onChange({ query: (e.target as HTMLTextAreaElement).value })
+          }
+          rows={2}
+          placeholder="What should be highlighted?"
           style={{ ...inputStyle, resize: "vertical" }}
         />
       </label>
@@ -501,6 +532,9 @@ function ComplexCard({
           {def.type === "question" && (
             <QuestionOptions fmt={fmt} onChange={onUpdate} />
           )}
+          {def.type === "highlights" && (
+            <HighlightsOptions fmt={fmt} onChange={onUpdate} />
+          )}
         </Fragment>
       )}
     </div>
@@ -575,15 +609,17 @@ export function FormatsPanel({ formats, onChange }: Props) {
                       schema: { type: "object", properties: {} },
                     }
                   : def.type === "changeTracking"
-                    ? { type: "changeTracking", mode: "json" }
+                    ? { type: "changeTracking", modes: ["json"] }
                     : def.type === "attributes"
                       ? {
                           type: "attributes",
                           selectors: [{ selector: "", attribute: "href" }],
                         }
                       : def.type === "question"
-                        ? { type: "question", prompt: "" }
-                        : { type: def.type };
+                        ? { type: "question", question: "" }
+                        : def.type === "highlights"
+                          ? { type: "highlights", query: "" }
+                          : { type: def.type };
 
           return (
             <ComplexCard

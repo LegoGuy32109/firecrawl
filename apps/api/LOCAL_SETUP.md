@@ -41,6 +41,8 @@ This starts all Docker services (Redis, RabbitMQ, nuq-postgres, playwright-servi
 - `DISABLE_BLOCKLIST=true` — skips blocklist table lookups (table is empty locally)
 - `DATABASE_URL` / `DATABASE_REPLICA_URL` — pointed at localhost:5432 (same container as NuQ)
 - `INDEX_DATABASE_URL` — same localhost:5432; the index-worker always tries to connect regardless of `USE_DB_AUTHENTICATION`
+- `LOCAL_LLM_PROXY_URL=http://localhost:3001` — routes AI-backed features through the local proxy
+- `TEST_API_KEY=fc-3d478a296e59403e85c794aba81ffd2a` — pre-fills the playground API key field on refresh
 
 ## 3. Test API key
 

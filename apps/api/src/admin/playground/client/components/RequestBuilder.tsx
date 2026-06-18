@@ -74,14 +74,14 @@ const FEATURE_ENDPOINT: Record<Feature, string> = {
 export function RequestBuilder() {
   const feature = activeFeature.value;
   const body = requestBody.value;
+  const [rawMode, setRawMode] = useState(false);
+  const [rawJson, setRawJson] = useState("{}");
 
   if (feature === "scrape") {
     return <ScrapeRequestBuilder />;
   }
 
   const fields = FEATURE_FIELDS[feature];
-  const [rawMode, setRawMode] = useState(false);
-  const [rawJson, setRawJson] = useState("{}");
 
   const buildBody = (): Record<string, unknown> => {
     if (rawMode) {

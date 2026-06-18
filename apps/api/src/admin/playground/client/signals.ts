@@ -62,6 +62,15 @@ export const recordingUrl = signal<string | null>(null);
 
 const hasWindow = typeof window !== "undefined";
 const storage = hasWindow ? window.localStorage : null;
+const defaultApiKey = hasWindow
+  ? (document.getElementById("root")?.dataset.defaultApiKey ??
+    "fc-3d478a296e59403e85c794aba81ffd2a")
+  : "";
+let hydratedFeature: Feature | null = null;
+
+if (defaultApiKey) {
+  apiKey.value = defaultApiKey;
+}
 
 if (storage) {
   const persisted = loadPersistedHistory(storage);
@@ -79,9 +88,9 @@ effect(() => {
   const active = activeFeature.value;
   const drafts = requestDrafts.value;
   const nextDraft = drafts[active] ?? {};
-  const current = requestBody.value;
-  if (JSON.stringify(current) !== JSON.stringify(nextDraft)) {
+  if (hydratedFeature !== active) {
     requestBody.value = nextDraft;
+    hydratedFeature = active;
   }
 });
 
