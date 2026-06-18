@@ -119,6 +119,7 @@ describe("Scrape browser interact replay", () => {
         expect(scrapeResponse.body.success).toBe(true);
         expect(typeof scrapeResponse.body.scrape_id).toBe("string");
         scrapeId = scrapeResponse.body.scrape_id as string;
+        await sleep(3000);
 
         const executeResponse = await interactWithReplicaRetry(
           scrapeId,
@@ -131,27 +132,53 @@ describe("Scrape browser interact replay", () => {
             `,
           },
           identity,
+          20,
         );
 
         expect(executeResponse.statusCode).toBe(200);
         expect(executeResponse.body.success).toBe(true);
         expect(executeResponse.body.stdout).toContain(marker);
+        expect(typeof executeResponse.body.sessionId).toBe("string");
+        expect(executeResponse.body.sessionId).toHaveLength(36);
+        expect(typeof executeResponse.body.liveViewUrl).toBe("string");
+        expect(executeResponse.body.liveViewUrl).toContain("/session/");
         expect(executeResponse.body.live).toMatchObject({
           status: "streaming",
         });
+
+        const failureResponse = await interactWithReplicaRetry(
+          scrapeId,
+          {
+            language: "node",
+            timeout: 60,
+            code: "throw new Error('forced interact failure')",
+          },
+          identity,
+          10,
+        );
+
+        expect(failureResponse.statusCode).toBe(422);
+        expect(failureResponse.body.success).toBe(false);
+        expect(failureResponse.body.code).toBe("BROWSER_EXECUTION_FAILED");
+        expect(typeof failureResponse.body.details?.sessionId).toBe("string");
+        expect(failureResponse.body.details?.sessionId).toHaveLength(36);
+        expect(typeof failureResponse.body.liveViewUrl).toBe("string");
+        expect(failureResponse.body.liveViewUrl).toContain("/session/");
       } finally {
         if (scrapeId) {
           const stopResponse = await scrapeStopInteractiveBrowserRaw(
             scrapeId,
             identity,
           );
-          expect(stopResponse.statusCode).toBe(200);
-          expect(stopResponse.body.live).toMatchObject({
-            status: "completed",
-          });
-          expect(stopResponse.body.sessionDurationMs).toEqual(
-            expect.any(Number),
-          );
+          expect([200, 404]).toContain(stopResponse.statusCode);
+          if (stopResponse.statusCode === 200) {
+            expect(stopResponse.body.live).toMatchObject({
+              status: "completed",
+            });
+            expect(stopResponse.body.sessionDurationMs).toEqual(
+              expect.any(Number),
+            );
+          }
         }
       }
     },

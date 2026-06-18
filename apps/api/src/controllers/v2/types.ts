@@ -1447,6 +1447,8 @@ export type ResponseCore = {
   warning?: string;
   warnings?: Warning[];
   live?: LiveMetadata;
+  liveViewUrl?: string;
+  liveViewWsUrl?: string;
 };
 
 type ErrorCore = ResponseCore & {

@@ -11,7 +11,6 @@ import { FeatureNav } from "./components/FeatureNav";
 import { RequestBuilder } from "./components/RequestBuilder";
 import { ResponseHistory } from "./components/ResponseHistory";
 import { LiveView } from "./components/LiveView";
-import { RecorderPanel } from "./components/RecorderPanel";
 import { Panel } from "./components/ui/Panel";
 import { Button } from "./components/ui/Button";
 
@@ -226,9 +225,6 @@ export function App() {
           <div className="playground-grid playground-grid--wide-left">
             <Panel label="Live view">
               <LiveView />
-            </Panel>
-            <Panel label="Actions">
-              <RecorderPanel />
             </Panel>
           </div>
         </>

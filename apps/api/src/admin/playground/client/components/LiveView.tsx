@@ -1,28 +1,25 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { sessionId, interactive } from "../signals";
+import { liveViewUrl, interactive } from "../signals";
 import { Button } from "./ui/Button";
 
 type ConnectionState = "idle" | "connecting" | "streaming" | "disconnected";
 
 export function LiveView() {
-  const sid = sessionId.value;
+  const targetUrl = liveViewUrl.value;
   const isInteractive = interactive.value;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const [connState, setConnState] = useState<ConnectionState>("idle");
 
-  function connect() {
-    if (!sid) return;
+  function connect(url = targetUrl) {
+    if (!url) return;
     if (wsRef.current) {
       wsRef.current.close();
     }
 
     setConnState("connecting");
-    const wsUrl = new URL(
-      `./session/${encodeURIComponent(sid)}/view`,
-      location.href,
-    );
+    const wsUrl = new URL(url, location.href);
     wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(wsUrl.toString());
     ws.binaryType = "arraybuffer";
@@ -84,6 +81,19 @@ export function LiveView() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!targetUrl) {
+      disconnect();
+      return;
+    }
+
+    connect(targetUrl);
+
+    return () => {
+      wsRef.current?.close();
+    };
+  }, [targetUrl]);
+
   function forwardPointerEvent(e: PointerEvent) {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -130,7 +140,7 @@ export function LiveView() {
           ● {connState}
         </span>
         {connState === "idle" || connState === "disconnected" ? (
-          <Button type="button" onClick={connect} disabled={!sid}>
+          <Button type="button" onClick={() => connect()} disabled={!targetUrl}>
             Start live view
           </Button>
         ) : (

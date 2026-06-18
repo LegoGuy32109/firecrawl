@@ -6,11 +6,11 @@ import {
   requestBody,
   inflight,
   apiKey,
-  sessionId,
 } from "../signals";
 import type { Feature } from "../signals";
 import { JsonView } from "./JsonView";
 import { ScrapeRequestBuilder } from "./scrape/ScrapeRequestBuilder";
+import { InteractRequestBuilder } from "./InteractRequestBuilder";
 import { Button } from "./ui/Button";
 import { Field } from "./ui/Field";
 import {
@@ -35,6 +35,7 @@ const FEATURE_FIELDS: Record<Feature, FieldDef[]> = {
     { key: "waitFor", label: "Wait (ms)", type: "number" },
     { key: "mobile", label: "Mobile", type: "checkbox" },
   ],
+  interact: [],
   search: [
     { key: "query", label: "Query *", type: "text" },
     { key: "limit", label: "Limit", type: "number" },
@@ -65,32 +66,13 @@ const FEATURE_FIELDS: Record<Feature, FieldDef[]> = {
 
 const FEATURE_ENDPOINT: Record<Feature, string> = {
   scrape: "/v2/scrape",
+  interact: "/v2/scrape/:jobId/interact",
   search: "/v2/search",
   crawl: "/v2/crawl",
   map: "/v2/map",
   extract: "/v2/extract",
   agent: "/v2/agent",
 };
-
-export function extractReturnedSessionId(
-  data: Record<string, unknown>,
-): string | null {
-  if (typeof data.sessionId === "string") {
-    return data.sessionId;
-  }
-
-  const details = data.details;
-  if (
-    details &&
-    typeof details === "object" &&
-    !Array.isArray(details) &&
-    typeof (details as Record<string, unknown>).sessionId === "string"
-  ) {
-    return (details as Record<string, unknown>).sessionId as string;
-  }
-
-  return null;
-}
 
 export function RequestBuilder() {
   const feature = activeFeature.value;
@@ -100,6 +82,10 @@ export function RequestBuilder() {
 
   if (feature === "scrape") {
     return <ScrapeRequestBuilder />;
+  }
+
+  if (feature === "interact") {
+    return <InteractRequestBuilder />;
   }
 
   const fields = FEATURE_FIELDS[feature];
@@ -183,10 +169,6 @@ export function RequestBuilder() {
           error: text.slice(0, 2048),
           success: false,
         };
-      }
-      const returnedSessionId = extractReturnedSessionId(data);
-      if (returnedSessionId) {
-        sessionId.value = returnedSessionId;
       }
       const warnings = normalizeWarnings(data);
       const creditsUsed = extractCreditsUsed(data);

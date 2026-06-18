@@ -326,6 +326,7 @@ type FailOpts = {
   errorId?: string;
   sponsor_status?: string;
   login_url?: string;
+  liveViewUrl?: string;
 };
 
 type AsyncFailOpts<TData> = {
@@ -387,6 +388,7 @@ export function makeResponder(req: Request, res: Response): Responder {
     ...(opts.errorId ? { errorId: opts.errorId } : {}),
     ...(opts.sponsor_status ? { sponsor_status: opts.sponsor_status } : {}),
     ...(opts.login_url ? { login_url: opts.login_url } : {}),
+    ...(opts.liveViewUrl ? { liveViewUrl: opts.liveViewUrl } : {}),
   });
 
   return {

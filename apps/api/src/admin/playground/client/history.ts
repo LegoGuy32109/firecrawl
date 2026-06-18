@@ -59,6 +59,7 @@ export type StorageAdapter = Pick<
 
 const FEATURES: Feature[] = [
   "scrape",
+  "interact",
   "search",
   "crawl",
   "map",
@@ -84,6 +85,7 @@ const DEFAULT_STATE: PersistedWorkspaceState = {
 function isFeature(value: unknown): value is Feature {
   return (
     value === "scrape" ||
+    value === "interact" ||
     value === "search" ||
     value === "crawl" ||
     value === "map" ||
@@ -220,6 +222,13 @@ export function deriveTarget(
   if (feature === "search") {
     const query = requestBody.query;
     if (typeof query === "string" && query.trim()) return query.trim();
+  }
+
+  if (feature === "interact") {
+    const jobId = requestBody.jobId;
+    if (typeof jobId === "string" && jobId.trim()) {
+      return jobId.trim();
+    }
   }
 
   if (feature === "extract") {

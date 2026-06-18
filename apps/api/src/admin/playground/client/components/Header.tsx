@@ -1,6 +1,5 @@
 import { h } from "preact";
 import { apiKey } from "../signals";
-import { LLMProxyStatus } from "./LLMProxyStatus";
 import { Field } from "./ui/Field";
 
 export function Header() {
@@ -11,7 +10,6 @@ export function Header() {
     <header className="playground-header">
       <div className="playground-header__top">
         <h1 className="playground-title">Firecrawl Playground</h1>
-        <LLMProxyStatus />
       </div>
       <div className="playground-grid playground-grid--fields playground-grid--fields-3">
         <Field label="ENV">

@@ -123,6 +123,10 @@ async function captureFailureContext(
   return { pageUrl, screenshot };
 }
 
+function buildPlaygroundLiveViewUrl(browserId: string): string {
+  return `./session/${encodeURIComponent(browserId)}/view`;
+}
+
 // The replay script (buildReplayScript) throws errors prefixed
 // `Replay action #N (type):`. Parsing this lets BROWSER_EXECUTION_FAILED carry
 // the same step-index shape as SCRAPE_ACTION on replay failures.
@@ -196,6 +200,7 @@ type BrowserExecuteRequest = z.infer<typeof browserExecuteRequestSchema>;
 interface BrowserExecuteResponse {
   success: boolean;
   sessionId?: string;
+  liveViewUrl?: string;
   output?: string;
   stdout?: string;
   result?: string;
@@ -479,6 +484,7 @@ export async function scrapeInteractController(
 
   const hasError = execResult.exitCode !== 0 || execResult.killed;
   const agentOutput = "output" in execResult ? execResult.output : undefined;
+  const liveViewUrl = buildPlaygroundLiveViewUrl(session.browser_id);
 
   if (hasError) {
     // CHANGED: was 200 + success:false + no code; now 422 + EXECUTION_FAILED
@@ -502,11 +508,13 @@ export async function scrapeInteractController(
         ...(replayFailedAt ? { replayFailedAt } : {}),
         ...(stderrSnippet ? { stderrSnippet } : {}),
       },
+      liveViewUrl,
     });
   }
 
   return r.ok({
     sessionId: session.id,
+    liveViewUrl,
     ...(agentOutput ? { output: agentOutput } : {}),
     stdout: execResult.stdout,
     result: execResult.result,

@@ -44,23 +44,11 @@ type FormatDef = SimpleFormatDef | ComplexFormatDef;
 
 const SIMPLE_FORMATS: SimpleFormatDef[] = [
   { type: "markdown", label: "Markdown" },
-  { type: "html", label: "HTML" },
-  { type: "rawHtml", label: "Raw HTML" },
   { type: "links", label: "Links" },
-  { type: "images", label: "Images" },
-  { type: "summary", label: "Summary" },
-  { type: "branding", label: "Branding" },
-  { type: "audio", label: "Audio" },
-  { type: "video", label: "Video" },
 ];
 
 const COMPLEX_FORMATS: ComplexFormatDef[] = [
   { type: "screenshot", label: "Screenshot", complex: true },
-  { type: "json", label: "JSON Extract", complex: true },
-  { type: "deterministicJson", label: "Deterministic JSON", complex: true },
-  { type: "changeTracking", label: "Change Tracking", complex: true },
-  { type: "attributes", label: "Attributes", complex: true },
-  { type: "question", label: "Question / Answer", complex: true },
 ];
 
 function isEnabled(formats: FormatObj[], type: string) {

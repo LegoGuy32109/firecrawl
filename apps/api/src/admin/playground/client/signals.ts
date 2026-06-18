@@ -12,6 +12,7 @@ import {
 
 export type Feature =
   | "scrape"
+  | "interact"
   | "search"
   | "crawl"
   | "map"
@@ -55,6 +56,7 @@ export const lastVisibleDockMode = signal<Exclude<DockMode, "hide">>("left");
 export const requestRailWidth = signal<number>(420);
 export const inflight = signal<boolean>(false);
 export const sessionId = signal<string | null>(null);
+export const liveViewUrl = signal<string | null>(null);
 export const interactive = signal<boolean>(false);
 export const recording = signal<boolean>(false);
 export const actions = signal<FirecrawlAction[]>([]);
