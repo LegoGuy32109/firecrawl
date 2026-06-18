@@ -16,9 +16,9 @@ function serializeMessages(messages: Message[]): string {
 function isAuthError(output: string): boolean {
   return (
     output.includes("not logged in") ||
-    output.includes("authentication") ||
     output.includes("Login required") ||
-    output.includes("ENOENT")
+    output.includes("401 Unauthorized") ||
+    output.includes("Missing bearer or basic authentication")
   );
 }
 
@@ -30,7 +30,13 @@ export function createClaudeBackend(): LLMBackend {
       return new Promise<string>((resolve, reject) => {
         const child = spawn(
           "claude",
-          ["--output-format", "json", "--prompt", prompt],
+          [
+            "-p",
+            prompt,
+            "--output-format",
+            "json",
+            "--dangerously-skip-permissions",
+          ],
           { stdio: ["ignore", "pipe", "pipe"] },
         );
 
