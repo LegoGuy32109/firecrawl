@@ -17,6 +17,8 @@ type Props = {
   body: Record<string, unknown>;
   warnings?: Warning[];
   legacyWarning?: string;
+  activeTab?: string;
+  onActiveTabChange?: (tab: string) => void;
 };
 
 type FormatTab = {
@@ -263,7 +265,13 @@ function WarningBanner({
   );
 }
 
-export function SuccessView({ body, warnings, legacyWarning }: Props) {
+export function SuccessView({
+  body,
+  warnings,
+  legacyWarning,
+  activeTab: controlledActiveTab,
+  onActiveTabChange,
+}: Props) {
   const feature = activeFeature.value;
 
   if (feature !== "scrape") {
@@ -308,7 +316,9 @@ export function SuccessView({ body, warnings, legacyWarning }: Props) {
     activeFormatTabs[0]?.id ??
     "meta";
 
-  const [activeTab, setActiveTab] = useState(defaultTab);
+  const [internalActiveTab, setInternalActiveTab] = useState(defaultTab);
+  const activeTab = controlledActiveTab ?? internalActiveTab;
+  const setActiveTab = onActiveTabChange ?? setInternalActiveTab;
 
   const validTab =
     activeFormatTabs.some(t => t.id === activeTab) ||

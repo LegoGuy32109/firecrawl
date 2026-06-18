@@ -230,6 +230,7 @@ export async function executePromptViaBrowserAgent(
   const allOutputs: string[] = [];
   let lastSnapshotResult = initialSnapshot;
   const actionLog: string[] = [];
+  let llmStepStart: number | undefined;
 
   const browserTool = tool({
     description:
@@ -379,6 +380,7 @@ export async function executePromptViaBrowserAgent(
         ? { providerOptions: { langsmith } as Record<string, any> }
         : {}),
       prepareStep: async ({ stepNumber, messages }) => {
+        llmStepStart = Date.now();
         if (actionLog.length === 0) return {};
         return {
           messages: [
@@ -395,11 +397,23 @@ export async function executePromptViaBrowserAgent(
           ],
         };
       },
-      onStepFinish: ({ text, toolCalls }) => {
+      onStepFinish: ({ text, toolCalls, usage }) => {
+        const durationMs = llmStepStart ? Date.now() - llmStepStart : undefined;
+        llmStepStart = undefined;
         if (toolCalls?.length) {
           debugLog.add(`[Step: ${toolCalls.length} tool call(s)]`);
         }
         if (text) debugLog.add(`Assistant: ${text}`);
+        onStep?.({
+          name: "llm-step",
+          status: DiagnosticStatus.Ok,
+          ...(durationMs !== undefined ? { durationMs } : {}),
+          details: {
+            toolCalls: toolCalls?.map(tc => tc.toolName) ?? [],
+            outputTokens: usage?.outputTokens,
+            text: text || undefined,
+          },
+        });
       },
     });
 

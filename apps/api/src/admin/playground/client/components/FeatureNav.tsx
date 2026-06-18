@@ -1,5 +1,5 @@
 import { h } from "preact";
-import { activeFeature, type Feature } from "../signals";
+import { activeFeature, activeView, type Feature } from "../signals";
 import { Tab } from "./ui/Tabs";
 
 const FEATURES: Feature[] = [
@@ -28,6 +28,16 @@ export function FeatureNav() {
           </Tab>
         );
       })}
+      <span className="playground-tabs__spacer" />
+      <Tab
+        active={activeView.value === "history"}
+        className="playground-tab--history"
+        onClick={() => {
+          activeView.value = "history";
+        }}
+      >
+        History
+      </Tab>
     </nav>
   );
 }

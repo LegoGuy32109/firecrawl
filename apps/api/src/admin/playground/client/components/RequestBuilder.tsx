@@ -2,9 +2,9 @@ import { h, Fragment } from "preact";
 import { useState } from "preact/hooks";
 import {
   activeFeature,
+  historyEntries,
   requestBody,
   inflight,
-  response,
   apiKey,
 } from "../signals";
 import type { Feature } from "../signals";
@@ -12,6 +12,15 @@ import { JsonView } from "./JsonView";
 import { ScrapeRequestBuilder } from "./scrape/ScrapeRequestBuilder";
 import { Button } from "./ui/Button";
 import { Field } from "./ui/Field";
+import {
+  createPendingEntry,
+  deriveTarget,
+  extractCreditsUsed,
+  finalizeHistoryEntry,
+  insertPendingEntry,
+  makeEntryId,
+  normalizeWarnings,
+} from "../history";
 
 type FieldDef = {
   key: string;
@@ -64,6 +73,7 @@ const FEATURE_ENDPOINT: Record<Feature, string> = {
 
 export function RequestBuilder() {
   const feature = activeFeature.value;
+  const body = requestBody.value;
 
   if (feature === "scrape") {
     return <ScrapeRequestBuilder />;
@@ -72,11 +82,6 @@ export function RequestBuilder() {
   const fields = FEATURE_FIELDS[feature];
   const [rawMode, setRawMode] = useState(false);
   const [rawJson, setRawJson] = useState("{}");
-  const [formValues, setFormValues] = useState<Record<string, string>>({});
-
-  const setField = (key: string, value: string) => {
-    setFormValues(prev => ({ ...prev, [key]: value }));
-  };
 
   const buildBody = (): Record<string, unknown> => {
     if (rawMode) {
@@ -88,22 +93,29 @@ export function RequestBuilder() {
     }
     const body: Record<string, unknown> = {};
     for (const f of fields) {
-      const v = formValues[f.key] ?? "";
+      const rawValue = requestBody.value[f.key];
+      const v = rawValue ?? "";
       if (!v && f.type !== "checkbox") continue;
       if (f.type === "number") {
         const n = Number(v);
         if (!isNaN(n) && v !== "") body[f.key] = n;
       } else if (f.type === "checkbox") {
-        body[f.key] = formValues[f.key] === "true";
+        body[f.key] = rawValue === true;
       } else if (f.key === "urls") {
-        const lines = v
+        const source = Array.isArray(rawValue)
+          ? rawValue.join("\n")
+          : typeof rawValue === "string"
+            ? rawValue
+            : String(v);
+        const lines = source
           .split("\n")
           .map(s => s.trim())
           .filter(Boolean);
         if (lines.length) body[f.key] = lines;
       } else if (f.key === "schema") {
         try {
-          body[f.key] = JSON.parse(v);
+          body[f.key] =
+            typeof v === "string" && v.trim() ? JSON.parse(v) : rawValue;
         } catch {
           /* skip */
         }
@@ -118,7 +130,19 @@ export function RequestBuilder() {
     const body = buildBody();
     requestBody.value = body;
     inflight.value = true;
-    response.value = null;
+    const startedAt = Date.now();
+    const id = makeEntryId();
+    const endpoint = FEATURE_ENDPOINT[feature];
+    const pending = createPendingEntry({
+      id,
+      feature,
+      method: "POST",
+      endpoint,
+      requestBody: body,
+      target: deriveTarget(feature, body, endpoint),
+      startedAt,
+    });
+    historyEntries.value = insertPendingEntry(historyEntries.value, pending);
     try {
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
@@ -129,13 +153,47 @@ export function RequestBuilder() {
         headers,
         body: JSON.stringify(body),
       });
-      const data = await res.json();
-      response.value = { status: res.status, body: data };
+      const text = await res.text();
+      let data: Record<string, unknown>;
+      try {
+        data = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        data = {
+          error: text.slice(0, 2048),
+          success: false,
+        };
+      }
+      const warnings = normalizeWarnings(data);
+      const creditsUsed = extractCreditsUsed(data);
+      const completedAt = Date.now();
+      historyEntries.value = finalizeHistoryEntry(historyEntries.value, id, {
+        status: res.status,
+        body: data,
+        completedAt,
+        durationMs: completedAt - startedAt,
+        creditsUsed: creditsUsed ?? undefined,
+        warningCount: warnings.length,
+        warnings,
+        legacyWarning:
+          typeof data.warning === "string" ? data.warning : undefined,
+        code: typeof data.code === "string" ? data.code : undefined,
+        errorMessage: res.ok
+          ? undefined
+          : typeof data.error === "string"
+            ? data.error
+            : undefined,
+      });
     } catch (err: unknown) {
-      response.value = {
+      const completedAt = Date.now();
+      historyEntries.value = finalizeHistoryEntry(historyEntries.value, id, {
         status: 0,
-        body: { error: err instanceof Error ? err.message : String(err) },
-      };
+        errorMessage: err instanceof Error ? err.message : String(err),
+        completedAt,
+        durationMs: completedAt - startedAt,
+        body: {
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
     } finally {
       inflight.value = false;
     }
@@ -174,9 +232,12 @@ export function RequestBuilder() {
             <Field key={f.key} label={f.label}>
               {f.type === "textarea" ? (
                 <textarea
-                  value={formValues[f.key] ?? ""}
+                  value={String(body[f.key] ?? "")}
                   onInput={e =>
-                    setField(f.key, (e.target as HTMLTextAreaElement).value)
+                    (requestBody.value = {
+                      ...requestBody.value,
+                      [f.key]: (e.target as HTMLTextAreaElement).value,
+                    })
                   }
                   rows={3}
                   className="playground-textarea"
@@ -184,21 +245,27 @@ export function RequestBuilder() {
               ) : f.type === "checkbox" ? (
                 <input
                   type="checkbox"
-                  checked={formValues[f.key] === "true"}
+                  checked={body[f.key] === true}
                   onChange={e =>
-                    setField(
-                      f.key,
-                      (e.target as HTMLInputElement).checked ? "true" : "false",
-                    )
+                    (requestBody.value = {
+                      ...requestBody.value,
+                      [f.key]: (e.target as HTMLInputElement).checked,
+                    })
                   }
                   className="playground-switch"
                 />
               ) : (
                 <input
                   type={f.type === "number" ? "number" : "text"}
-                  value={formValues[f.key] ?? ""}
+                  value={body[f.key] ?? ""}
                   onInput={e =>
-                    setField(f.key, (e.target as HTMLInputElement).value)
+                    (requestBody.value = {
+                      ...requestBody.value,
+                      [f.key]:
+                        f.type === "number"
+                          ? Number((e.target as HTMLInputElement).value)
+                          : (e.target as HTMLInputElement).value,
+                    })
                   }
                   className="playground-input"
                 />

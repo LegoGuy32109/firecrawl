@@ -8,12 +8,15 @@ type Props = {
 };
 
 export function StatusPill({ httpStatus, code }: Props) {
+  const isNetworkError = httpStatus === 0;
   const isOk = httpStatus >= 200 && httpStatus < 300;
-  const className = isOk
-    ? "playground-chip playground-chip--success"
-    : httpStatus >= 400
-      ? "playground-chip playground-chip--danger"
-      : "playground-chip playground-chip--warning";
+  const className = isNetworkError
+    ? "playground-chip playground-chip--danger"
+    : isOk
+      ? "playground-chip playground-chip--success"
+      : httpStatus >= 400
+        ? "playground-chip playground-chip--danger"
+        : "playground-chip playground-chip--warning";
 
   let mismatch: string | null = null;
   if (code) {
@@ -25,7 +28,9 @@ export function StatusPill({ httpStatus, code }: Props) {
 
   return (
     <div className="playground-status">
-      <span className={className}>HTTP {httpStatus || "—"}</span>
+      <span className={className}>
+        {isNetworkError ? "Network error" : `HTTP ${httpStatus || "—"}`}
+      </span>
       {mismatch && (
         <span className="playground-status__mismatch">
           Status mismatch: {mismatch}

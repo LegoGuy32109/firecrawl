@@ -113,40 +113,6 @@ export function diagnosticsForRequest(
   };
 }
 
-const CONTROLLED_DIAGNOSTIC_STEP_NAMES = new Set([
-  "request",
-  "response",
-  "handler",
-  "job",
-  "source",
-  "sources",
-  "action",
-  "actions",
-  "warning",
-  "error",
-  "scrape",
-  "extract",
-  "query",
-  "crawl",
-  "map",
-  "browser",
-  "agent",
-  "auth",
-  "billing",
-  "rate",
-  "gating",
-  "dependency",
-  "proxy",
-  "validation",
-  "parse",
-  "compare",
-  "cleanup",
-  "generation",
-  "highlight",
-  "sitemap",
-  "dns",
-]);
-
 const CONTROLLED_DIAGNOSTIC_STATUSES: DiagnosticStep["status"][] = [
   DiagnosticStatus.Ok,
   DiagnosticStatus.Warning,
@@ -154,10 +120,6 @@ const CONTROLLED_DIAGNOSTIC_STATUSES: DiagnosticStep["status"][] = [
   DiagnosticStatus.Skipped,
   DiagnosticStatus.TimedOut,
 ];
-
-function normalizeDiagnosticStepName(name: string): string {
-  return CONTROLLED_DIAGNOSTIC_STEP_NAMES.has(name) ? name : "response";
-}
 
 function normalizeDiagnosticStepStatus(
   status: string,
@@ -179,7 +141,7 @@ function buildDiagnosticStep(
     : (step.message ?? step.messageTemplate);
 
   return {
-    name: normalizeDiagnosticStepName(step.name),
+    name: step.name,
     status: normalizeDiagnosticStepStatus(step.status),
     ...(step.code !== undefined ? { code: step.code } : {}),
     ...(step.durationMs !== undefined ? { durationMs: step.durationMs } : {}),

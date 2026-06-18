@@ -1,8 +1,17 @@
 import { h, Fragment } from "preact";
 import { useState } from "preact/hooks";
-import { requestBody, inflight, response, apiKey } from "../../signals";
+import { inflight, historyEntries, requestBody, apiKey } from "../../signals";
 import { FormatsPanel } from "./FormatsPanel";
 import { ActionsBuilder, type Action } from "./ActionsBuilder";
+import {
+  createPendingEntry,
+  deriveTarget,
+  extractCreditsUsed,
+  finalizeHistoryEntry,
+  insertPendingEntry,
+  makeEntryId,
+  normalizeWarnings,
+} from "../../history";
 
 type FormatObj = { type: string; [k: string]: unknown };
 type KVPair = { key: string; value: string };
@@ -303,7 +312,8 @@ export function ScrapeRequestBuilder() {
 
   const send = async () => {
     inflight.value = true;
-    response.value = null;
+    const startedAt = Date.now();
+    let entryId: string | null = null;
     try {
       let body = requestBody.value;
       if (rawMode) {
@@ -316,22 +326,78 @@ export function ScrapeRequestBuilder() {
         setRawError(null);
       }
 
+      entryId = makeEntryId();
+      const endpoint = "/v2/scrape";
+      const pending = createPendingEntry({
+        id: entryId,
+        feature: "scrape",
+        method: "POST",
+        endpoint,
+        requestBody: body,
+        target: deriveTarget("scrape", body, endpoint),
+        startedAt,
+      });
+      historyEntries.value = insertPendingEntry(historyEntries.value, pending);
+
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
       };
       if (apiKey.value) headers["Authorization"] = `Bearer ${apiKey.value}`;
-      const res = await fetch("/v2/scrape", {
+      const res = await fetch(endpoint, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
       });
-      const data = await res.json();
-      response.value = { status: res.status, body: data };
+      const text = await res.text();
+      let data: Record<string, unknown>;
+      try {
+        data = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        data = {
+          error: text.slice(0, 2048),
+          success: false,
+        };
+      }
+      const warnings = normalizeWarnings(data);
+      const completedAt = Date.now();
+      historyEntries.value = finalizeHistoryEntry(
+        historyEntries.value,
+        entryId,
+        {
+          status: res.status,
+          body: data,
+          completedAt,
+          durationMs: completedAt - startedAt,
+          creditsUsed: extractCreditsUsed(data) ?? undefined,
+          warningCount: warnings.length,
+          warnings,
+          legacyWarning:
+            typeof data.warning === "string" ? data.warning : undefined,
+          code: typeof data.code === "string" ? data.code : undefined,
+          errorMessage: res.ok
+            ? undefined
+            : typeof data.error === "string"
+              ? data.error
+              : text.slice(0, 2048),
+        },
+      );
     } catch (err: unknown) {
-      response.value = {
-        status: 0,
-        body: { error: err instanceof Error ? err.message : String(err) },
-      };
+      if (!entryId) {
+        throw err;
+      }
+      const completedAt = Date.now();
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      historyEntries.value = finalizeHistoryEntry(
+        historyEntries.value,
+        entryId,
+        {
+          status: 0,
+          errorMessage,
+          completedAt,
+          durationMs: completedAt - startedAt,
+          body: { error: errorMessage },
+        },
+      );
     } finally {
       inflight.value = false;
     }
