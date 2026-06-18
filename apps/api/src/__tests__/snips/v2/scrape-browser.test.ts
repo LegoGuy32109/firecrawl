@@ -5,7 +5,6 @@ import { config } from "../../../config";
 import {
   ALLOW_TEST_SUITE_WEBSITE,
   HAS_FIRE_ENGINE,
-  HAS_PLAYWRIGHT,
   TEST_PRODUCTION,
   TEST_SELF_HOST,
   TEST_SUITE_WEBSITE,
@@ -240,39 +239,6 @@ describe("Scrape browser interact replay", () => {
     scrapeTimeout,
   );
 
-  itIf(HAS_PLAYWRIGHT && ALLOW_TEST_SUITE_WEBSITE)(
-    "returns top-level live metadata and artifact URLs for local live scrape runs",
-    async () => {
-      const response = await scrapeRaw(
-        {
-          url: `${TEST_SUITE_WEBSITE}?playgroundLive=${crypto.randomUUID()}`,
-          origin: "website-replay-test",
-          __playgroundLive: true,
-          maxAge: 0,
-        },
-        identity,
-      );
-
-      expect(response.statusCode).toBe(200);
-      expect(response.body.success).toBe(true);
-      expect(response.body.live).toMatchObject({
-        mode: "single",
-        status: expect.stringMatching(/^(completed|warning)$/),
-      });
-      expect(response.body.live.screenshotUrl).toContain("/v2/live/scrape/");
-      expect(response.body.data.metadata.contentType).toBeDefined();
-
-      const screenshotResponse = await request(TEST_API_URL).get(
-        response.body.live.screenshotUrl,
-      );
-      expect(screenshotResponse.statusCode).toBe(200);
-      expect(screenshotResponse.headers["content-type"]).toContain(
-        "image/jpeg",
-      );
-      expect(screenshotResponse.body.length).toBeGreaterThan(0);
-    },
-    scrapeTimeout,
-  );
 
   itIf(canRunReplayHappyPath)(
     "keeps a non-blank replay tab in the foreground for follow-up execs",

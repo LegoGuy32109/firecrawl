@@ -757,6 +757,7 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
     const remainingEngines = [...fallbackList];
     let enginePromises: EngineBundlePromise[] = [];
     const enginesAttempted: string[] = [];
+    const engineErrors: Map<string, string> = new Map();
 
     meta.abort.throwIfAborted();
 
@@ -911,6 +912,14 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
               );
             }
 
+            // Record the engine failure for diagnostic steps
+            engineErrors.set(
+              error.engine,
+              error.error instanceof Error
+                ? error.error.message
+                : String(error.error),
+            );
+
             // Filter out the failed engine
             enginePromises = enginePromises.filter(
               x => x.engine !== error.engine,
@@ -1059,6 +1068,13 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
               }
           : {}),
         postprocessorsUsed: engineResult.postprocessorsUsed,
+        engineAttempts: enginesAttempted.map(engine => ({
+          engine,
+          success: engine === result.engine,
+          ...(engineErrors.has(engine)
+            ? { error: engineErrors.get(engine) }
+            : {}),
+        })),
       },
     };
 

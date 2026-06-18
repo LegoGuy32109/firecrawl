@@ -791,10 +791,6 @@ export const scrapeOptions = strictWithMessage(baseScrapeOptions)
 
 export type BaseScrapeOptions = z.infer<typeof baseScrapeOptions>;
 
-const browserLiveScrapeOptions = baseScrapeOptions.extend({
-  __playgroundLive: z.boolean().optional(),
-});
-
 export type ScrapeOptions = BaseScrapeOptions;
 
 export type UploadedParseFileKind = "html" | "pdf" | "document";
@@ -927,7 +923,7 @@ export const agentRequestSchema = z.strictObject({
 export type AgentRequest = z.infer<typeof agentRequestSchema>;
 // export type AgentRequestInput = z.input<typeof agentRequestSchema>;
 
-const scrapeRequestSchemaBase = browserLiveScrapeOptions.extend({
+const scrapeRequestSchemaBase = baseScrapeOptions.extend({
   url: URL,
   origin: z.string().optional().prefault("api"),
   integration: integrationSchema.optional().transform(val => val || null),
@@ -951,10 +947,10 @@ export type ScrapeRequest = z.infer<typeof scrapeRequestSchema>;
 // This is needed because zod v4's .strict() changes type inference for optional fields
 // We explicitly make formats optional since it has .prefault() which should make it optional
 export type ScrapeRequestInput = Omit<
-  z.input<typeof browserLiveScrapeOptions>,
+  z.input<typeof baseScrapeOptions>,
   "formats"
 > & {
-  formats?: z.input<typeof browserLiveScrapeOptions>["formats"];
+  formats?: z.input<typeof baseScrapeOptions>["formats"];
 } & {
   url: z.input<typeof URL>;
   origin?: string;
@@ -1012,7 +1008,7 @@ export const parseRequestSchema = strictWithMessage(parseRequestSchemaBase)
 export type ParseRequest = z.infer<typeof parseRequestSchema>;
 export type ParseRequestInput = z.input<typeof parseRequestSchemaBase>;
 
-const batchScrapeRequestSchemaBase = browserLiveScrapeOptions.extend({
+const batchScrapeRequestSchemaBase = baseScrapeOptions.extend({
   urls: URL.array().min(1),
   origin: z.string().optional().prefault("api"),
   integration: integrationSchema.optional().transform(val => val || null),
@@ -1037,7 +1033,7 @@ export const batchScrapeRequestSchema = strictWithMessage(
   .transform(extractTransformRequired);
 
 const batchScrapeRequestSchemaNoURLValidationBase =
-  browserLiveScrapeOptions.extend({
+  baseScrapeOptions.extend({
     urls: z.string().array().min(1),
     origin: z.string().optional().prefault("api"),
     integration: integrationSchema.optional().transform(val => val || null),
@@ -1065,10 +1061,10 @@ export type BatchScrapeRequest = z.infer<typeof batchScrapeRequestSchema>;
 // Use z.input on the base schema before strict() to preserve optional fields with defaults
 // We explicitly make formats optional since it has .prefault() which should make it optional
 export type BatchScrapeRequestInput = Omit<
-  z.input<typeof browserLiveScrapeOptions>,
+  z.input<typeof baseScrapeOptions>,
   "formats"
 > & {
-  formats?: z.input<typeof browserLiveScrapeOptions>["formats"];
+  formats?: z.input<typeof baseScrapeOptions>["formats"];
 } & {
   urls: z.input<typeof URL>[];
   origin?: string;
@@ -1120,8 +1116,8 @@ const crawlRequestSchemaBase = crawlerOptions.extend({
   url: URL,
   origin: z.string().optional().prefault("api"),
   integration: integrationSchema.optional().transform(val => val || null),
-  scrapeOptions: browserLiveScrapeOptions.prefault(() =>
-    browserLiveScrapeOptions.parse({}),
+  scrapeOptions: baseScrapeOptions.prefault(() =>
+    baseScrapeOptions.parse({}),
   ),
   webhook: webhookSchema.optional(),
   limit: z.number().prefault(10000),
@@ -1296,6 +1292,11 @@ export type Document = {
     postprocessorsUsed?: string[];
     live?: LiveMetadata;
     indexId?: string; // ID used to store the document in the index (GCS)
+    engineAttempts?: Array<{
+      engine: string;
+      success: boolean;
+      error?: string;
+    }>;
     concurrencyLimited?: boolean;
     concurrencyQueueDurationMs?: number;
     // [key: string]: string | string[] | number | { smartScrape: number; other: number; total: number } | undefined;
@@ -2053,7 +2054,7 @@ export const searchRequestSchema = z
     // scrapeURL. Falls back to the provider snippet when the URL isn't indexed.
     highlights: z.boolean().optional().prefault(false),
     __searchPreviewToken: z.string().optional(),
-    scrapeOptions: browserLiveScrapeOptions
+    scrapeOptions: baseScrapeOptions
       .extend({
         formats: z
           .preprocess(

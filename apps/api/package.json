@@ -98,7 +98,6 @@
     "@sentry/cli": "^2.58.2",
     "@sentry/node": "^10.27.0",
     "@types/ws": "^8.5.12",
-    "@uiw/react-json-view": "2.0.0-alpha.43",
     "@x402/core": "^2.4.0",
     "@x402/evm": "^2.4.0",
     "@x402/express": "^2.4.0",

@@ -30,7 +30,6 @@ import {
   BrowserServiceCreateResponse,
   BrowserServiceDeleteResponse,
 } from "../../lib/scrape-interact/browser-service-client";
-import { browserLiveViewPath, browserLiveWsPath } from "../../lib/live";
 import {
   ScrapeContextRow,
   buildReplayContextFromScrape,
@@ -65,7 +64,6 @@ import {
 import { autumnService } from "../../services/autumn/autumn.service";
 import { applyAgentAuthDiscoveryHeader } from "../../lib/agent-auth-discovery";
 import { makeResponder } from "./response-enveloper";
-import type { LiveMetadata } from "./types";
 import {
   BillingError,
   BrowserError,
@@ -111,9 +109,6 @@ type BrowserExecuteRequest = z.infer<typeof browserExecuteRequestSchema>;
 
 interface BrowserExecuteResponse {
   success: boolean;
-  liveViewUrl?: string;
-  interactiveLiveViewUrl?: string;
-  live?: LiveMetadata;
   output?: string;
   stdout?: string;
   result?: string;
@@ -127,21 +122,7 @@ interface BrowserDeleteResponse {
   success: boolean;
   sessionDurationMs?: number;
   creditsBilled?: number;
-  live?: LiveMetadata;
   error?: string;
-}
-
-function buildBrowserLive(
-  sessionId: string,
-  status: LiveMetadata["status"],
-): LiveMetadata {
-  return {
-    mode: "single",
-    status,
-    sessionId,
-    liveViewUrl: browserLiveViewPath(sessionId),
-    liveViewWsUrl: browserLiveWsPath(sessionId),
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -413,9 +394,6 @@ export async function scrapeInteractController(
   }
 
   return r.ok({
-    liveViewUrl: session.cdp_path,
-    interactiveLiveViewUrl: session.cdp_interactive_path,
-    live: buildBrowserLive(session.id, "streaming"),
     ...(agentOutput ? { output: agentOutput } : {}),
     stdout: execResult.stdout,
     result: execResult.result,
@@ -487,9 +465,7 @@ export async function scrapeStopInteractiveBrowserController(
     logger.info("Session already destroyed by another path, skipping billing", {
       sessionId: session.id,
     });
-    return r.ok({
-      live: buildBrowserLive(session.id, "completed"),
-    });
+    return r.ok({});
   }
 
   const wallClockMs = Date.now() - new Date(session.created_at).getTime();
@@ -547,7 +523,6 @@ export async function scrapeStopInteractiveBrowserController(
   return r.ok({
     sessionDurationMs: durationMs,
     creditsBilled,
-    live: buildBrowserLive(session.id, "completed"),
   });
 }
 
