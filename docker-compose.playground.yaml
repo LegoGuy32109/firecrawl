@@ -16,6 +16,24 @@
 # convention used by the playground client and existing tests.)
 
 services:
+  replay-fault:
+    # Minimal stateful HTTP server for F5a/F5b CLI tests.
+    # Serves /replay-fault/element and /replay-fault/route, each keyed by
+    # ?token=<uuid>. Visit counts reset when the container restarts, so use a
+    # fresh token per test run.
+    build:
+      context: apps/test-site
+      dockerfile_inline: |
+        FROM node:22-alpine
+        WORKDIR /app
+        COPY replay-fault-server.mjs .
+        EXPOSE 4322
+        CMD ["node", "replay-fault-server.mjs", "4322"]
+    ports:
+      - "4322:4322"
+    networks:
+      - backend
+
   nuq-postgres:
     # initdb runs every .sql in /docker-entrypoint-initdb.d in alpha order on
     # first DB creation. nuq-postgres' Dockerfile already installs 010-nuq.sql
@@ -32,6 +50,10 @@ services:
       retries: 30
       start_period: 10s
 
+  playwright-service:
+    environment:
+      ALLOW_LOCAL_WEBHOOKS: "true"
+
   api:
     environment:
       # Persistence ON so /v2/scrape writes a `scrapes` row that
@@ -47,6 +69,7 @@ services:
       DISABLE_BLOCKLIST: "true"
       BULL_AUTH_KEY: "playground-local"
       ALLOW_LOCAL_WEBHOOKS: "true"
+      TEST_SUITE_SELF_HOSTED: "true"
     depends_on:
       nuq-postgres:
         condition: service_healthy

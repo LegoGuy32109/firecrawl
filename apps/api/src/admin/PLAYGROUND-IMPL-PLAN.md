@@ -25,7 +25,7 @@ Interview-confirmed decisions recorded here.
 ### Already done
 
 - `playwright-service-ts/api.ts` — `POST /browsers`, `DELETE /browsers/:id`, `GET /browsers/:id/view`, `POST /browsers/:id/exec` all implemented with full session lifecycle
-- `scraper/scrapeURL/engines/playwright/cdp.ts` — `scrapeURLWithPlaywrightCDP` handler implemented (actions, screenshots, mobile, location, `__playgroundLive` flag)
+- `scraper/scrapeURL/engines/playwright/cdp.ts` — `scrapeURLWithPlaywrightCDP` handler implemented (actions, screenshots, mobile, location)
 - `engines/index.ts` — `playwright;cdp` in Engine union, handlers, feature flags
 - `src/__tests__/snips/v2/scrape-playwright-cdp.test.ts` — test file exists, gated on `HAS_LOCAL_PLAYWRIGHT_NO_FIRE_ENGINE`
 - `lib/browser-sessions.ts` — full session CRUD (local Map + DB-backed)

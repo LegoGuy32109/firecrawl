@@ -332,6 +332,106 @@ curl -sS -X DELETE "http://localhost:3002/v2/scrape/$JOB_ID/interact" -H "$AUTH"
 
 ---
 
+### Test F5a — Replay fault: element disappears between scrape and interact
+
+Verifies that when a DOM element is present at scrape time but removed before
+the interact replay runs, the error envelope captures `pageUrl` and `screenshot`
+so the developer can see exactly what the page looked like when the click failed.
+
+The `replay-fault` container (`http://replay-fault:4322`) serves a button on
+visit 1 and removes it on visit 2+, keyed by `?token=`. Using a unique token
+per run guarantees visit 1 is the scrape and visit 2 is the interact.
+
+```bash
+# Generate a unique token so visit counts start fresh
+F5A_TOKEN="f5a-$(date +%s)"
+
+# Step 1: scrape — visit 1 confirms button is present in markdown
+curl -sS -X POST http://localhost:3002/v2/scrape \
+  -H 'Content-Type: application/json' -H "$AUTH" \
+  -d "{\"url\": \"http://replay-fault:4322/replay-fault/element?token=${F5A_TOKEN}\", \"origin\": \"website\"}" \
+  > /tmp/F5a-scrape.json
+
+jq '{success, scrape_id, button_visible: (.data.markdown | test("Click me"))}' /tmp/F5a-scrape.json
+F5A_ID=$(jq -r '.scrape_id' /tmp/F5a-scrape.json)
+
+# Step 2: interact — visit 2 has no button; click must fail
+curl -sS -X POST "http://localhost:3002/v2/scrape/${F5A_ID}/interact" \
+  -H 'Content-Type: application/json' -H "$AUTH" \
+  -d "{\"code\": \"await page.goto('http://replay-fault:4322/replay-fault/element?token=${F5A_TOKEN}'); await page.click('#replay-btn');\"}" \
+  > /tmp/F5a-interact.json
+
+jq '{
+  success, code, error,
+  pageUrl: .details.pageUrl,
+  screenshotLen: (.details.screenshot | length // 0)
+}' /tmp/F5a-interact.json
+```
+
+PASS:
+- Scrape: `success: true`, `button_visible: true`, `scrape_id` is non-null
+- Interact: `success: false`
+- `code: "BROWSER_EXECUTION_FAILED"`
+- `error` contains `"#replay-btn"` (Playwright waiting for the missing selector)
+- **`pageUrl`** is `"http://replay-fault:4322/replay-fault/element?token=f5a-..."` ← proves which page was open when the click failed
+- **`screenshotLen > 1000`** ← screenshot captured showing the page without the button
+
+Cleanup:
+```bash
+curl -sS -X DELETE "http://localhost:3002/v2/scrape/${F5A_ID}/interact" -H "$AUTH" > /dev/null
+```
+
+---
+
+### Test F5b — Replay fault: route removed between scrape and interact
+
+Verifies that when a URL returns 200 at scrape time but 404 on replay
+navigation, the error envelope captures `pageUrl` and `screenshot` of the
+404 page so the developer knows the route was gone — not that the element was
+wrong.
+
+The `replay-fault` server returns 200 on visit 1 and 404 on visit 2+ for
+`/replay-fault/route`.
+
+```bash
+F5B_TOKEN="f5b-$(date +%s)"
+
+# Step 1: scrape — visit 1 is 200 OK
+curl -sS -X POST http://localhost:3002/v2/scrape \
+  -H 'Content-Type: application/json' -H "$AUTH" \
+  -d "{\"url\": \"http://replay-fault:4322/replay-fault/route?token=${F5B_TOKEN}\", \"origin\": \"website\"}" \
+  > /tmp/F5b-scrape.json
+
+jq '{success, scrape_id, title: .data.metadata.title}' /tmp/F5b-scrape.json
+F5B_ID=$(jq -r '.scrape_id' /tmp/F5b-scrape.json)
+
+# Step 2: interact — visit 2 returns 404; waiting for original content must time out
+curl -sS -X POST "http://localhost:3002/v2/scrape/${F5B_ID}/interact" \
+  -H 'Content-Type: application/json' -H "$AUTH" \
+  -d "{\"code\": \"await page.goto('http://replay-fault:4322/replay-fault/route?token=${F5B_TOKEN}'); await page.waitForSelector('#visit-count', {timeout: 5000});\"}" \
+  > /tmp/F5b-interact.json
+
+jq '{
+  success, code, error,
+  pageUrl: .details.pageUrl,
+  screenshotLen: (.details.screenshot | length // 0)
+}' /tmp/F5b-interact.json
+```
+
+PASS:
+- Scrape: `success: true`, `title: "Replay Fault — Route"`, `scrape_id` is non-null
+- Interact: `success: false`
+- `code: "BROWSER_EXECUTION_FAILED"`
+- **`pageUrl`** is `"http://replay-fault:4322/replay-fault/route?token=f5b-..."` ← proves which URL was open (the now-404 route)
+- **`screenshotLen > 1000`** ← screenshot captured showing the 404 page
+
+Cleanup:
+```bash
+curl -sS -X DELETE "http://localhost:3002/v2/scrape/${F5B_ID}/interact" -H "$AUTH" > /dev/null
+```
+
+---
+
 ## Section C — Final teardown
 
 ```bash
@@ -342,7 +442,7 @@ docker compose -f docker-compose.yaml -f docker-compose.playground.yaml down
 
 ## Reporting (under 600 words)
 
-For each test (S1-S4, F1-F4):
+For each test (S1-S4, F1-F4, F5a-F5b):
 - PASS / FAIL
 - The verbatim output from the `jq` block
 - If FAIL: which specific criterion didn't match, and your best hypothesis for
@@ -354,6 +454,9 @@ Then summarize:
   screenshots may be untrustworthy.
 - **Envelope coverage** (Section B): are all four customer-visible failure
   modes returning the rich envelope?
+- **Real-world replay faults** (F5a/F5b): did the `replay-fault` container
+  correctly simulate element-disappears and route-removed scenarios, and did
+  the API return `pageUrl` + `screenshot` in both cases?
 - **Concerns about demo-readiness**: anything in `docker compose logs api
   --tail 40` that looks like a real error?
 
@@ -366,5 +469,7 @@ Then summarize:
 - If the stack fails to start, dump logs and stop.
 - Do NOT run the broader Firecrawl test suite (e.g., snips, e2e). Only the
   tests in this document.
-- Order: run S1-S4 first (engine sanity), then F1-F4 (envelope verification).
-  Failing engine sanity invalidates failure tests.
+- Order: run S1-S4 first (engine sanity), then F1-F4 (envelope verification),
+  then F5a-F5b (real-world replay faults). Failing engine sanity invalidates
+  the failure tests. F5a/F5b require the `replay-fault` container (included in
+  the playground stack) and use a unique `?token=` per run — never reuse tokens.

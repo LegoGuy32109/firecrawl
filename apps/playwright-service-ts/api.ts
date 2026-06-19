@@ -251,7 +251,6 @@ interface UrlModel {
     languages?: string[];
   };
   actions?: ScrapeAction[];
-  __playgroundLive?: boolean;
 }
 
 interface BrowserCreateRequest {
@@ -1619,7 +1618,6 @@ async function handleScrape(req: Request, res: Response) {
     mobile = false,
     location,
     actions = [],
-    __playgroundLive = false,
   }: UrlModel = req.body;
 
   console.log(`================= Scrape Request =================`);
@@ -1669,19 +1667,6 @@ async function handleScrape(req: Request, res: Response) {
   let requestContext: BrowserContext | null = null;
   let securityState: ContextSecurityState | null = null;
   let page: Page | null = null;
-  const scrapeId = crypto.randomUUID();
-  const liveCaptureEnabled = __playgroundLive === true;
-  let liveResponse:
-    | {
-        live?: ReturnType<typeof buildLiveMetadata>;
-        warnings?: Array<{
-          code: string;
-          message: string;
-          details?: Record<string, unknown>;
-        }>;
-      }
-    | undefined;
-  let pageVideo: ReturnType<Page["video"]> | null = null;
 
   try {
     // Extract user-agent from request headers (case-insensitive) so it can
@@ -1698,9 +1683,7 @@ async function handleScrape(req: Request, res: Response) {
       userAgentOverride,
       mobile,
       location,
-      liveCaptureEnabled
-        ? path.join(serviceArtifactRoot, "scrape", scrapeId)
-        : undefined,
+      undefined,
       screenshot_viewport,
     );
     requestContext = contextBundle.context;
@@ -1807,60 +1790,6 @@ async function handleScrape(req: Request, res: Response) {
       screenshotData = screenshotBuffer.toString("base64");
     }
 
-    if (liveCaptureEnabled) {
-      pageVideo = page.video();
-      try {
-        await ensureDir(path.join(serviceArtifactRoot, "scrape", scrapeId));
-        const screenshotPath = scrapeSessionArtifactPath(
-          scrapeId,
-          "final.jpeg",
-        );
-        await page.screenshot({
-          type: "jpeg",
-          quality: screenshot_quality ?? 80,
-          fullPage: full_page_screenshot,
-          path: screenshotPath,
-        });
-        scrapeArtifacts.set(scrapeId, {
-          artifactDir: path.join(serviceArtifactRoot, "scrape", scrapeId),
-          screenshotPath,
-        });
-        liveResponse = {
-          live: buildLiveMetadata("scrape", scrapeId, "completed", {
-            screenshotUrl: apiScrapeArtifactPath(scrapeId, "final.jpeg"),
-          }),
-          warnings: [],
-        };
-      } catch (error) {
-        liveResponse = {
-          live: buildLiveMetadata("scrape", scrapeId, "warning", {
-            warning: "Live capture is unavailable for this request.",
-            warnings: [
-              {
-                code: "LIVE_CAPTURE_UNAVAILABLE",
-                message: "Live capture is unavailable for this request.",
-                details: {
-                  dependency: "browser-service",
-                  reason:
-                    error instanceof Error ? error.message : String(error),
-                },
-              },
-            ],
-          }),
-          warnings: [
-            {
-              code: "LIVE_CAPTURE_UNAVAILABLE",
-              message: "Live capture is unavailable for this request.",
-              details: {
-                dependency: "browser-service",
-                reason: error instanceof Error ? error.message : String(error),
-              },
-            },
-          ],
-        };
-      }
-    }
-
     if (!pageError) {
       console.log(`✅ Scrape successful!`);
     } else {
@@ -1869,8 +1798,6 @@ async function handleScrape(req: Request, res: Response) {
       );
     }
 
-    liveResponse = liveResponse ?? undefined;
-
     const responseBody = {
       content: result.content,
       pageStatusCode: result.status,
@@ -1878,72 +1805,7 @@ async function handleScrape(req: Request, res: Response) {
       ...(pageError && { pageError }),
       ...(screenshotData !== undefined && { screenshot: screenshotData }),
       ...(actionResults.length > 0 && { actionResults }),
-      ...(liveResponse?.live ? { live: liveResponse.live } : {}),
-      ...(liveResponse?.warnings && liveResponse.warnings.length > 0
-        ? { warnings: liveResponse.warnings }
-        : {}),
     };
-
-    if (liveCaptureEnabled) {
-      await page.close().catch(() => {});
-      page = null;
-      if (requestContext) {
-        await requestContext.close().catch(() => {});
-        requestContext = null;
-      }
-      if (pageVideo) {
-        try {
-          const videoPath = await pageVideo.path();
-          const videoDest = scrapeSessionArtifactPath(
-            scrapeId,
-            "recording.webm",
-          );
-          await rm(videoDest, { force: true }).catch(() => {});
-          await copyFile(videoPath, videoDest);
-          scrapeArtifacts.set(scrapeId, {
-            artifactDir: path.join(serviceArtifactRoot, "scrape", scrapeId),
-            screenshotPath: scrapeSessionArtifactPath(scrapeId, "final.jpeg"),
-            recordingPath: videoDest,
-          });
-          responseBody.live = buildLiveMetadata(
-            "scrape",
-            scrapeId,
-            "completed",
-            {
-              screenshotUrl: apiScrapeArtifactPath(scrapeId, "final.jpeg"),
-              recordingUrl: apiScrapeArtifactPath(scrapeId, "recording.webm"),
-            },
-          );
-        } catch (error) {
-          responseBody.live = buildLiveMetadata("scrape", scrapeId, "warning", {
-            screenshotUrl: apiScrapeArtifactPath(scrapeId, "final.jpeg"),
-            warning: "Recording artifact capture failed.",
-            warnings: [
-              {
-                code: "LIVE_RECORDING_FAILED",
-                message: "Recording artifact capture failed.",
-                details: {
-                  scrapeId,
-                  reason:
-                    error instanceof Error ? error.message : String(error),
-                },
-              },
-            ],
-          });
-          responseBody.warnings = [
-            ...(responseBody.warnings ?? []),
-            {
-              code: "LIVE_RECORDING_FAILED",
-              message: "Recording artifact capture failed.",
-              details: {
-                scrapeId,
-                reason: error instanceof Error ? error.message : String(error),
-              },
-            },
-          ];
-        }
-      }
-    }
 
     return res.json(responseBody);
   } catch (error) {

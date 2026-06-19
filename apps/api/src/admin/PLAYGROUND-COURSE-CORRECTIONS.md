@@ -11,7 +11,7 @@ This document is now the authoritative course-correction plan. Older specs in th
 ## Executive Decisions
 
 1. **Live/session routes are admin-only.** Remove public `/v2/live/*` routes. Playground live view, artifacts, and recorder/session routes live under `/admin/:BULL_AUTH_KEY/playground/*`.
-2. **`__playgroundLive` is not public API.** Public v2 schemas should not accept it. Use admin middleware/internal metadata to request playground-only live capture.
+2. **Private scrape live flags are not public API.** Public v2 schemas should not accept them. Use admin middleware/internal metadata to request playground-only live capture.
 3. **Browser service stateful endpoints require auth.** Enforce `BROWSER_SERVICE_API_KEY` on `/browsers*`, artifact endpoints, and the browser live WS.
 4. **`playwright;cdp` should steal local traffic.** All local deployments with Playwright configured should prefer the new engine over legacy `playwright`. This is intentional.
 5. **`mobile` and `location` are best-effort locally.** Specs that call these deferred are outdated. Keep support, but surface warnings/diagnostics if behavior is partial.
@@ -48,7 +48,7 @@ WS  /v2/live/browser/:sessionId/ws
 
 Also update `apps/api/src/lib/live.ts`, which currently emits `/v2/live/...` paths.
 
-### Public `__playgroundLive` Still Exists
+### Public Scrape Live Flag Still Exists
 
 File: `apps/api/src/controllers/v2/types.ts`
 
@@ -56,7 +56,7 @@ Current schema accepts:
 
 ```ts
 const browserLiveScrapeOptions = baseScrapeOptions.extend({
-  __playgroundLive: z.boolean().optional(),
+  privateScrapeLive: z.boolean().optional(),
 });
 ```
 
@@ -193,7 +193,7 @@ Implementation:
 
 ```ts
 type PlaygroundInternalScrapeOptions = ScrapeOptions & {
-  __playgroundLive?: boolean;
+  privateScrapeLive?: boolean;
 };
 ```
 
@@ -212,12 +212,12 @@ declare global {
 ```
 
 5. Admin playground scrape route should set `req.playground.live = true` and call scrape internals, or invoke the browser/CDP service directly for live preview.
-6. Public `/v2/scrape` should reject or ignore `__playgroundLive`. Because v2 schemas are strict, removing the field should make public requests fail as bad request.
+6. Public `/v2/scrape` should reject or ignore private scrape live flags. Because v2 schemas are strict, removing the field should make public requests fail as bad request.
 
 Tests:
 
 - Add public guard test to `apps/api/src/__tests__/snips/v2/scrape-playwright-cdp.test.ts` or a new `scrape-playground-live-guard.test.ts`.
-- Assert `POST /v2/scrape` with `__playgroundLive: true` does not activate live capture. Prefer asserting strict-schema rejection.
+- Assert `POST /v2/scrape` with a private scrape live flag does not activate live capture. Prefer asserting strict-schema rejection.
 
 Command:
 
@@ -539,7 +539,7 @@ File: `apps/api/src/__tests__/snips/v2/scrape-playground-live-guard.test.ts`
 Case:
 
 ```text
-POST /v2/scrape with __playgroundLive:true -> bad request, no live metadata
+POST /v2/scrape with private scrape live flag -> bad request, no live metadata
 ```
 
 #### Admin Playground Tests
@@ -594,7 +594,7 @@ If no service harness exists, start with API/admin route tests plus a TODO for d
 Do first.
 
 - remove public `/v2/live/*`
-- remove public `__playgroundLive`
+- remove public private scrape live flag
 - browser-service auth
 - admin WS proxy path fix
 - base path/global fix in playground client
@@ -631,7 +631,7 @@ If implementation pressure is high, PR A and PR B can be combined, but do not sh
 The course correction is complete when:
 
 1. `/v2/live/*` routes no longer exist.
-2. Public `/v2/scrape` does not accept `__playgroundLive`.
+2. Public `/v2/scrape` does not accept private scrape live flags.
 3. Browser service stateful endpoints and WS require `BROWSER_SERVICE_API_KEY` when configured.
 4. Admin playground session/live routes work through `/admin/:BULL_AUTH_KEY/playground/*`.
 5. `playwright;cdp` is preferred locally and calls `PLAYWRIGHT_CDP_URL` / `/scrape-cdp`.

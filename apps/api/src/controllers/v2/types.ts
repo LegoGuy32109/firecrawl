@@ -58,7 +58,11 @@ export const URL = z.preprocess(
         ) {
           return true;
         }
-        if (/^https?:\/\/test-site(:\d+)?([\/?#]|$)/i.test(x as string)) {
+        if (
+          /^https?:\/\/(test-site|replay-fault)(:\d+)?([\/?#]|$)/i.test(
+            x as string,
+          )
+        ) {
           return true;
         }
       }
@@ -70,7 +74,9 @@ export const URL = z.preprocess(
       if (
         config.TEST_SUITE_SELF_HOSTED &&
         config.ALLOW_LOCAL_WEBHOOKS &&
-        /^https?:\/\/test-site(:\d+)?([\/?#]|$)/i.test(x as string)
+        /^https?:\/\/(test-site|replay-fault)(:\d+)?([\/?#]|$)/i.test(
+          x as string,
+        )
       ) {
         return true;
       }

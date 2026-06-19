@@ -38,8 +38,15 @@ export function LiveView() {
       } else if (typeof event.data === "string") {
         try {
           const msg = JSON.parse(event.data);
-          if (msg.method === "Page.screencastFrame" && msg.params?.data) {
-            const bytes = atob(msg.params.data);
+          const frameData =
+            msg.type === "frame" && typeof msg.data === "string"
+              ? msg.data
+              : msg.method === "Page.screencastFrame" &&
+                  typeof msg.params?.data === "string"
+                ? msg.params.data
+                : null;
+          if (frameData) {
+            const bytes = atob(frameData);
             const arr = new Uint8Array(bytes.length);
             for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
             blob = new Blob([arr], { type: "image/jpeg" });

@@ -83,11 +83,11 @@ branch for playground purposes and are not part of the upstream public API.
 
 Also remove import of `browserLiveViewPath` / `buildBrowserLive` if they become unused.
 
-#### Remove `__playgroundLive` from public schema
+#### Remove private scrape live flag from public schema
 
 `apps/api/src/controllers/v2/types.ts`
 
-- Remove `browserLiveScrapeOptions` (the schema extension that adds `__playgroundLive`)
+- Remove `browserLiveScrapeOptions` (the schema extension that adds the private scrape live flag)
 - Make `scrapeRequestSchemaBase` and `batchScrapeRequestSchemaBase` extend
   `baseScrapeOptions` directly
 - Remove every reference to `browserLiveScrapeOptions`
@@ -141,7 +141,7 @@ GET /v2/live/scrape/test/artifacts/final.jpeg → 404
 New file: `apps/api/src/__tests__/snips/v2/scrape-playground-live-guard.test.ts`
 
 ```
-POST /v2/scrape with __playgroundLive: true → 400 (strict schema rejects unknown field)
+POST /v2/scrape with the private scrape live flag → 400 (strict schema rejects unknown field)
 ```
 
 Extend `apps/api/src/admin/__tests__/playground.test.ts`:
