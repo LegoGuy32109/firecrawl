@@ -2,17 +2,14 @@ import { h } from "preact";
 import { useState } from "preact/hooks";
 import { activeFeature, openInInteract, type Feature } from "../signals";
 import { JsonView } from "./JsonView";
-import { DiagnosticsWaterfall } from "./DiagnosticsWaterfall";
+import {
+  DiagnosticsWaterfall,
+  type DiagnosticStep,
+} from "./DiagnosticsWaterfall";
 import { toImageSrc } from "../imageSrc";
 import { Button } from "./ui/Button";
 
 type Warning = { code: string; message: string; details?: unknown };
-type DiagnosticStep = {
-  name: string;
-  status: string;
-  code?: string;
-  durationMs?: number;
-};
 
 type Props = {
   body: Record<string, unknown>;

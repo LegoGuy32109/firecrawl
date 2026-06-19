@@ -1,6 +1,6 @@
 import { h } from "preact";
 
-type DiagnosticStep = {
+export type DiagnosticStep = {
   name: string;
   status: string;
   code?: string;

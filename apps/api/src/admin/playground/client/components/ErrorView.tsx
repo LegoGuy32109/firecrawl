@@ -1,15 +1,11 @@
 import { h } from "preact";
 import { explainError, parseErrorCode } from "../../../../lib/error-catalog";
-import { DiagnosticsWaterfall } from "./DiagnosticsWaterfall";
+import {
+  DiagnosticsWaterfall,
+  type DiagnosticStep,
+} from "./DiagnosticsWaterfall";
 import { JsonView } from "./JsonView";
 import { Button } from "./ui/Button";
-
-type DiagnosticStep = {
-  name: string;
-  status: string;
-  code?: string;
-  durationMs?: number;
-};
 
 type Props = {
   body: Record<string, unknown>;

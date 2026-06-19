@@ -721,6 +721,7 @@ async function createSessionForScrape(
     {},
   );
   const integration = req.body?.integration ?? null;
+  const zdrForced = getScrapeZDR(req.acuc?.flags) === "forced";
 
   if (!config.BROWSER_SERVICE_URL) {
     return {
@@ -971,7 +972,7 @@ async function createSessionForScrape(
       target_hint: "Interact session",
       origin: req.body?.origin ?? "api",
       integration: integration ?? null,
-      zeroDataRetention: false,
+      zeroDataRetention: zdrForced,
       api_key_id: req.acuc?.api_key_id ?? null,
     });
     const session = await insertBrowserSession({
