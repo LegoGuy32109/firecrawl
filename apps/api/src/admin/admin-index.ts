@@ -181,17 +181,17 @@ export function adminIndexController(req: Request, res: Response) {
   <style>
     :root {
       color-scheme: dark;
-      --bg: #080a0f;
-      --panel: #10151d;
-      --panel-strong: #151c26;
-      --ink: #eef3f8;
-      --muted: #8995a3;
-      --line: #26313d;
-      --accent: #ff6a3d;
-      --accent-soft: #26150f;
-      --get: #187a52;
-      --post: #a66516;
-      --field: #0b1017;
+      --bg: #0d0d0d;
+      --panel: #1a1a1a;
+      --panel-strong: #111111;
+      --ink: #ffffff;
+      --muted: #9ca3af;
+      --line: #2a2a2a;
+      --accent: #ff540c;
+      --accent-soft: #1c0a00;
+      --get: #16a34a;
+      --post: #d97706;
+      --field: #111111;
     }
 
     * { box-sizing: border-box; }
@@ -199,7 +199,7 @@ export function adminIndexController(req: Request, res: Response) {
     body {
       margin: 0;
       min-height: 100vh;
-      background: linear-gradient(180deg, #0d1219 0%, var(--bg) 42%, #05070a 100%);
+      background: var(--bg);
       color: var(--ink);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       line-height: 1.45;
@@ -333,10 +333,10 @@ export function adminIndexController(req: Request, res: Response) {
     .warning {
       margin-top: 22px;
       padding: 14px 16px;
-      border: 1px solid #573121;
+      border: 1px solid #7c2d12;
       border-radius: 0;
       background: var(--accent-soft);
-      color: #ffb196;
+      color: #fed7aa;
       font-size: 14px;
     }
 

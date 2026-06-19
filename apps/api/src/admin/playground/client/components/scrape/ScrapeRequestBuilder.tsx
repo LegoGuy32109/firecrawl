@@ -14,41 +14,6 @@ import {
 } from "../../history";
 
 type FormatObj = { type: string; [k: string]: unknown };
-type KVPair = { key: string; value: string };
-type LocationObj = { country?: string; languages?: string[] };
-
-const COUNTRIES = [
-  "US",
-  "GB",
-  "DE",
-  "FR",
-  "CA",
-  "AU",
-  "JP",
-  "IN",
-  "BR",
-  "MX",
-  "IT",
-  "ES",
-  "NL",
-  "SE",
-  "NO",
-  "DK",
-  "FI",
-  "PL",
-  "PT",
-  "RU",
-  "KR",
-  "CN",
-  "SG",
-  "HK",
-  "TW",
-  "AE",
-  "SA",
-  "ZA",
-  "NG",
-  "KE",
-];
 
 const sectionLabel = {
   color: "var(--muted)",
@@ -100,28 +65,6 @@ function getActions(): Action[] {
   return Array.isArray(a) ? (a as Action[]) : [];
 }
 
-function getLocation(): LocationObj {
-  const l = requestBody.value.location;
-  return l && typeof l === "object" ? (l as LocationObj) : {};
-}
-
-function getHeaders(): KVPair[] {
-  const h = requestBody.value.headers;
-  if (!h || typeof h !== "object") return [];
-  return Object.entries(h as Record<string, string>).map(([key, value]) => ({
-    key,
-    value,
-  }));
-}
-
-function kvToObj(pairs: KVPair[]): Record<string, string> {
-  const obj: Record<string, string> = {};
-  for (const { key, value } of pairs) {
-    if (key.trim()) obj[key.trim()] = value;
-  }
-  return obj;
-}
-
 function set(key: string, value: unknown) {
   if (
     value === undefined ||
@@ -134,85 +77,6 @@ function set(key: string, value: unknown) {
   } else {
     requestBody.value = { ...requestBody.value, [key]: value };
   }
-}
-
-// ── KV editor for headers ──────────────────────────────────────────────────
-
-function HeadersEditor() {
-  const pairs = getHeaders();
-
-  const update = (i: number, field: keyof KVPair, val: string) => {
-    const next = pairs.map((p, idx) =>
-      idx === i ? { ...p, [field]: val } : p,
-    );
-    set("headers", kvToObj(next));
-  };
-
-  const add = () => set("headers", kvToObj([...pairs, { key: "", value: "" }]));
-
-  const remove = (i: number) =>
-    set("headers", kvToObj(pairs.filter((_, idx) => idx !== i)));
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-      {pairs.map((p, i) => (
-        <div
-          key={i}
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr auto",
-            gap: "6px",
-          }}
-        >
-          <input
-            type="text"
-            value={p.key}
-            onInput={e =>
-              update(i, "key", (e.target as HTMLInputElement).value)
-            }
-            placeholder="Header-Name"
-            style={inputStyle}
-          />
-          <input
-            type="text"
-            value={p.value}
-            onInput={e =>
-              update(i, "value", (e.target as HTMLInputElement).value)
-            }
-            placeholder="value"
-            style={inputStyle}
-          />
-          <button
-            onClick={() => remove(i)}
-            style={{
-              padding: "0 8px",
-              background: "transparent",
-              color: "var(--muted)",
-              border: "1px solid var(--line)",
-              cursor: "pointer",
-              font: "11px/1 monospace",
-            }}
-          >
-            ✕
-          </button>
-        </div>
-      ))}
-      <button
-        onClick={add}
-        style={{
-          padding: "6px 10px",
-          background: "transparent",
-          color: "var(--muted)",
-          border: "1px dashed var(--line)",
-          cursor: "pointer",
-          font: "11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
-          alignSelf: "flex-start",
-        }}
-      >
-        + Add header
-      </button>
-    </div>
-  );
 }
 
 // ── Toggle widget ──────────────────────────────────────────────────────────
@@ -511,44 +375,6 @@ export function ScrapeRequestBuilder() {
             <Section title="Options">
               <div
                 style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: "12px",
-                }}
-              >
-                <label style={{ display: "grid", gap: "5px" }}>
-                  <span style={fieldLabel}>Wait (ms)</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={60000}
-                    value={(rb.waitFor as number) ?? ""}
-                    onInput={e => {
-                      const v = (e.target as HTMLInputElement).value;
-                      set("waitFor", v ? Number(v) : undefined);
-                    }}
-                    placeholder="0"
-                    style={inputStyle}
-                  />
-                </label>
-                <label style={{ display: "grid", gap: "5px" }}>
-                  <span style={fieldLabel}>Timeout (ms)</span>
-                  <input
-                    type="number"
-                    min={1000}
-                    value={(rb.timeout as number) ?? ""}
-                    onInput={e => {
-                      const v = (e.target as HTMLInputElement).value;
-                      set("timeout", v ? Number(v) : undefined);
-                    }}
-                    placeholder="30000"
-                    style={inputStyle}
-                  />
-                </label>
-              </div>
-
-              <div
-                style={{
                   display: "flex",
                   flexWrap: "wrap" as const,
                   gap: "16px",
@@ -579,76 +405,6 @@ export function ScrapeRequestBuilder() {
 
             {/* Advanced */}
             <Section title="Advanced" collapsible defaultOpen={false}>
-              {/* Location */}
-              <div
-                style={{ display: "flex", flexDirection: "column", gap: "6px" }}
-              >
-                <span style={sectionLabel}>Location</span>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: "8px",
-                  }}
-                >
-                  <label style={{ display: "grid", gap: "4px" }}>
-                    <span style={fieldLabel}>Country</span>
-                    <select
-                      value={getLocation().country ?? ""}
-                      onChange={e => {
-                        const v = (e.target as HTMLSelectElement).value;
-                        const loc = getLocation();
-                        set("location", v ? { ...loc, country: v } : undefined);
-                      }}
-                      style={inputStyle}
-                    >
-                      <option value="">— none —</option>
-                      <option value="us-generic">us-generic</option>
-                      <option value="us-whitelist">us-whitelist</option>
-                      {COUNTRIES.map(c => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label style={{ display: "grid", gap: "4px" }}>
-                    <span style={fieldLabel}>Languages (comma-sep)</span>
-                    <input
-                      type="text"
-                      value={(getLocation().languages ?? []).join(", ")}
-                      onInput={e => {
-                        const raw = (e.target as HTMLInputElement).value;
-                        const langs = raw
-                          .split(",")
-                          .map(s => s.trim())
-                          .filter(Boolean);
-                        const loc = getLocation();
-                        set(
-                          "location",
-                          loc.country
-                            ? {
-                                ...loc,
-                                languages: langs.length ? langs : undefined,
-                              }
-                            : undefined,
-                        );
-                      }}
-                      placeholder="en, fr"
-                      style={inputStyle}
-                    />
-                  </label>
-                </div>
-              </div>
-
-              {/* Headers */}
-              <div
-                style={{ display: "flex", flexDirection: "column", gap: "6px" }}
-              >
-                <span style={sectionLabel}>Request Headers</span>
-                <HeadersEditor />
-              </div>
-
               {/* Actions */}
               <div
                 style={{ display: "flex", flexDirection: "column", gap: "6px" }}

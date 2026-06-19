@@ -1,18 +1,18 @@
 :root {
   color-scheme: dark;
-  --bg: #080a0f;
-  --panel: #10151d;
-  --panel-strong: #151c26;
-  --ink: #eef3f8;
-  --muted: #8995a3;
-  --line: #26313d;
-  --accent: #ff6a3d;
-  --accent-soft: #26150f;
-  --get: #187a52;
-  --post: #a66516;
-  --field: #0b1017;
-  --danger: #8b1a1a;
-  --warning: #ffb196;
+  --bg: #0d0d0d;
+  --panel: #1a1a1a;
+  --panel-strong: #111111;
+  --ink: #ffffff;
+  --muted: #9ca3af;
+  --line: #2a2a2a;
+  --accent: #ff540c;
+  --accent-soft: #1c0a00;
+  --get: #16a34a;
+  --post: #d97706;
+  --field: #111111;
+  --danger: #991b1b;
+  --warning: #fed7aa;
 }
 
 * {
@@ -22,7 +22,7 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: linear-gradient(180deg, #0d1219 0%, var(--bg) 42%, #05070a 100%);
+  background: var(--bg);
   color: var(--ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   line-height: 1.45;
@@ -38,6 +38,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 24px;
+  padding: 0 8px;
 }
 
 .playground-header {
@@ -217,7 +218,7 @@ body {
 
 .playground-button--danger {
   color: var(--warning);
-  border-color: #573121;
+  border-color: #7c2d12;
   background: var(--accent-soft);
 }
 
@@ -291,7 +292,7 @@ body {
 
 .playground-surface--danger {
   background: var(--accent-soft);
-  border-color: #573121;
+  border-color: #7c2d12;
 }
 
 .playground-surface__label {
@@ -387,7 +388,7 @@ body {
   line-height: 1.5;
   background: var(--field);
   color: var(--ink);
-  border-radius: 4px;
+  border-radius: 0;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -410,7 +411,7 @@ body {
 .playground-warning {
   padding: 10px 12px;
   background: var(--accent-soft);
-  border: 1px solid #573121;
+  border: 1px solid #7c2d12;
 }
 
 .playground-warning__code {
@@ -682,7 +683,7 @@ body {
   font-size: 12px;
   background: var(--accent-soft);
   padding: 6px 10px;
-  border: 1px solid #573121;
+  border: 1px solid #7c2d12;
 }
 
 .playground-response-tabs {
@@ -851,7 +852,7 @@ body {
   gap: 4px;
   padding: 8px 12px;
   background: var(--accent-soft);
-  border: 1px solid #573121;
+  border: 1px solid #7c2d12;
   border-bottom: none;
 }
 
