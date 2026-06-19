@@ -464,6 +464,11 @@ export const ERROR_CATALOG = {
     "The request is invalid.",
     "Fix request parameters.",
   ),
+  [RequestError.FORBIDDEN]: entry(
+    403,
+    "The request is forbidden.",
+    "Remove forbidden request options or contact support.",
+  ),
   [RequestError.BAD_REQUEST_INVALID_JSON]: entry(
     400,
     "The request body contains malformed JSON.",

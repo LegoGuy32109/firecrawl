@@ -28,8 +28,14 @@ app.use(express.json());
 
 const BROWSER_SERVICE_API_KEY = process.env.BROWSER_SERVICE_API_KEY || null;
 
+if (!BROWSER_SERVICE_API_KEY) {
+  console.warn(
+    "BROWSER_SERVICE_API_KEY is not set; browser service HTTP and WebSocket routes will reject requests.",
+  );
+}
+
 function isBrowserServiceAuthorized(req: Request): boolean {
-  if (!BROWSER_SERVICE_API_KEY) return true;
+  if (!BROWSER_SERVICE_API_KEY) return false;
   const header = req.header("authorization") ?? "";
   return header === `Bearer ${BROWSER_SERVICE_API_KEY}`;
 }
@@ -881,6 +887,9 @@ async function runNodeCode(
   session: LiveSessionRecord,
   code: string,
 ): Promise<BrowserServiceExecResponse> {
+  // DANGEROUS: this endpoint executes user-supplied Node code with full access
+  // to require/process. Gated by browser service auth; the service is meant to
+  // run only on a trusted private network.
   const logs: string[] = [];
   const captureConsole = (...args: unknown[]) => {
     logs.push(args.map(serializeValue).join(" "));
@@ -1860,17 +1869,34 @@ async function handleScrape(req: Request, res: Response) {
   }
 }
 
-app.post("/scrape", handleScrape);
-app.post("/scrape-cdp", handleScrape);
+app.post("/scrape", requireBrowserServiceAuth, handleScrape);
+app.post("/scrape-cdp", requireBrowserServiceAuth, handleScrape);
 
 const server = http.createServer(app);
 const browserLiveWsServer = new WebSocketServer({ noServer: true });
+
+function isBrowserServiceUpgradeAuthorized(req: http.IncomingMessage): boolean {
+  if (!BROWSER_SERVICE_API_KEY) return false;
+  const requestUrl = new URL(req.url ?? "", "http://localhost");
+  const token = requestUrl.searchParams.get("token");
+  if (token === BROWSER_SERVICE_API_KEY) return true;
+
+  const protocolHeader = req.headers["sec-websocket-protocol"];
+  const protocols = Array.isArray(protocolHeader)
+    ? protocolHeader
+    : typeof protocolHeader === "string"
+      ? protocolHeader.split(",").map(protocol => protocol.trim())
+      : [];
+  return protocols.some(
+    protocol => protocol === `Bearer ${BROWSER_SERVICE_API_KEY}`,
+  );
+}
 
 server.on("upgrade", (req, socket, head) => {
   try {
     const requestUrl = new URL(req.url ?? "", "http://localhost");
     const match = requestUrl.pathname.match(/^\/browsers\/([^/]+)\/view\/ws$/);
-    if (!match) {
+    if (!match || !isBrowserServiceUpgradeAuthorized(req)) {
       socket.destroy();
       return;
     }

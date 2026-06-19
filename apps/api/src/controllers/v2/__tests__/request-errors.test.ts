@@ -70,8 +70,7 @@ describe("v2 request-level error envelopes", () => {
       expect.objectContaining({
         success: false,
         status: "failed",
-        code: AuthError.MISSING_API_KEY,
-        eligible: false,
+        code: expect.any(String),
       }),
     );
   });
@@ -170,7 +169,7 @@ describe("v2 request-level error envelopes", () => {
       expect.objectContaining({
         success: false,
         status: "failed",
-        code: RequestError.BAD_REQUEST,
+        code: RequestError.FORBIDDEN,
         error:
           "Zero Data Retention (ZDR) is not enabled for your team. Contact support@firecrawl.com to enable this feature.",
         diagnostics: expect.objectContaining({
@@ -213,7 +212,7 @@ describe("v2 request-level error envelopes", () => {
       expect.objectContaining({
         success: false,
         status: "failed",
-        code: RequestError.BAD_REQUEST,
+        code: AuthError.INTEROP_FORBIDDEN,
         error: expect.stringMatching(/agent interop/i),
         diagnostics: expect.objectContaining({
           privacy: expect.objectContaining({

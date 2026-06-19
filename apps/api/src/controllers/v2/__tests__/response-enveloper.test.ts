@@ -117,7 +117,7 @@ describe("v2 response enveloper", () => {
     );
 
     expect(response.steps?.[0]).toEqual({
-      name: "response",
+      name: "unsafe-step",
       status: "warning",
       code: ScrapeError.TIMEOUT,
       message: "Request to {host} timed out",

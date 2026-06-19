@@ -114,6 +114,8 @@ adminRouter.post(
   wrap(handleIntegrationAdminRotateProxy),
 );
 
+// Playground admin routes inherit BULL_AUTH_KEY gating from these route paths.
+// The scrapes route also uses API auth because it returns team-scoped data.
 adminRouter.post(
   `/admin/${config.BULL_AUTH_KEY}/playground/session`,
   wrap(createPlaygroundSession),
@@ -142,6 +144,9 @@ adminRouter.delete(
     const upstream = new URL(config.BROWSER_SERVICE_URL);
     upstream.protocol = upstream.protocol === "https:" ? "wss:" : "ws:";
     upstream.pathname = `/browsers/${req.params.id}/view/ws`;
+    if (config.BROWSER_SERVICE_API_KEY) {
+      upstream.searchParams.set("token", config.BROWSER_SERVICE_API_KEY);
+    }
     return upstream.toString();
   }),
 );

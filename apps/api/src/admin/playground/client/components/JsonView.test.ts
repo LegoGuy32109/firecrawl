@@ -40,4 +40,18 @@ describe("JsonView", () => {
     render(null, root);
     root.remove();
   });
+
+  it("escapes string values before injecting highlighted html", () => {
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+
+    render(h(JsonView, { value: { html: "<script>alert(1)</script>" } }), root);
+
+    const html = root.querySelector("pre")?.innerHTML ?? "";
+    expect(html).not.toContain("<script>alert(1)</script>");
+    expect(/&lt;script&gt;/.test(html)).toBe(true);
+
+    render(null, root);
+    root.remove();
+  });
 });

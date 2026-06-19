@@ -16,7 +16,6 @@ const config: KnipConfig = {
     "native/**",
     "src/scraper/scrapeURL/engines/fire-engine/branding-script/**",
     "src/admin/playground/client/**",
-    "src/lib/live.ts",
   ],
   ignoreDependencies: ["undici-types", "stripe"],
   ignoreBinaries: ["psql"],

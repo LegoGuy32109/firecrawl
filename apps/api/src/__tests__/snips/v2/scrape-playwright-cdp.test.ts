@@ -283,6 +283,7 @@ describe("playwright;cdp engine", () => {
           actionIndex: 3,
           selector: "#selector-that-will-not-exist",
           actionType: "click",
+          pageUrl: expect.any(String),
           actionStatuses: [
             expect.objectContaining({
               name: "Action 0 (wait)",
@@ -415,6 +416,7 @@ describe("playwright;cdp engine", () => {
         expect.objectContaining({
           actionIndex: 0,
           selector: "#selector-that-will-not-exist",
+          pageUrl: expect.any(String),
         }),
       );
     },

@@ -15,6 +15,7 @@ import { hasFormatOfType } from "../../lib/format-utils";
 import { TransportableError } from "../../lib/error";
 import {
   AgentError,
+  AuthError,
   BillingError,
   CommonError,
   RequestError,
@@ -119,7 +120,7 @@ export async function scrapeController(
           "scrape.error": permissions.error,
           "scrape.status_code": 403,
         });
-        return r.fail(RequestError.BAD_REQUEST, permissions.error);
+        return r.fail(RequestError.FORBIDDEN, permissions.error);
       }
 
       const billing: BillingMetadata = req.body.__agentInterop
@@ -131,10 +132,10 @@ export async function scrapeController(
         config.AGENT_INTEROP_SECRET &&
         req.body.__agentInterop.auth !== config.AGENT_INTEROP_SECRET
       ) {
-        return r.fail(RequestError.BAD_REQUEST, "Invalid agent interop.");
+        return r.fail(AuthError.INTEROP_FORBIDDEN, "Invalid agent interop.");
       } else if (req.body.__agentInterop && !config.AGENT_INTEROP_SECRET) {
         return r.fail(
-          RequestError.BAD_REQUEST,
+          AuthError.INTEROP_FORBIDDEN,
           "Agent interop is not enabled.",
         );
       }

@@ -2,6 +2,15 @@ import { h } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { Button } from "./ui/Button";
 
+function htmlEscape(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function syntaxHighlight(json: string): string {
   return json.replace(
     /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
@@ -16,7 +25,7 @@ function syntaxHighlight(json: string): string {
       } else {
         cls = "color:#b5cea8"; // number
       }
-      return `<span style="${cls}">${match}</span>`;
+      return `<span style="${cls}">${htmlEscape(match)}</span>`;
     },
   );
 }
