@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { config } from "../config";
 import { deleteKey, getValue, setValue } from "../services/redis";
 import { db } from "../db/connection";
@@ -132,9 +132,15 @@ export async function getBrowserSessionFromScrape(
   id: string,
 ): Promise<BrowserSessionRow | null> {
   if (!useDbBrowserSessions()) {
-    const session = [...localBrowserSessions.values()].find(
-      row => row.scrape_id === id,
-    );
+    const session = [...localBrowserSessions.values()]
+      .filter(row => row.scrape_id === id)
+      .sort((a, b) => {
+        if (a.status === "active" && b.status !== "active") return -1;
+        if (a.status !== "active" && b.status === "active") return 1;
+        return (
+          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+        );
+      })[0];
     return session ? cloneLocalBrowserSession(session) : null;
   }
 
@@ -143,6 +149,10 @@ export async function getBrowserSessionFromScrape(
       .select()
       .from(schema.browser_sessions)
       .where(eq(schema.browser_sessions.scrape_id, id))
+      .orderBy(
+        sql`case when ${schema.browser_sessions.status} = 'active' then 0 else 1 end`,
+        desc(schema.browser_sessions.updated_at),
+      )
       .limit(1);
     return (data ?? null) as BrowserSessionRow | null;
   } catch (error) {

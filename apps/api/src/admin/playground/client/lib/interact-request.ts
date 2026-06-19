@@ -6,6 +6,8 @@ export type InteractRequestDraft = {
   prompt?: unknown;
   language?: unknown;
   timeout?: unknown;
+  sessionMode?: unknown;
+  forceNewSession?: unknown;
 };
 
 export function getInteractRequestValidationError(
@@ -73,5 +75,8 @@ export function buildInteractRequestBody(
     ...(prompt.trim() ? { prompt } : {}),
     language,
     timeout,
+    ...(draft.sessionMode === "force-replay" || draft.forceNewSession === true
+      ? { sessionMode: "force-replay" }
+      : { sessionMode: "reuse" }),
   };
 }

@@ -26,6 +26,7 @@ import {
   deletePlaygroundSession,
   getPlaygroundSession,
 } from "../admin/playground/session";
+import { listPlaygroundScrapes } from "../admin/playground/scrapes";
 import { createLivecastWS } from "../services/sessionLivecastWS";
 
 expressWs(express());
@@ -121,6 +122,12 @@ adminRouter.post(
 adminRouter.get(
   `/admin/${config.BULL_AUTH_KEY}/playground/session/:id`,
   wrap(getPlaygroundSession),
+);
+
+adminRouter.get(
+  `/admin/${config.BULL_AUTH_KEY}/playground/scrapes`,
+  authMiddleware(RateLimiterMode.CrawlStatus),
+  wrap(listPlaygroundScrapes),
 );
 
 adminRouter.delete(

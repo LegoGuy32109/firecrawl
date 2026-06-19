@@ -40,6 +40,7 @@ describe("interact-request helpers", () => {
       code: "console.log(1)",
       language: "node",
       timeout: 12,
+      sessionMode: "reuse",
     });
   });
 });

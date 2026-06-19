@@ -190,6 +190,8 @@ const browserExecuteRequestSchema = z
     origin: z.string().optional(),
     integration: integrationSchema.optional().transform(val => val || null),
     existingSessionId: z.string().optional(),
+    sessionMode: z.enum(["reuse", "force-replay"]).optional(),
+    forceNewSession: z.boolean().optional(),
   })
   .refine(data => data.code || data.prompt, {
     message: "Either 'code' or 'prompt' must be provided.",
@@ -217,6 +219,110 @@ interface BrowserDeleteResponse {
   error?: string;
 }
 
+type BrowserSessionRecord = NonNullable<
+  Awaited<ReturnType<typeof getBrowserSession>>
+>;
+
+async function destroyInteractBrowserSession(
+  req: RequestWithAuth<any, any, any>,
+  session: BrowserSessionRecord,
+  logger: typeof _logger,
+): Promise<{ sessionDurationMs?: number; creditsBilled?: number }> {
+  let sessionDurationMs: number | undefined;
+  try {
+    const deleteResult =
+      await browserServiceRequest<BrowserServiceDeleteResponse>(
+        "DELETE",
+        `/browsers/${session.browser_id}`,
+      );
+    sessionDurationMs = deleteResult?.sessionDurationMs;
+  } catch (err) {
+    logger.warn("Failed to delete browser session via browser service", {
+      error: err,
+    });
+  }
+
+  const claimed = await claimBrowserSessionDestroyed(session.id);
+
+  invalidateActiveBrowserSessionCount(session.team_id).catch(() => {});
+  try {
+    await mirrorExternalSlotRelease(session.team_id, session.id);
+  } catch (error) {
+    logger.error(
+      "Failed to remove concurrency limiter entry for browser session",
+      {
+        error,
+        sessionId: session.id,
+        teamId: session.team_id,
+      },
+    );
+  }
+
+  if (!claimed) {
+    logger.info("Session already destroyed by another path, skipping billing", {
+      sessionId: session.id,
+    });
+    return {};
+  }
+
+  const wallClockMs = Date.now() - new Date(session.created_at).getTime();
+  const durationMs =
+    sessionDurationMs && sessionDurationMs > 0
+      ? sessionDurationMs
+      : wallClockMs;
+
+  const usedPrompt = await didBrowserSessionUsePrompt(session.id);
+  const rate = usedPrompt
+    ? INTERACT_CREDITS_PER_HOUR
+    : BROWSER_CREDITS_PER_HOUR;
+  const creditsBilled = calculateBrowserSessionCredits(durationMs, rate);
+
+  clearBrowserSessionPromptFlag(session.id).catch(() => {});
+
+  updateBrowserSessionCreditsUsed(session.id, creditsBilled).catch(error => {
+    logger.error("Failed to update credits_used on browser session", {
+      error,
+      sessionId: session.id,
+      creditsBilled,
+    });
+  });
+
+  billTeam(
+    req.auth.team_id,
+    req.acuc?.sub_id ?? undefined,
+    creditsBilled,
+    req.acuc?.api_key_id ?? null,
+    { endpoint: "interact", jobId: session.id },
+  ).catch(error => {
+    logger.error("Failed to bill team for interact session", {
+      error,
+      creditsBilled,
+      durationMs,
+    });
+  });
+
+  const reservedCredits = calculateBrowserSessionCredits(
+    session.ttl_total * 1000,
+    BROWSER_CREDITS_PER_HOUR,
+  );
+  adjustKeylessCredits(req.auth.team_id, creditsBilled - reservedCredits).catch(
+    () => {},
+  );
+  logKeylessCreditUsage(req.auth.team_id, creditsBilled).catch(() => {});
+
+  logger.info("Browser session destroyed", {
+    sessionDurationMs: durationMs,
+    creditsBilled,
+    usedPrompt,
+    rate,
+  });
+
+  return {
+    sessionDurationMs: durationMs,
+    creditsBilled,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // POST /v2/scrape/:jobId/interact
 // ---------------------------------------------------------------------------
@@ -233,7 +339,15 @@ export async function scrapeInteractController(
   req.body = browserExecuteRequestSchema.parse(req.body);
 
   const scrapeId = req.params.jobId;
-  const { code: rawCode, prompt, language, timeout, origin } = req.body;
+  const {
+    code: rawCode,
+    prompt,
+    language,
+    timeout,
+    origin,
+    sessionMode,
+    forceNewSession,
+  } = req.body;
 
   let logger = _logger.child({
     scrapeId,
@@ -285,6 +399,40 @@ export async function scrapeInteractController(
   // --- Ensure a browser session exists (create + replay if needed) ---
 
   let session = await getBrowserSessionFromScrape(scrapeId);
+  const shouldForceReplay =
+    sessionMode === "force-replay" || forceNewSession === true;
+
+  if (session && session.team_id !== req.auth.team_id) {
+    return r.fail(BrowserError.SESSION_FORBIDDEN, "Forbidden.", {
+      details: { key: session.id },
+    });
+  }
+
+  if (session && shouldForceReplay) {
+    logger = logger.child({
+      sessionId: session.id,
+      browserId: session.browser_id,
+    });
+    logger.info("Force replay requested; destroying linked browser session", {
+      scrapeId,
+      sessionId: session.id,
+      browserId: session.browser_id,
+      status: session.status,
+    });
+    if (session.status === "active") {
+      await destroyInteractBrowserSession(req, session, logger);
+    }
+    session = null;
+  }
+
+  if (session?.status === "destroyed") {
+    logger.info("Ignoring destroyed linked browser session and replaying", {
+      scrapeId,
+      sessionId: session.id,
+      browserId: session.browser_id,
+    });
+    session = null;
+  }
 
   if (!session && req.body.existingSessionId) {
     const existing = await getBrowserSession(req.body.existingSessionId);
@@ -333,19 +481,6 @@ export async function scrapeInteractController(
       sessionId: session.id,
       browserId: session.browser_id,
     });
-  }
-
-  if (session.team_id !== req.auth.team_id) {
-    return r.fail(BrowserError.SESSION_FORBIDDEN, "Forbidden.", {
-      details: { key: session.id },
-    });
-  }
-  if (session.status === "destroyed") {
-    return r.fail(
-      BrowserError.SESSION_EXPIRED,
-      "Browser session has been destroyed.",
-      { details: { expiredAt: session.updated_at } },
-    );
   }
 
   updateBrowserSessionActivity(session.id).catch(() => {});
@@ -554,96 +689,12 @@ export async function scrapeStopInteractiveBrowserController(
   });
   logger.info("Deleting browser session");
 
-  let sessionDurationMs: number | undefined;
-  try {
-    const deleteResult =
-      await browserServiceRequest<BrowserServiceDeleteResponse>(
-        "DELETE",
-        `/browsers/${session.browser_id}`,
-      );
-    sessionDurationMs = deleteResult?.sessionDurationMs;
-  } catch (err) {
-    logger.warn("Failed to delete browser session via browser service", {
-      error: err,
-    });
-  }
-
-  const claimed = await claimBrowserSessionDestroyed(session.id);
-
-  invalidateActiveBrowserSessionCount(session.team_id).catch(() => {});
-  mirrorExternalSlotRelease(session.team_id, session.id).catch(error => {
-    logger.error(
-      "Failed to remove concurrency limiter entry for browser session",
-      {
-        error,
-        sessionId: session.id,
-        teamId: session.team_id,
-      },
-    );
-  });
-
-  if (!claimed) {
-    logger.info("Session already destroyed by another path, skipping billing", {
-      sessionId: session.id,
-    });
-    return r.ok({});
-  }
-
-  const wallClockMs = Date.now() - new Date(session.created_at).getTime();
-  const durationMs =
-    sessionDurationMs && sessionDurationMs > 0
-      ? sessionDurationMs
-      : wallClockMs;
-
-  const usedPrompt = await didBrowserSessionUsePrompt(session.id);
-  const rate = usedPrompt
-    ? INTERACT_CREDITS_PER_HOUR
-    : BROWSER_CREDITS_PER_HOUR;
-  const creditsBilled = calculateBrowserSessionCredits(durationMs, rate);
-
-  clearBrowserSessionPromptFlag(session.id).catch(() => {});
-
-  updateBrowserSessionCreditsUsed(session.id, creditsBilled).catch(error => {
-    logger.error("Failed to update credits_used on browser session", {
-      error,
-      sessionId: session.id,
-      creditsBilled,
-    });
-  });
-
-  billTeam(
-    req.auth.team_id,
-    req.acuc?.sub_id ?? undefined,
-    creditsBilled,
-    req.acuc?.api_key_id ?? null,
-    { endpoint: "interact", jobId: session.id },
-  ).catch(error => {
-    logger.error("Failed to bill team for interact session", {
-      error,
-      creditsBilled,
-      durationMs,
-    });
-  });
-
-  const reservedCredits = calculateBrowserSessionCredits(
-    session.ttl_total * 1000,
-    BROWSER_CREDITS_PER_HOUR,
-  );
-  adjustKeylessCredits(req.auth.team_id, creditsBilled - reservedCredits).catch(
-    () => {},
-  );
-  logKeylessCreditUsage(req.auth.team_id, creditsBilled).catch(() => {});
-
-  logger.info("Browser session destroyed", {
-    sessionDurationMs: durationMs,
-    creditsBilled,
-    usedPrompt,
-    rate,
-  });
+  const { sessionDurationMs, creditsBilled } =
+    await destroyInteractBrowserSession(req, session, logger);
 
   return r.ok({
-    sessionDurationMs: durationMs,
-    creditsBilled,
+    ...(sessionDurationMs !== undefined ? { sessionDurationMs } : {}),
+    ...(creditsBilled !== undefined ? { creditsBilled } : {}),
   });
 }
 

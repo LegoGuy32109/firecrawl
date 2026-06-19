@@ -303,6 +303,42 @@ body {
   margin-bottom: 6px;
 }
 
+.playground-details {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.playground-details summary {
+  cursor: pointer;
+}
+
+.playground-details[open] summary {
+  margin-bottom: 8px;
+}
+
+.playground-scrape-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.playground-scrape-meta span {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.playground-run-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .playground-chip {
   display: inline-flex;
   align-items: center;

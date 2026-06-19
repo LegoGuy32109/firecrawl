@@ -64,6 +64,51 @@ describe("InteractRequestBuilder — rendering", () => {
     expect(root.textContent).toContain("Run interact");
     expect(root.querySelectorAll("option").length).toBeGreaterThan(0);
   });
+
+  it("renders existing scrape status and run mode controls", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          scrapes: [
+            {
+              id: BASE_BODY.jobId,
+              url: "https://example.com/session",
+              createdAt: "2026-06-19T12:00:00.000Z",
+              isSuccessful: true,
+              error: null,
+              actionsCount: 2,
+              waitForMs: 500,
+              creditsUsed: 1,
+              replayAvailable: true,
+              statusLabel: "Live session",
+              session: {
+                id: "session-id",
+                browserId: "browser-id",
+                status: "active",
+                createdAt: "2026-06-19T12:00:00.000Z",
+                updatedAt: "2026-06-19T12:01:00.000Z",
+                creditsUsed: null,
+                liveViewUrl: "/admin/key/playground/session/browser-id/view",
+              },
+            },
+          ],
+        }),
+        text: async () => "{}",
+      })),
+    );
+
+    mountInteract();
+    await new Promise(r => setTimeout(r, 20));
+
+    expect(root.textContent).toContain("Live session");
+    expect(root.textContent).toContain("Use live session");
+    expect(root.textContent).toContain("Force new replay");
+    expect(root.textContent).toContain("Session status");
+  });
 });
 
 describe("InteractRequestBuilder — Stop lifecycle", () => {
@@ -71,25 +116,30 @@ describe("InteractRequestBuilder — Stop lifecycle", () => {
 
   beforeEach(() => {
     resetState();
-    fetchMock = vi.fn();
+    fetchMock = vi.fn(async (_url, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return {
+          status: 200,
+          ok: true,
+          text: async () =>
+            JSON.stringify({
+              success: true,
+              sessionId: "sess-abc",
+              result: {},
+            }),
+        };
+      }
+      return {
+        status: 200,
+        ok: true,
+        json: async () => ({ success: true, scrapes: [] }),
+        text: async () => "{}",
+      };
+    });
     vi.stubGlobal("fetch", fetchMock);
   });
 
   it("Stop DELETEs the original job ID even after the draft job ID is changed", async () => {
-    // POST returns a live session
-    fetchMock.mockResolvedValueOnce({
-      status: 200,
-      ok: true,
-      text: async () =>
-        JSON.stringify({ success: true, sessionId: "sess-abc", result: {} }),
-    });
-    // DELETE returns 200
-    fetchMock.mockResolvedValueOnce({
-      status: 200,
-      ok: true,
-      text: async () => "{}",
-    });
-
     mountInteract();
 
     // Click Run interact — sends POST for the original job ID
@@ -108,7 +158,7 @@ describe("InteractRequestBuilder — Stop lifecycle", () => {
     await Promise.resolve();
 
     // Click Stop — must DELETE the original locked-in job ID
-    findButton("Stop").dispatchEvent(
+    findButton("End live session").dispatchEvent(
       new MouseEvent("click", { bubbles: true }),
     );
     await new Promise(r => setTimeout(r, 20));
@@ -121,16 +171,10 @@ describe("InteractRequestBuilder — Stop lifecycle", () => {
     expect(deleteCall![0]).not.toContain("different-job-id");
   });
 
-  it("Stop still works after component remount (signal survives unmount)", async () => {
+  it("End live session still works after component remount (signal survives unmount)", async () => {
     // Simulate an active session without going through send()
     activeInteractJobId.value = "original-session-job";
     sessionId.value = "sess-xyz";
-
-    fetchMock.mockResolvedValueOnce({
-      status: 200,
-      ok: true,
-      text: async () => "{}",
-    });
 
     mountInteract();
 
@@ -138,8 +182,8 @@ describe("InteractRequestBuilder — Stop lifecycle", () => {
     unmountInteract();
     mountInteract();
 
-    // Stop button enabled because sessionId.value is non-null
-    const stopBtn = findButton("Stop");
+    // End live session button enabled because sessionId.value is non-null
+    const stopBtn = findButton("End live session");
     expect(stopBtn.disabled).toBe(false);
 
     stopBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -154,19 +198,13 @@ describe("InteractRequestBuilder — Stop lifecycle", () => {
     expect(activeInteractJobId.value).toBeNull();
   });
 
-  it("Stop clears live session signals on success", async () => {
+  it("End live session clears live session signals on success", async () => {
     activeInteractJobId.value = "job-to-stop";
     sessionId.value = "active-session";
     liveViewUrl.value = "ws://live";
 
-    fetchMock.mockResolvedValueOnce({
-      status: 200,
-      ok: true,
-      text: async () => "{}",
-    });
-
     mountInteract();
-    findButton("Stop").dispatchEvent(
+    findButton("End live session").dispatchEvent(
       new MouseEvent("click", { bubbles: true }),
     );
     await new Promise(r => setTimeout(r, 20));
@@ -176,15 +214,25 @@ describe("InteractRequestBuilder — Stop lifecycle", () => {
     expect(activeInteractJobId.value).toBeNull();
   });
 
-  it("failed Stop shows error and preserves state for retry", async () => {
+  it("failed End live session shows error and preserves state for retry", async () => {
     activeInteractJobId.value = "job-to-stop";
     sessionId.value = "active-session";
     liveViewUrl.value = "ws://live";
 
-    fetchMock.mockRejectedValueOnce(new Error("network error"));
+    fetchMock.mockImplementation(async (_url, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        throw new Error("network error");
+      }
+      return {
+        status: 200,
+        ok: true,
+        json: async () => ({ success: true, scrapes: [] }),
+        text: async () => "{}",
+      };
+    });
 
     mountInteract();
-    findButton("Stop").dispatchEvent(
+    findButton("End live session").dispatchEvent(
       new MouseEvent("click", { bubbles: true }),
     );
     await new Promise(r => setTimeout(r, 20));
@@ -194,33 +242,40 @@ describe("InteractRequestBuilder — Stop lifecycle", () => {
     expect(activeInteractJobId.value).toBe("job-to-stop");
     // Error surfaced in UI
     expect(root.textContent).toContain("Stop failed");
-    // Stop button still enabled for retry
-    expect(findButton("Stop").disabled).toBe(false);
+    // End live session button still enabled for retry
+    expect(findButton("End live session").disabled).toBe(false);
   });
 
-  it("successful retry after failed Stop clears all state", async () => {
+  it("successful retry after failed End live session clears all state", async () => {
     activeInteractJobId.value = "job-to-stop";
     sessionId.value = "active-session";
     liveViewUrl.value = "ws://live";
 
-    // First attempt fails
-    fetchMock.mockRejectedValueOnce(new Error("network error"));
-    // Second attempt succeeds
-    fetchMock.mockResolvedValueOnce({
-      status: 200,
-      ok: true,
-      text: async () => "{}",
+    let deleteAttempts = 0;
+    fetchMock.mockImplementation(async (_url, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        deleteAttempts++;
+        if (deleteAttempts === 1) {
+          throw new Error("network error");
+        }
+      }
+      return {
+        status: 200,
+        ok: true,
+        json: async () => ({ success: true, scrapes: [] }),
+        text: async () => "{}",
+      };
     });
 
     mountInteract();
-    findButton("Stop").dispatchEvent(
+    findButton("End live session").dispatchEvent(
       new MouseEvent("click", { bubbles: true }),
     );
     await new Promise(r => setTimeout(r, 20));
     expect(root.textContent).toContain("Stop failed");
 
     // Retry
-    findButton("Stop").dispatchEvent(
+    findButton("End live session").dispatchEvent(
       new MouseEvent("click", { bubbles: true }),
     );
     await new Promise(r => setTimeout(r, 20));
