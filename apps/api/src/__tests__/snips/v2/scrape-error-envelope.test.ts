@@ -227,7 +227,7 @@ describe("F — failure envelope", () => {
   );
 
   itIf(canRun)(
-    "F4: interact error matching replay pattern populates replayFailedAt",
+    "F4: user interact code with replay-like text does not populate replayFailedAt",
     async () => {
       const scrapeRes = await scrapeRaw(
         { url: "https://example.com", origin: "website" },
@@ -252,13 +252,30 @@ describe("F — failure envelope", () => {
         expect(interactRes.body.details?.stderrSnippet).toContain(
           "Replay action #3 (click)",
         );
-        expect(interactRes.body.details?.replayFailedAt).toEqual({
-          actionIndex: 3,
-          actionType: "click",
-        });
+        expect(interactRes.body.details?.replayFailedAt ?? null).toBeNull();
       } finally {
         await scrapeStopInteractiveBrowserRaw(scrapeId, identity);
       }
+    },
+    scrapeTimeout,
+  );
+
+  itIf(canRun)(
+    "F4b: bad interact request uses the v2 responder envelope",
+    async () => {
+      const response = await scrapeInteractRaw(
+        crypto.randomUUID(),
+        { language: "node" } as any,
+        identity,
+      );
+
+      expect(response.statusCode).toBe(400);
+      expect(response.body).toMatchObject({
+        success: false,
+        status: "failed",
+        code: "BAD_REQUEST",
+      });
+      expect(response.body.diagnostics).toBeTruthy();
     },
     scrapeTimeout,
   );

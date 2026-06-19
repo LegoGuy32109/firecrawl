@@ -26,11 +26,12 @@ describe("ErrorView — failure frame (SCRAPE_ACTION_ERROR)", () => {
       code: "SCRAPE_ACTION_ERROR",
       details: {
         actionIndex: 3,
+        actionNumber: 4,
         selector: ".product-card-add",
         pageUrl: "https://example.com",
       },
     });
-    expect(root.textContent).toContain("Action 3 failed: .product-card-add");
+    expect(root.textContent).toContain("Action 4 failed: .product-card-add");
   });
 
   it("shows headline without selector when absent", () => {
@@ -38,7 +39,7 @@ describe("ErrorView — failure frame (SCRAPE_ACTION_ERROR)", () => {
       code: "SCRAPE_ACTION_ERROR",
       details: { actionIndex: 1, pageUrl: "https://example.com" },
     });
-    expect(root.textContent).toContain("Action 1 failed");
+    expect(root.textContent).toContain("Action 2 failed");
     expect(root.textContent).not.toContain("failed:");
   });
 
@@ -62,7 +63,7 @@ describe("ErrorView — failure frame (SCRAPE_ACTION_ERROR)", () => {
       details: { actionIndex: 2, selector: ".btn" },
     });
     // Falls into failure frame because actionIndex is present
-    expect(root.textContent).toContain("Action 2 failed: .btn");
+    expect(root.textContent).toContain("Action 3 failed: .btn");
     expect(root.textContent).toContain("screenshot unavailable");
   });
 
@@ -128,12 +129,16 @@ describe("ErrorView — failure frame (BROWSER_EXECUTION_FAILED)", () => {
       code: "BROWSER_EXECUTION_FAILED",
       details: {
         exitCode: 1,
-        replayFailedAt: { actionIndex: 7, actionType: "click" },
+        replayFailedAt: {
+          actionIndex: 7,
+          actionNumber: 8,
+          actionType: "click",
+        },
         pageUrl: "https://example.com",
       },
     });
     expect(root.textContent).toContain(
-      "Replay reconstruction failed at action 7 (click)",
+      "Replay reconstruction failed at action 8 (click)",
     );
   });
 

@@ -1421,6 +1421,7 @@ export type DiagnosticStep = {
   status: DiagnosticStatus;
   code?: ErrorCodes | WarningCodes;
   message?: string;
+  actionNumber?: number;
   durationMs?: number;
   startedAt?: string;
   endedAt?: string;

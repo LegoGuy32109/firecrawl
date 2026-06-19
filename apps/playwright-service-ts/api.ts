@@ -264,6 +264,9 @@ interface BrowserCreateRequest {
   activityTtl?: number;
   streamWebView?: boolean;
   persistentStorage?: { uniqueId: string; write: boolean };
+  skipTlsVerification?: boolean;
+  mobile?: boolean;
+  location?: UrlModel["location"];
 }
 
 interface BrowserExecRequest {
@@ -624,6 +627,7 @@ type ActionStatus = {
   status: "ok" | "failed" | "skipped" | "timed_out";
   code?: string;
   message?: string;
+  actionNumber?: number;
   durationMs?: number;
   startedAt?: string;
   endedAt?: string;
@@ -1243,6 +1247,7 @@ const executeActions = async (
       }
       actionStatuses.push({
         name: `Action ${actionIndex} (${action.type})`,
+        actionNumber: actionIndex + 1,
         status: "ok",
         durationMs: Date.now() - startedAt,
         startedAt: startedAtIso,
@@ -1251,6 +1256,7 @@ const executeActions = async (
     } catch (error) {
       actionStatuses.push({
         name: `Action ${actionIndex} (${action.type})`,
+        actionNumber: actionIndex + 1,
         status: "failed",
         code: "SCRAPE_ACTION_ERROR",
         message: error instanceof Error ? error.message : String(error),
@@ -1266,6 +1272,7 @@ const executeActions = async (
         const skippedAction = actions[skippedIndex];
         actionStatuses.push({
           name: `Action ${skippedIndex} (${skippedAction.type})`,
+          actionNumber: skippedIndex + 1,
           status: "skipped",
           startedAt: startedAtIso,
         });
@@ -1316,6 +1323,9 @@ app.post(
     const session = await createLiveBrowserSession({
       live: streamWebView,
       recording: streamWebView,
+      skipTlsVerification: body.skipTlsVerification,
+      mobile: body.mobile,
+      location: body.location,
     });
 
     return res.status(200).json({
@@ -1843,6 +1853,7 @@ async function handleScrape(req: Request, res: Response) {
         error: "Action failed",
         actionError: {
           actionIndex: error.actionIndex,
+          actionNumber: error.actionIndex + 1,
           type: error.action.type,
           actionType: error.action.type,
           selector:

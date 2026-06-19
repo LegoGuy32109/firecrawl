@@ -35,6 +35,7 @@ import {
   buildReplayContextFromScrape,
   estimateReplayTimeoutSeconds,
   buildReplayScript,
+  parseReplayFailure,
 } from "../../lib/scrape-interact/scrape-replay";
 import {
   executePromptViaBrowserAgent,
@@ -125,18 +126,6 @@ async function captureFailureContext(
 
 function buildPlaygroundLiveViewUrl(browserId: string): string {
   return `/admin/${config.BULL_AUTH_KEY}/playground/session/${encodeURIComponent(browserId)}/view`;
-}
-
-// The replay script (buildReplayScript) throws errors prefixed
-// `Replay action #N (type):`. Parsing this lets BROWSER_EXECUTION_FAILED carry
-// the same step-index shape as SCRAPE_ACTION on replay failures.
-function parseReplayFailure(
-  stderr: string | undefined,
-): { actionIndex: number; actionType: string } | undefined {
-  if (!stderr) return undefined;
-  const m = stderr.match(/Replay action #(\d+) \((\w+)\):/);
-  if (!m) return undefined;
-  return { actionIndex: parseInt(m[1], 10), actionType: m[2] };
 }
 
 function parseBrowserExecFailure(
@@ -624,11 +613,9 @@ export async function scrapeInteractController(
   if (hasError) {
     // CHANGED: was 200 + success:false + no code; now 422 + EXECUTION_FAILED
     // with rich diagnostic envelope: page URL + screenshot at the moment of
-    // failure, the failed replay action index if the failure came from the
-    // replay script, and a truncated stderr snippet (privacy-gated).
+    // failure plus a truncated stderr snippet (privacy-gated).
     const capture = await captureFailureContext(session.browser_id, zdrForced);
     const stderr = execResult.stderr ?? "";
-    const replayFailedAt = parseReplayFailure(stderr);
     const stderrSnippet =
       !zdrForced && stderr ? stderr.slice(0, 500) : undefined;
     return r.fail(BrowserError.EXECUTION_FAILED, stderr || "Execution failed", {
@@ -640,7 +627,6 @@ export async function scrapeInteractController(
         ...(capture.screenshot !== undefined
           ? { screenshot: capture.screenshot }
           : {}),
-        ...(replayFailedAt ? { replayFailedAt } : {}),
         ...(stderrSnippet ? { stderrSnippet } : {}),
       },
       liveViewUrl,
@@ -810,6 +796,15 @@ async function createSessionForScrape(
           ttl,
           ...(activityTtl !== undefined ? { activityTtl } : {}),
           ...(persistentStorage !== undefined ? { persistentStorage } : {}),
+          ...(replayContext.skipTlsVerification !== undefined
+            ? { skipTlsVerification: replayContext.skipTlsVerification }
+            : {}),
+          ...(replayContext.mobile !== undefined
+            ? { mobile: replayContext.mobile }
+            : {}),
+          ...(replayContext.location !== undefined
+            ? { location: replayContext.location }
+            : {}),
         },
       );
       break;
@@ -934,7 +929,7 @@ async function createSessionForScrape(
       zdrForcedInit,
     );
     const stderr = err instanceof Error ? err.message : String(err ?? "");
-    const replayFailedAt = parseReplayFailure(stderr);
+    const replayFailedAt = parseReplayFailure(err);
     const stderrSnippet =
       !zdrForcedInit && stderr ? stderr.slice(0, 500) : undefined;
 

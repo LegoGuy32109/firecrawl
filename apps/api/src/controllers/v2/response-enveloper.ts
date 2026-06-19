@@ -32,6 +32,7 @@ type DiagnosticStepInput = {
   status: DiagnosticStep["status"];
   code?: DiagnosticStep["code"];
   message?: string;
+  actionNumber?: number;
   messageTemplate?: string;
   details?: Record<string, unknown>;
   durationMs?: number;
@@ -144,6 +145,9 @@ function buildDiagnosticStep(
     name: step.name,
     status: normalizeDiagnosticStepStatus(step.status),
     ...(step.code !== undefined ? { code: step.code } : {}),
+    ...(step.actionNumber !== undefined
+      ? { actionNumber: step.actionNumber }
+      : {}),
     ...(step.durationMs !== undefined ? { durationMs: step.durationMs } : {}),
     ...(step.startedAt ? { startedAt: step.startedAt } : {}),
     ...(step.endedAt ? { endedAt: step.endedAt } : {}),

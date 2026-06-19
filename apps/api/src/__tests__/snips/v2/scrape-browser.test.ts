@@ -241,7 +241,8 @@ describe("Scrape browser interact replay", () => {
         "Failed to initialize browser session from the original scrape context",
       );
       expect(interactResponse.body.details?.replayFailedAt).toEqual({
-        actionIndex: 1,
+        actionIndex: 0,
+        actionNumber: 1,
         actionType: "click",
       });
       expect(interactResponse.body.details?.stderrSnippet).toContain(

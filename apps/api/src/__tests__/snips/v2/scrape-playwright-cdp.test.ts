@@ -281,6 +281,7 @@ describe("playwright;cdp engine", () => {
       expect(raw.body.details).toEqual(
         expect.objectContaining({
           actionIndex: 3,
+          actionNumber: 4,
           selector: "#selector-that-will-not-exist",
           actionType: "click",
           pageUrl: expect.any(String),
@@ -299,15 +300,18 @@ describe("playwright;cdp engine", () => {
             }),
             expect.objectContaining({
               name: "Action 3 (click)",
+              actionNumber: 4,
               status: "failed",
               code: "SCRAPE_ACTION_ERROR",
             }),
             expect.objectContaining({
               name: "Action 4 (scroll)",
+              actionNumber: 5,
               status: "skipped",
             }),
             expect.objectContaining({
               name: "Action 5 (click)",
+              actionNumber: 6,
               status: "skipped",
             }),
           ],
@@ -327,27 +331,33 @@ describe("playwright;cdp engine", () => {
       expect(diagnosticsActions).toEqual([
         expect.objectContaining({
           name: "Action 0 (wait)",
+          actionNumber: 1,
           status: "ok",
         }),
         expect.objectContaining({
           name: "Action 1 (click)",
+          actionNumber: 2,
           status: "ok",
         }),
         expect.objectContaining({
           name: "Action 2 (wait)",
+          actionNumber: 3,
           status: "ok",
         }),
         expect.objectContaining({
           name: "Action 3 (click)",
+          actionNumber: 4,
           status: "failed",
           code: "SCRAPE_ACTION_ERROR",
         }),
         expect.objectContaining({
           name: "Action 4 (scroll)",
+          actionNumber: 5,
           status: "skipped",
         }),
         expect.objectContaining({
           name: "Action 5 (click)",
+          actionNumber: 6,
           status: "skipped",
         }),
       ]);

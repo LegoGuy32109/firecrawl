@@ -39,6 +39,7 @@ import { initializeEngineForcing } from "./scraper/WebScraper/utils/engine-forci
 import responseTime from "response-time";
 import { shutdownWebhookQueue } from "./services/webhook";
 import { shutdownIndexerQueue } from "./services/indexing/indexer-queue";
+import { makeResponder } from "./controllers/v2/response-enveloper";
 
 const { createBullBoard } = require("@bull-board/api");
 const { BullMQAdapter } = require("@bull-board/api/bullMQAdapter");
@@ -203,6 +204,16 @@ app.use(
         : issues.length > 0 && issues[0].code === "custom"
           ? issues[0].message
           : "Bad Request";
+
+      if (req.originalUrl === "/v2" || req.originalUrl.startsWith("/v2/")) {
+        return makeResponder(req as any, res).fail(
+          RequestError.BAD_REQUEST,
+          customErrorMessage,
+          {
+            details: issues,
+          },
+        );
+      }
 
       res.status(400).json({
         success: false,

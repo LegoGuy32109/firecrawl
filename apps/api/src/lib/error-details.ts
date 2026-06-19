@@ -35,6 +35,7 @@ export type ActionStatus = {
   status: "ok" | "failed" | "skipped" | "timed_out";
   code?: string;
   message?: string;
+  actionNumber?: number;
   durationMs?: number;
   startedAt?: string;
   endedAt?: string;
@@ -93,6 +94,7 @@ export interface ErrorDetailsMap {
   [ScrapeError.ACTION]: {
     errorCode: string;
     actionIndex?: number;
+    actionNumber?: number;
     selector?: string;
     pageUrl?: string;
     screenshot?: string;
@@ -126,7 +128,11 @@ export interface ErrorDetailsMap {
     timedOut?: boolean;
     pageUrl?: string;
     screenshot?: string;
-    replayFailedAt?: { actionIndex: number; actionType: string };
+    replayFailedAt?: {
+      actionIndex: number;
+      actionNumber: number;
+      actionType: string;
+    };
     stderrSnippet?: string;
   };
   [BrowserError.SERVICE_UNAVAILABLE]: { dependency: "browser-service" };
@@ -205,3 +211,9 @@ export type WarningDetailsFor<C extends WarningCodes> =
 
 export type ErrorDetails = ErrorDetailsMap[keyof ErrorDetailsMap];
 export type WarningDetails = WarningDetailsMap[keyof WarningDetailsMap];
+
+export type ReplayFailedAt = {
+  actionIndex: number;
+  actionNumber: number;
+  actionType: string;
+};

@@ -210,6 +210,7 @@ export class ActionError extends TransportableError {
   constructor(
     public errorCode: string,
     public actionIndex?: number,
+    public actionNumber?: number,
     public selector?: string,
     public pageUrl?: string,
     public screenshot?: string,
@@ -223,6 +224,7 @@ export class ActionError extends TransportableError {
         details: {
           errorCode,
           ...(actionIndex !== undefined ? { actionIndex } : {}),
+          ...(actionNumber !== undefined ? { actionNumber } : {}),
           ...(selector !== undefined ? { selector } : {}),
           ...(pageUrl !== undefined ? { pageUrl } : {}),
           ...(screenshot !== undefined ? { screenshot } : {}),
@@ -238,6 +240,7 @@ export class ActionError extends TransportableError {
       ...super.serialize(),
       errorCode: this.errorCode,
       actionIndex: this.actionIndex,
+      actionNumber: this.actionNumber,
       selector: this.selector,
       pageUrl: this.pageUrl,
       screenshot: this.screenshot,
@@ -253,6 +256,7 @@ export class ActionError extends TransportableError {
     const x = new ActionError(
       data.errorCode,
       data.actionIndex,
+      data.actionNumber,
       data.selector,
       data.pageUrl,
       data.screenshot,

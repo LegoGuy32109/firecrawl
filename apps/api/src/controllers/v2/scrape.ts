@@ -381,6 +381,9 @@ export async function scrapeController(
                   ...(status.message !== undefined
                     ? { message: status.message }
                     : {}),
+                  ...(status.actionNumber !== undefined
+                    ? { actionNumber: status.actionNumber }
+                    : {}),
                   ...(status.startedAt !== undefined
                     ? { startedAt: status.startedAt }
                     : {}),

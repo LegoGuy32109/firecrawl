@@ -11,6 +11,12 @@ type Props = {
   body: Record<string, unknown>;
 };
 
+function displayActionNumber(details: Record<string, unknown>): number | null {
+  if (typeof details.actionNumber === "number") return details.actionNumber;
+  if (typeof details.actionIndex === "number") return details.actionIndex + 1;
+  return null;
+}
+
 function CatalogSurface({
   catalog,
 }: {
@@ -90,18 +96,25 @@ function renderDetails(code: string, details: unknown) {
 
 function failureHeadline(code: string, d: Record<string, unknown>): string {
   if (code === "SCRAPE_ACTION_ERROR") {
-    const idx = d.actionIndex != null ? String(d.actionIndex) : "?";
+    const idx = displayActionNumber(d);
+    const label = idx != null ? String(idx) : "?";
     return d.selector
-      ? `Action ${idx} failed: ${String(d.selector)}`
-      : `Action ${idx} failed`;
+      ? `Action ${label} failed: ${String(d.selector)}`
+      : `Action ${label} failed`;
   }
   if (code === "BROWSER_EXECUTION_FAILED") {
     const replay = d.replayFailedAt as
       | Record<string, unknown>
       | null
       | undefined;
-    if (replay && replay.actionIndex != null) {
-      return `Replay reconstruction failed at action ${String(replay.actionIndex)} (${String(replay.actionType)})`;
+    if (replay && (replay.actionNumber != null || replay.actionIndex != null)) {
+      const number =
+        typeof replay.actionNumber === "number"
+          ? replay.actionNumber
+          : typeof replay.actionIndex === "number"
+            ? replay.actionIndex + 1
+            : "?";
+      return `Replay reconstruction failed at action ${String(number)} (${String(replay.actionType)})`;
     }
     return "Interact code failed";
   }
