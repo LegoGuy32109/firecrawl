@@ -22,6 +22,7 @@ import {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const fixtureUrl = `${TEST_SUITE_WEBSITE}/cdp-engine`;
+const replayFaultUrl = process.env.REPLAY_FAULT_URL ?? "";
 
 async function waitForFirstFrame(wsUrl: string, timeoutMs: number = 15000) {
   return await new Promise<any>((resolve, reject) => {
@@ -92,6 +93,7 @@ describe("Scrape browser interact replay", () => {
     ALLOW_TEST_SUITE_WEBSITE &&
     !!config.BROWSER_SERVICE_URL &&
     (TEST_PRODUCTION || HAS_FIRE_ENGINE);
+  const canRunReplayFaultPath = canRunReplayHappyPath && !!replayFaultUrl;
 
   itIf(canRunReplayHappyPath)(
     "replays scrape URL/waitFor/actions before interactive code runs",
@@ -187,6 +189,69 @@ describe("Scrape browser interact replay", () => {
           );
         }
       }
+    },
+    scrapeTimeout,
+  );
+
+  itIf(canRunReplayFaultPath)(
+    "reports the failed replay action when original scrape actions cannot be reconstructed",
+    async () => {
+      const token = `replay-action-${crypto.randomUUID()}`;
+      const url = `${replayFaultUrl.replace(/\/$/, "")}/replay-fault/element?token=${token}`;
+
+      const scrapeResponse = await scrapeRaw(
+        {
+          url,
+          origin: "website-replay-action-failure-test",
+          actions: [
+            {
+              type: "click",
+              selector: "#replay-btn",
+            },
+          ],
+        },
+        identity,
+      );
+
+      expect(scrapeResponse.statusCode).toBe(200);
+      expect(scrapeResponse.body.success).toBe(true);
+      expect(typeof scrapeResponse.body.scrape_id).toBe("string");
+      expect(scrapeResponse.body.data?.markdown).toContain(
+        "Button clicked successfully during scrape actions",
+      );
+
+      const scrapeId = scrapeResponse.body.scrape_id as string;
+      await sleep(1000);
+
+      const interactResponse = await interactWithReplicaRetry(
+        scrapeId,
+        {
+          language: "node",
+          timeout: 30,
+          code: "console.log('this should not run before replay failure')",
+        },
+        identity,
+        20,
+      );
+
+      expect(interactResponse.statusCode).toBe(422);
+      expect(interactResponse.body.success).toBe(false);
+      expect(interactResponse.body.code).toBe("BROWSER_EXECUTION_FAILED");
+      expect(interactResponse.body.error).toContain(
+        "Failed to initialize browser session from the original scrape context",
+      );
+      expect(interactResponse.body.details?.replayFailedAt).toEqual({
+        actionIndex: 1,
+        actionType: "click",
+      });
+      expect(interactResponse.body.details?.stderrSnippet).toContain(
+        "Replay action #1 (click)",
+      );
+      expect(interactResponse.body.details?.pageUrl).toBe(url);
+      expect(typeof interactResponse.body.details?.screenshot).toBe("string");
+      expect(interactResponse.body.details.screenshot.length).toBeGreaterThan(
+        1000,
+      );
     },
     scrapeTimeout,
   );

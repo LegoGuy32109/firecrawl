@@ -332,11 +332,12 @@ curl -sS -X DELETE "http://localhost:3002/v2/scrape/$JOB_ID/interact" -H "$AUTH"
 
 ---
 
-### Test F5a — Replay fault: element disappears between scrape and interact
+### Test F5a — Replay fault: scrape action element disappears before interact
 
-Verifies that when a DOM element is present at scrape time but removed before
-the interact replay runs, the error envelope captures `pageUrl` and `screenshot`
-so the developer can see exactly what the page looked like when the click failed.
+Verifies the customer issue #7 path: a scrape action succeeds on the original
+scrape, but the interact session later fails while replaying that saved action
+to reconstruct the scrape state. The envelope captures the failed replay step,
+`pageUrl`, and `screenshot`.
 
 The `replay-fault` container (`http://replay-fault:4322`) serves a button on
 visit 1 and removes it on visit 2+, keyed by `?token=`. Using a unique token
@@ -346,33 +347,37 @@ per run guarantees visit 1 is the scrape and visit 2 is the interact.
 # Generate a unique token so visit counts start fresh
 F5A_TOKEN="f5a-$(date +%s)"
 
-# Step 1: scrape — visit 1 confirms button is present in markdown
+# Step 1: scrape — visit 1 has the button and the scrape action clicks it
 curl -sS -X POST http://localhost:3002/v2/scrape \
   -H 'Content-Type: application/json' -H "$AUTH" \
-  -d "{\"url\": \"http://replay-fault:4322/replay-fault/element?token=${F5A_TOKEN}\", \"origin\": \"website\"}" \
+  -d "{\"url\": \"http://replay-fault:4322/replay-fault/element?token=${F5A_TOKEN}\", \"origin\": \"website\", \"actions\": [{\"type\": \"click\", \"selector\": \"#replay-btn\"}]}" \
   > /tmp/F5a-scrape.json
 
-jq '{success, scrape_id, button_visible: (.data.markdown | test("Click me"))}' /tmp/F5a-scrape.json
+jq '{success, scrape_id, action_clicked: (.data.markdown | test("Button clicked successfully"))}' /tmp/F5a-scrape.json
 F5A_ID=$(jq -r '.scrape_id' /tmp/F5a-scrape.json)
 
-# Step 2: interact — visit 2 has no button; click must fail
+# Step 2: interact — visit 2 has no button; replay fails before this code runs
 curl -sS -X POST "http://localhost:3002/v2/scrape/${F5A_ID}/interact" \
   -H 'Content-Type: application/json' -H "$AUTH" \
-  -d "{\"code\": \"await page.goto('http://replay-fault:4322/replay-fault/element?token=${F5A_TOKEN}'); await page.click('#replay-btn');\"}" \
+  -d '{"code": "console.log(\"interact code should not run before replay failure\")"}' \
   > /tmp/F5a-interact.json
 
 jq '{
   success, code, error,
+  replayFailedAt: .details.replayFailedAt,
+  stderrSnippet: .details.stderrSnippet,
   pageUrl: .details.pageUrl,
   screenshotLen: (.details.screenshot | length // 0)
 }' /tmp/F5a-interact.json
 ```
 
 PASS:
-- Scrape: `success: true`, `button_visible: true`, `scrape_id` is non-null
+- Scrape: `success: true`, `action_clicked: true`, `scrape_id` is non-null
 - Interact: `success: false`
 - `code: "BROWSER_EXECUTION_FAILED"`
-- `error` contains `"#replay-btn"` (Playwright waiting for the missing selector)
+- `error` is `"Failed to initialize browser session from the original scrape context. Please rerun the scrape and try again."`
+- `replayFailedAt` is `{ "actionIndex": 1, "actionType": "click" }`
+- `stderrSnippet` contains `Replay action #1 (click)`
 - **`pageUrl`** is `"http://replay-fault:4322/replay-fault/element?token=f5a-..."` ← proves which page was open when the click failed
 - **`screenshotLen > 1000`** ← screenshot captured showing the page without the button
 

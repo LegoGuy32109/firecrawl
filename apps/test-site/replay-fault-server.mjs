@@ -28,7 +28,8 @@ function html(body, status = 200) {
 function elementPage(token, visitCount) {
   const buttonVisible = visitCount === 1;
   const content = buttonVisible
-    ? `<button id="replay-btn" type="button">Click me (only here on visit 1)</button>`
+    ? `<button id="replay-btn" type="button" onclick="document.getElementById('click-result').textContent='Button clicked successfully during scrape actions'; this.setAttribute('data-clicked','true');">Click me (only here on visit 1)</button>
+  <p id="click-result">Button has not been clicked yet.</p>`
     : `<p id="button-gone">Button removed (visit ${visitCount} — element no longer in DOM)</p>`;
 
   return html(`<!doctype html>

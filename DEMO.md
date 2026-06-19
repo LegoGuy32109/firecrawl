@@ -37,23 +37,82 @@ Auth key (pre-filled in the UI): `fc-3d478a296e59403e85c794aba81ffd2a`
 
 ---
 
-## Demo A — Element disappears (UI walkthrough)
+## Demo A — Scrape action replay fails in Interact (UI walkthrough)
 
-Shows the envelope in the browser with a screenshot of the missing button.
+Shows the actual issue #7 path: the original scrape action succeeds, then
+Interact tries to reconstruct that scrape state by replaying the saved action
+against a changed page. The replay fails before the interact code runs, and the
+Interact tab shows which replay action failed.
+
+Use a fresh token for every run:
+```
+demo-1750000000
+```
+
+**Step 1: Scrape** — paste this URL into the scrape URL field:
+```
+http://replay-fault:4322/replay-fault/element?token=demo-1750000000
+```
+
+Add one scrape action:
+```json
+{ "type": "click", "selector": "#replay-btn" }
+```
+
+Run the scrape. It should succeed. The response markdown should include:
+```
+Button clicked successfully during scrape actions
+```
+
+That proves the button existed and the scrape action was good on visit 1.
+
+**Step 2: Interact** — open the Interact tab for that scrape. Select the scrape
+from Existing scrape if needed.
+
+If it shows **Live session**, click **End live session** or choose **Force new
+replay**. The point of this demo is to force Interact to reconstruct the browser
+from saved scrape actions after no usable live session exists.
+
+Choose **Replay from scrape** or **Force new replay**, then paste harmless code:
+```javascript
+console.log("If you see this, replay did not fail first");
+```
+
+**What you see:** The Interact error view says:
+
+```
+Replay reconstruction failed at action 1 (click)
+```
+
+It also shows:
+- `code: BROWSER_EXECUTION_FAILED`
+- `details.replayFailedAt.actionIndex: 1`
+- `details.replayFailedAt.actionType: "click"`
+- a screenshot of visit 2, where the page says the button was removed
+- the page URL, proving the replay was on the expected page
+
+This is different from a code-execution failure: the user code never gets to run.
+
+---
+
+## Demo A2 — Same page, code execution failure only
+
+This is the older proof path and is useful as a contrast. It does **not** prove
+scrape-action replay failed; it only proves interact code errors are rendered.
 
 **Step 1: Scrape** — paste into the URL field, hit Scrape.
 ```
-http://replay-fault:4322/replay-fault/element?token=demo-001
+http://replay-fault:4322/replay-fault/element?token=demo-code-001
 ```
-The markdown will contain "Click me (only here on visit 1)" — confirming the button existed at scrape time.
 
-**Step 2: Interact** — click the seam button ("Interact with this page"), paste into the code editor, hit Run.
+**Step 2: Interact** — paste this code and run:
 ```javascript
-await page.goto('http://replay-fault:4322/replay-fault/element?token=demo-001');
+await page.goto('http://replay-fault:4322/replay-fault/element?token=demo-code-001');
 await page.click('#replay-btn');
 ```
 
-**What you see:** The error view shows the page screenshot (no button), the exact URL that was open, and the error message pinning the failed click. Use a fresh token (`demo-002`, `demo-003`, …) for each run.
+**What you see:** The error view shows the screenshot and missing selector, but
+the headline is `Interact code failed`, not `Replay reconstruction failed...`.
 
 ---
 
