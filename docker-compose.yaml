@@ -200,21 +200,6 @@ services:
         max-file: "3"
         compress: "true"
 
-  # Local LLM proxy (Codex/Claude enterprise OAuth) — useful for testing AI
-  # features without a paid OpenAI key. Profile-gated: only starts under
-  # `--profile full`. Demo paths don't depend on it.
-  llm-proxy:
-    profiles: ["full"]
-    build:
-      context: ./apps/llm-proxy
-    environment:
-      PROXY_BACKEND: ${PROXY_BACKEND:-codex}
-      PROXY_TIMEOUT_MS: ${PROXY_TIMEOUT_MS:-30000}
-    volumes:
-      - codex-auth:/root/.codex
-    restart: unless-stopped
-    networks:
-      - backend
 
   # one-shot: creates the database on first boot (no-op afterwards)
   # Profile-gated alongside foundationdb.

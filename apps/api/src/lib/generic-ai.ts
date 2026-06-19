@@ -21,10 +21,6 @@ type Provider =
   | "deepinfra"
   | "vertex";
 const defaultProvider: Provider = config.OLLAMA_BASE_URL ? "ollama" : "openai";
-const localProxyUrl =
-  config.LOCAL_LLM_PROXY_URL ??
-  (config.ENV === "local" ? "http://llm-proxy:3001" : undefined);
-
 const providerList: Record<Provider, any> = {
   openai: createOpenAI({
     apiKey: config.OPENAI_API_KEY,

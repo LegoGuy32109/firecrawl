@@ -41,7 +41,6 @@ This starts all Docker services (Redis, RabbitMQ, nuq-postgres, playwright-servi
 - `DISABLE_BLOCKLIST=true` — skips blocklist table lookups (table is empty locally)
 - `DATABASE_URL` / `DATABASE_REPLICA_URL` — pointed at localhost:5432 (same container as NuQ)
 - `INDEX_DATABASE_URL` — same localhost:5432; the index-worker always tries to connect regardless of `USE_DB_AUTHENTICATION`
-- `LOCAL_LLM_PROXY_URL=http://localhost:3001` — routes AI-backed features through the local proxy
 - `TEST_API_KEY=fc-3d478a296e59403e85c794aba81ffd2a` — pre-fills the playground API key field on refresh
 
 ## 3. Test API key
@@ -91,17 +90,3 @@ curl -s "http://localhost:3002/v2/scrape/${SCRAPE_ID}/interact" \
 | `change_tracking_insert_scrape`        | No-op — no Supabase realtime needed locally               |
 
 The billing emulation is intentional: you can test credit-gated code paths without depleting a real quota.
-
-## LLM backend (optional)
-
-The API defaults to Gemini/OpenAI. To route all AI calls through a local proxy (e.g. `claude` CLI or `codex`):
-
-```bash
-# From apps/llm-proxy/
-pnpm start   # starts the proxy on :4000
-
-# Then add to your dev:local env:
-LOCAL_LLM_PROXY_URL=http://localhost:4000
-```
-
-Set `LOCAL_LLM_PROXY_URL` in your shell before running `pnpm dev:local` and the proxy intercepts all `getModel()` calls.
