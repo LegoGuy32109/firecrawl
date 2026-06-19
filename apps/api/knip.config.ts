@@ -19,6 +19,7 @@ const config: KnipConfig = {
     "src/lib/live.ts",
   ],
   ignoreDependencies: ["undici-types", "stripe"],
+  ignoreBinaries: ["psql"],
 };
 
 export default config;
