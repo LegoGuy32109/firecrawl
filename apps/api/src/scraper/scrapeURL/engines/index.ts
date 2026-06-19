@@ -13,6 +13,10 @@ import {
   playwrightMaxReasonableTime,
   scrapeURLWithPlaywright,
 } from "./playwright";
+import {
+  playwrightCDPMaxReasonableTime,
+  scrapeURLWithPlaywrightCDP,
+} from "./playwright/cdp";
 import { indexMaxReasonableTime, scrapeURLWithIndex } from "./index/index";
 import {
   scrapeURLWithWikipedia,
@@ -30,6 +34,7 @@ import { getPDFMaxPages } from "../../../controllers/v2/types";
 import type { PdfMetadata } from "./pdf/types";
 import { BrandingProfile } from "../../../types/branding";
 import { BrandingNotSupportedError } from "../error";
+import type { LiveMetadata } from "../../../controllers/v2/types";
 
 export type Engine =
   | "fire-engine;chrome-cdp"
@@ -39,6 +44,7 @@ export type Engine =
   | "fire-engine;tlsclient"
   | "fire-engine;tlsclient;stealth"
   | "playwright"
+  | "playwright;cdp"
   | "fetch"
   | "pdf"
   | "document"
@@ -76,7 +82,7 @@ const engines: Engine[] = [
         "fire-engine;tlsclient;stealth" as const,
       ]
     : []),
-  ...(usePlaywright ? ["playwright" as const] : []),
+  ...(usePlaywright ? ["playwright;cdp" as const, "playwright" as const] : []),
   "fetch",
   "pdf",
   "document",
@@ -144,6 +150,7 @@ export type EngineScrapeResult = {
     }[];
     pdfs: string[];
   };
+  live?: LiveMetadata;
 
   branding?: BrandingProfile;
 
@@ -175,6 +182,7 @@ const engineHandlers: {
   "fire-engine;tlsclient": scrapeURLWithFireEngineTLSClient,
   "fire-engine;tlsclient;stealth": scrapeURLWithFireEngineTLSClient,
   playwright: scrapeURLWithPlaywright,
+  "playwright;cdp": scrapeURLWithPlaywrightCDP,
   fetch: scrapeURLWithFetch,
   pdf: scrapePDF,
   document: scrapeDocument,
@@ -200,6 +208,7 @@ const engineMRTs: {
   "fire-engine;tlsclient;stealth": meta =>
     fireEngineMaxReasonableTime(meta, "tlsclient"),
   playwright: playwrightMaxReasonableTime,
+  "playwright;cdp": playwrightCDPMaxReasonableTime,
   fetch: fetchMaxReasonableTime,
   pdf: pdfMaxReasonableTime,
   document: documentMaxReasonableTime,
@@ -363,6 +372,27 @@ const engineOptions: {
       disableAdblock: false,
     },
     quality: 20,
+  },
+  "playwright;cdp": {
+    features: {
+      actions: true,
+      waitFor: true,
+      screenshot: true,
+      "screenshot@fullScreen": true,
+      pdf: false,
+      document: false,
+      audio: false,
+      video: false,
+      atsv: false,
+      location: true,
+      mobile: true,
+      skipTlsVerification: true,
+      useFastMode: false,
+      stealthProxy: false,
+      branding: false,
+      disableAdblock: false,
+    },
+    quality: 35,
   },
   "fire-engine;tlsclient": {
     features: {

@@ -8,6 +8,7 @@ import {
 import { CostTracking } from "./cost-tracking";
 import { hasFormatOfType } from "./format-utils";
 import { TransportableError } from "./error";
+import { ScrapeError } from "./error-codes";
 import { FeatureFlag } from "../scraper/scrapeURL/engines";
 import { isUrlBlocked } from "../scraper/WebScraper/utils/blocklist";
 
@@ -46,8 +47,8 @@ export async function calculateCreditsToBeBilled(
     // Bill for DNS resolution errors
     if (
       error instanceof TransportableError &&
-      (error.code === "SCRAPE_DNS_RESOLUTION_ERROR" ||
-        error.code === "SCRAPE_LOCKDOWN_CACHE_MISS")
+      (error.code === ScrapeError.DNS ||
+        error.code === ScrapeError.LOCKDOWN_CACHE_MISS)
     ) {
       creditsToBeBilled = 1;
     }

@@ -6,6 +6,22 @@ import parseDiff from "parse-diff";
 import { generateCompletions } from "./llmExtract";
 import { hasFormatOfType } from "../../../lib/format-utils";
 import { getJobFromGCS } from "../../../lib/gcs-jobs";
+import { ChangeTrackingWarning } from "../../../lib/error-codes";
+import type { Warning } from "../../../controllers/v2/types";
+
+type WarnableDocument = Document & {
+  warning?: string;
+  warnings?: Warning[];
+};
+
+function pushWarning(
+  document: WarnableDocument,
+  warning: Warning,
+  message: string,
+) {
+  document.warning = message + (document.warning ? " " + document.warning : "");
+  document.warnings = [...(document.warnings ?? []), warning];
+}
 
 async function extractDataWithSchema(
   content: string,
@@ -82,9 +98,14 @@ export async function deriveDiff(
 
   if (changeTrackingFormat) {
     if (meta.internalOptions.zeroDataRetention) {
-      document.warning =
-        "Change tracking is not supported with zero data retention." +
-        (document.warning ? " " + document.warning : "");
+      pushWarning(
+        document as WarnableDocument,
+        {
+          code: ChangeTrackingWarning.ZDR_UNSUPPORTED,
+          message: "Change tracking is not supported with zero data retention.",
+        },
+        "Change tracking is not supported with zero data retention.",
+      );
       return document;
     }
 
@@ -98,9 +119,14 @@ export async function deriveDiff(
       );
     } catch (error) {
       meta.logger.error("Error fetching previous scrape", { error });
-      document.warning =
-        "Comparing failed, please try again later." +
-        (document.warning ? ` ${document.warning}` : "");
+      pushWarning(
+        document as WarnableDocument,
+        {
+          code: ChangeTrackingWarning.COMPARE_FAILED,
+          message: "Comparing failed, please try again later.",
+        },
+        "Comparing failed, please try again later.",
+      );
       return document;
     }
     const end = Date.now();
@@ -269,9 +295,14 @@ export async function deriveDiff(
           meta.logger.error("Error generating structured diff with LLM", {
             error,
           });
-          document.warning =
-            "Structured diff generation failed." +
-            (document.warning ? ` ${document.warning}` : "");
+          pushWarning(
+            document as WarnableDocument,
+            {
+              code: ChangeTrackingWarning.STRUCTURED_DIFF_FAILED,
+              message: "Structured diff generation failed.",
+            },
+            "Structured diff generation failed.",
+          );
         }
       }
     } else {

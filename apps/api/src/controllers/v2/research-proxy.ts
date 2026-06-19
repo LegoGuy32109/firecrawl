@@ -17,6 +17,9 @@ import type {
 } from "../../services/logging/log_job";
 import type { RequestWithAuth } from "../v1/types";
 import { wrap } from "../../routes/shared";
+import { makeResponder } from "./response-enveloper";
+import { ProxyError, RequestError } from "../../lib/error-codes";
+import type { ErrorDetails } from "../../lib/error-details";
 
 const TIMEOUT_MS = 120_000;
 const SEARCH_CREDITS_PER_TEN_RESULTS = 2;
@@ -192,15 +195,12 @@ function creditsFor(
 }
 
 function researchError(
-  res: Response,
-  status: number,
+  r: ReturnType<typeof makeResponder>,
   error: string,
-  details?: unknown,
+  details?: ErrorDetails,
 ) {
-  return res.status(status).json({
-    success: false,
-    error,
-    ...(details === undefined ? {} : { details }),
+  return r.fail(RequestError.BAD_REQUEST, error, {
+    ...(details !== undefined ? { details } : {}),
   });
 }
 
@@ -239,6 +239,7 @@ function createResearchController(
 ): ResearchController {
   return async (req, res: Response) => {
     const authedReq = req as RequestWithAuth<any, any, any>;
+    const r = makeResponder(req, res);
     const started = Date.now();
     const jobId = uuidv7();
     const logger = rootLogger.child({
@@ -251,12 +252,7 @@ function createResearchController(
     const parsed = schema.safeParse(req.query);
     if (!parsed.success) {
       logger.warn("Invalid research query", { error: parsed.error.issues });
-      return researchError(
-        res,
-        400,
-        "Invalid query parameters",
-        parsed.error.issues,
-      );
+      return researchError(r, "Invalid query parameters", parsed.error.issues);
     }
 
     const params = parsed.data as ResearchQueryParams;
@@ -286,9 +282,11 @@ function createResearchController(
         queryKeys,
       );
       if (!upstream) {
-        statusCode = 404;
+        statusCode = 503;
         error = "Research service is not configured";
-        return res.status(404).end();
+        return r.fail(ProxyError.NOT_CONFIGURED, error, {
+          details: { upstream: "research" },
+        });
       }
 
       statusCode = upstream.status;
@@ -332,23 +330,29 @@ function createResearchController(
       }
 
       if (responseBody === null || typeof responseBody === "string") {
+        // raw-response: streaming upstream proxy body
         return res.status(statusCode).send(responseBody ?? "");
       }
       const response =
         options.legacy && upstream.ok
           ? addLegacySnakeCaseAliases(responseBody)
           : responseBody;
+      // raw-response: relays the upstream research body verbatim
       return res.status(statusCode).json(response);
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === "TimeoutError") {
         statusCode = 504;
         error = "Research service timed out";
-        return res.status(504).end();
+        return r.fail(ProxyError.UPSTREAM_TIMEOUT, error, {
+          details: { upstream: "research", timeoutMs: TIMEOUT_MS },
+        });
       }
       statusCode = 502;
       error = "Research proxy error";
       logger.error("Research proxy error", { error: err });
-      return res.status(502).end();
+      return r.fail(ProxyError.UPSTREAM_UNAVAILABLE, error, {
+        details: { upstream: "research" },
+      });
     } finally {
       const timeTaken = (Date.now() - started) / 1000;
       logResearchEndpoint({

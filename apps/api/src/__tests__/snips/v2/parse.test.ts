@@ -143,8 +143,10 @@ describe("/v2/parse", () => {
         identity,
       );
 
+      expect(failure.status).toBe("failed");
       expect(failure.code).toBe("BAD_REQUEST");
       expect(failure.error).toContain("Missing file upload");
+      expect(failure.diagnostics).toBeDefined();
     },
     scrapeTimeout,
   );
@@ -164,8 +166,10 @@ describe("/v2/parse", () => {
         identity,
       );
 
+      expect(failure.status).toBe("failed");
       expect(failure.code).toBe("BAD_REQUEST");
       expect(failure.error).toContain("Invalid JSON");
+      expect(failure.diagnostics).toBeDefined();
     },
     scrapeTimeout,
   );
@@ -187,8 +191,41 @@ describe("/v2/parse", () => {
         identity,
       );
 
+      expect(failure.status).toBe("failed");
       expect(failure.code).toBe("UNSUPPORTED_FILE_TYPE");
       expect(failure.error).toContain("Unsupported upload type");
+      expect(failure.diagnostics).toBeDefined();
+    },
+    scrapeTimeout,
+  );
+
+  it(
+    "returns a structured 403 envelope for parse agent interop failures",
+    async () => {
+      const failure = await parseWithFailure(
+        {
+          options: {
+            formats: ["markdown"],
+            __agentInterop: {
+              auth: "definitely-wrong",
+            },
+          } as any,
+          file: {
+            content: htmlFixture,
+            filename: "upload.html",
+            contentType: "text/html",
+          },
+        },
+        identity,
+      );
+
+      expect(failure.status).toBe("failed");
+      expect(failure.code).toBe("BAD_REQUEST");
+      expect(failure.error.toLowerCase()).toContain("agent interop");
+      expect(failure.diagnostics).toBeDefined();
+      expect(JSON.stringify(failure.diagnostics)).toContain(
+        '"zeroDataRetention":false',
+      );
     },
     scrapeTimeout,
   );

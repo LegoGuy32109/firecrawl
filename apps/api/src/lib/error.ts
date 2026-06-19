@@ -1,45 +1,36 @@
-export type ErrorCodes =
-  | "SCRAPE_TIMEOUT"
-  | "MAP_TIMEOUT"
-  | "UNKNOWN_ERROR"
-  | "SCRAPE_ALL_ENGINES_FAILED"
-  | "SCRAPE_SSL_ERROR"
-  | "SCRAPE_SITE_ERROR"
-  | "SCRAPE_PROXY_SELECTION_ERROR"
-  | "SCRAPE_PDF_PREFETCH_FAILED"
-  | "SCRAPE_DOCUMENT_PREFETCH_FAILED"
-  | "SCRAPE_JOB_CANCELLED"
-  | "SCRAPE_RETRY_LIMIT"
-  | "SCRAPE_ZDR_VIOLATION_ERROR"
-  | "SCRAPE_DNS_RESOLUTION_ERROR"
-  | "SCRAPE_PDF_INSUFFICIENT_TIME_ERROR"
-  | "SCRAPE_PDF_ANTIBOT_ERROR"
-  | "SCRAPE_PDF_OCR_REQUIRED"
-  | "SCRAPE_DOCUMENT_ANTIBOT_ERROR"
-  | "SCRAPE_UNSUPPORTED_FILE_ERROR"
-  | "SCRAPE_ACTION_ERROR"
-  | "SCRAPE_RACED_REDIRECT_ERROR"
-  | "SCRAPE_NO_CACHED_DATA"
-  | "SCRAPE_LOCKDOWN_CACHE_MISS"
-  | "SCRAPE_SITEMAP_ERROR"
-  | "SCRAPE_ACTIONS_NOT_SUPPORTED"
-  | "SCRAPE_BRANDING_NOT_SUPPORTED"
-  | "AGENT_INDEX_ONLY"
-  | "SCRAPE_AUDIO_UNSUPPORTED_URL"
-  | "SCRAPE_VIDEO_UNSUPPORTED_URL"
-  | "SCRAPE_X_TWITTER_CONFIGURATION_ERROR"
-  | "PARSE_UNSUPPORTED_OPTIONS"
-  | "CRAWL_DENIAL"
-  | "MAP_FAILED"
-  | "BAD_REQUEST_INVALID_JSON"
-  | "BAD_REQUEST";
+import {
+  CommonError,
+  CrawlError,
+  LocalError,
+  MapError,
+  ScrapeError,
+} from "./error-codes";
+import type { ErrorCodes } from "./error-codes";
+import type { ErrorDetails } from "./error-details";
+
+export type { ErrorCodes } from "./error-codes";
+
+export function restoreTransportableError<T extends TransportableError>(
+  error: T,
+  data: { stack?: string; details?: ErrorDetails },
+): T {
+  error.stack = data.stack;
+  Object.assign(error, { details: data.details });
+  return error;
+}
 
 export class TransportableError extends Error {
   public readonly code: ErrorCodes;
+  public readonly details?: ErrorDetails;
 
-  constructor(code: ErrorCodes, message?: string, options?: ErrorOptions) {
+  constructor(
+    code: ErrorCodes,
+    message?: string,
+    options?: ErrorOptions & { details?: ErrorDetails },
+  ) {
     super(message, options);
     this.code = code;
+    this.details = options?.details;
   }
 
   serialize() {
@@ -47,6 +38,7 @@ export class TransportableError extends Error {
       cause: this.cause,
       stack: this.stack,
       message: this.message,
+      details: this.details,
     };
   }
 
@@ -54,9 +46,13 @@ export class TransportableError extends Error {
     code: ErrorCodes,
     data: ReturnType<typeof this.prototype.serialize>,
   ) {
-    const x = new TransportableError(code, data.message, { cause: data.cause });
-    x.stack = data.stack;
-    return x;
+    return restoreTransportableError(
+      new TransportableError(code, data.message, {
+        cause: data.cause,
+        details: data.details,
+      }),
+      data,
+    );
   }
 }
 
@@ -64,7 +60,7 @@ export class ScrapeJobTimeoutError extends TransportableError {
   constructor(
     message: string = "The scrape operation timed out before completing. This happens when a page takes too long to load, render, or process. Possible causes: (1) The website is slow or unresponsive, (2) The page has heavy JavaScript that takes time to execute, (3) The page is very large or has many resources to load, (4) Network latency is high. To fix this, try increasing the timeout parameter in your scrape request, or if using actions, ensure your selectors are correct and the page is ready before actions are executed.",
   ) {
-    super("SCRAPE_TIMEOUT", message);
+    super(ScrapeError.TIMEOUT, message);
   }
 
   serialize() {
@@ -76,8 +72,7 @@ export class ScrapeJobTimeoutError extends TransportableError {
     data: ReturnType<typeof this.prototype.serialize>,
   ) {
     const x = new ScrapeJobTimeoutError(data.message);
-    x.stack = data.stack;
-    return x;
+    return restoreTransportableError(x, data);
   }
 }
 
@@ -86,7 +81,7 @@ export class UnknownError extends TransportableError {
     const innerMessage =
       inner && inner instanceof Error ? inner.message : String(inner);
     super(
-      "UNKNOWN_ERROR",
+      CommonError.UNKNOWN,
       `An unexpected internal error occurred while processing your request. Error details: "${innerMessage}". This is typically a temporary issue. Please try your request again. If the problem persists, contact support with your request ID and this error message for investigation.`,
     );
 
@@ -105,15 +100,44 @@ export class UnknownError extends TransportableError {
   ) {
     const x = new UnknownError("dummy");
     x.message = data.message;
-    x.stack = data.stack;
-    return x;
+    return restoreTransportableError(x, data);
+  }
+}
+
+export class LocalFeatureUnsupportedError extends TransportableError {
+  constructor(public feature: string) {
+    super(
+      LocalError.FEATURE_UNSUPPORTED,
+      `The feature "${feature}" is unsupported in this local environment. Enable fire-engine or disable the feature.`,
+      {
+        details: {
+          feature,
+          requiresEngine: "fire-engine",
+        },
+      },
+    );
+  }
+
+  serialize() {
+    return {
+      ...super.serialize(),
+      feature: this.feature,
+    };
+  }
+
+  static deserialize(
+    _code: ErrorCodes,
+    data: ReturnType<typeof this.prototype.serialize>,
+  ) {
+    const x = new LocalFeatureUnsupportedError(data.feature);
+    return restoreTransportableError(x, data);
   }
 }
 
 export class MapTimeoutError extends TransportableError {
   constructor() {
     super(
-      "MAP_TIMEOUT",
+      MapError.TIMEOUT,
       "The map operation timed out before completing. This happens when discovering URLs on a large website takes too long. Try using a more specific starting URL, or increase the timeout parameter if available.",
     );
   }
@@ -127,14 +151,13 @@ export class MapTimeoutError extends TransportableError {
     data: ReturnType<typeof this.prototype.serialize>,
   ) {
     const x = new MapTimeoutError();
-    x.stack = data.stack;
-    return x;
+    return restoreTransportableError(x, data);
   }
 }
 
 export class MapFailedError extends TransportableError {
   constructor(message: string) {
-    super("MAP_FAILED", message);
+    super(MapError.FAILED, message);
   }
 
   serialize() {
@@ -146,15 +169,14 @@ export class MapFailedError extends TransportableError {
     data: ReturnType<typeof this.prototype.serialize>,
   ) {
     const x = new MapFailedError(data.message);
-    x.stack = data.stack;
-    return x;
+    return restoreTransportableError(x, data);
   }
 }
 
 export class RacedRedirectError extends TransportableError {
   constructor() {
     super(
-      "SCRAPE_RACED_REDIRECT_ERROR",
+      ScrapeError.RACED_REDIRECT,
       "This URL was not scraped because another scrape job in this same crawl or batch scrape has already scraped this URL (usually due to a redirect). This is an expected error used to prevent duplicate scrapes of the same URL and ensure efficiency. No action is needed - the content is already captured by the other scrape job.",
     );
   }
@@ -168,14 +190,13 @@ export class RacedRedirectError extends TransportableError {
     data: ReturnType<typeof this.prototype.serialize>,
   ) {
     const x = new RacedRedirectError();
-    x.stack = data.stack;
-    return x;
+    return restoreTransportableError(x, data);
   }
 }
 
 export class SitemapError extends TransportableError {
   constructor(message: string, cause?: unknown) {
-    super("SCRAPE_SITEMAP_ERROR", message, { cause });
+    super(ScrapeError.SITEMAP, message, { cause });
   }
 
   serialize() {
@@ -187,14 +208,13 @@ export class SitemapError extends TransportableError {
     data: ReturnType<typeof this.prototype.serialize>,
   ) {
     const x = new SitemapError(data.message, data.cause);
-    x.stack = data.stack;
-    return x;
+    return restoreTransportableError(x, data);
   }
 }
 
 export class CrawlDenialError extends TransportableError {
   constructor(public reason: string) {
-    super("CRAWL_DENIAL", reason);
+    super(CrawlError.DENIAL, reason, { details: { reason } });
   }
 
   serialize() {
@@ -209,14 +229,13 @@ export class CrawlDenialError extends TransportableError {
     data: ReturnType<typeof this.prototype.serialize> & { reason: string },
   ) {
     const x = new CrawlDenialError(data.reason);
-    x.stack = data.stack;
-    return x;
+    return restoreTransportableError(x, data);
   }
 }
 
 export class ActionsNotSupportedError extends TransportableError {
   constructor(message: string) {
-    super("SCRAPE_ACTIONS_NOT_SUPPORTED", message);
+    super(ScrapeError.ACTIONS_NOT_SUPPORTED, message);
   }
 
   serialize() {
@@ -228,8 +247,7 @@ export class ActionsNotSupportedError extends TransportableError {
     data: ReturnType<typeof this.prototype.serialize>,
   ) {
     const x = new ActionsNotSupportedError(data.message);
-    x.stack = data.stack;
-    return x;
+    return restoreTransportableError(x, data);
   }
 }
 

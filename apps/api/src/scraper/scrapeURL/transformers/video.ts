@@ -2,6 +2,22 @@ import { Meta } from "..";
 import { Document, VideoItem } from "../../../controllers/v2/types";
 import { config } from "../../../config";
 import { hasFormatOfType } from "../../../lib/format-utils";
+import { MediaWarning } from "../../../lib/error-codes";
+import type { Warning } from "../../../controllers/v2/types";
+
+type WarnableDocument = Document & {
+  warning?: string;
+  warnings?: Warning[];
+};
+
+function pushWarning(
+  document: WarnableDocument,
+  warning: Warning,
+  message: string,
+) {
+  document.warning = message + (document.warning ? " " + document.warning : "");
+  document.warnings = [...(document.warnings ?? []), warning];
+}
 
 let cachedUrlRegex: RegExp | null = null;
 let cacheTimestamp = 0;
@@ -206,9 +222,15 @@ export async function fetchVideo(
 
   if (!config.AVGRAB_SERVICE_URL) {
     meta.logger.warn("AVGRAB_SERVICE_URL is not configured");
-    document.warning =
-      "Video format is not available (service not configured)." +
-      (document.warning ? " " + document.warning : "");
+    pushWarning(
+      document as WarnableDocument,
+      {
+        code: MediaWarning.VIDEO_UNAVAILABLE,
+        message: "Video format is not available (service not configured).",
+        details: { reason: "not_configured" },
+      },
+      "Video format is not available (service not configured).",
+    );
     return document;
   }
 

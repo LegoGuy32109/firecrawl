@@ -7,6 +7,7 @@ import { isFdbTeam } from "./nuq-router";
 import { externalSlotsFdb, nuqFdbHealthCheck, withFdbTimeout } from "./nuq-fdb";
 import { isSelfHosted } from "../../lib/deployment";
 import { ScrapeJobTimeoutError, TransportableError } from "../../lib/error";
+import { ScrapeError } from "../../lib/error-codes";
 import { logger as _logger } from "../../lib/logger";
 import { nuqRedis, semaphoreKeys } from "./redis";
 import { Gauge, Histogram, register } from "prom-client";
@@ -190,7 +191,7 @@ function startHeartbeat(
 
         const ok = await heartbeat(teamId, holderId);
         if (!ok) {
-          throw new TransportableError("SCRAPE_TIMEOUT", "heartbeat_failed");
+          throw new TransportableError(ScrapeError.TIMEOUT, "heartbeat_failed");
         }
         if (stopped) break;
         await sleep(intervalMs);

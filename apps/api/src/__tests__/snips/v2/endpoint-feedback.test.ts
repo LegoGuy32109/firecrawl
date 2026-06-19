@@ -13,6 +13,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { db } from "../../../db/connection";
 import * as schema from "../../../db/schema";
+import { CommonError, FeedbackError } from "../../../lib/error-codes";
 
 let identity: Identity;
 let secondaryIdentity: Identity;
@@ -90,7 +91,7 @@ describeIf(TEST_PRODUCTION)("Generic endpoint feedback tests", () => {
     );
 
     expect(failed.error.toLowerCase()).toContain("not found");
-    expect((failed as any).feedbackErrorCode).toBe("JOB_NOT_FOUND");
+    expect((failed as any).code).toBe(FeedbackError.TARGET_NOT_FOUND);
   }, 120000);
 
   it("applies search feedback validation on the generic endpoint", async () => {
@@ -149,7 +150,7 @@ describeIf(TEST_PRODUCTION)("Generic endpoint feedback tests", () => {
 
       expect(failed.statusCode).toBe(409);
       expect(failed.body.success).toBe(false);
-      expect(failed.body.feedbackErrorCode).toBe("SEARCH_FAILED");
+      expect(failed.body.code).toBe(CommonError.UNKNOWN);
     } finally {
       await db
         .delete(schema.searches)

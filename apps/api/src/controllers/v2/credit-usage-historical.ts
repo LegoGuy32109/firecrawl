@@ -36,6 +36,7 @@ export async function creditUsageHistoricalController(
     return aTime - bTime;
   });
 
+  // raw-response: historical usage endpoint returns the computed payload directly
   res.json({
     success: true,
     periods,

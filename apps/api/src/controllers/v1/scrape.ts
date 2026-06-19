@@ -12,6 +12,7 @@ import { v7 as uuidv7 } from "uuid";
 import { getJobPriority } from "../../lib/job-priority";
 import { fromV1ScrapeOptions } from "../v2/types";
 import { TransportableError } from "../../lib/error";
+import { AgentError, CommonError, ScrapeError } from "../../lib/error-codes";
 import { NuQJob } from "../../services/worker/nuq";
 import { checkPermissions } from "../../lib/permissions";
 import { includesFormat } from "../../lib/format-utils";
@@ -220,7 +221,7 @@ export async function scrapeController(
     }
 
     const timeoutErr =
-      e instanceof TransportableError && e.code === "SCRAPE_TIMEOUT";
+      e instanceof TransportableError && e.code === ScrapeError.TIMEOUT;
 
     if (e instanceof TransportableError) {
       if (!timeoutErr) {
@@ -230,7 +231,7 @@ export async function scrapeController(
         });
       }
       // DNS resolution errors should return 200 with success: false
-      if (e.code === "SCRAPE_DNS_RESOLUTION_ERROR") {
+      if (e.code === ScrapeError.DNS) {
         return res.status(200).json({
           success: false,
           code: e.code,
@@ -238,7 +239,7 @@ export async function scrapeController(
         });
       }
 
-      if (e.code === "AGENT_INDEX_ONLY") {
+      if (e.code === AgentError.INDEX_ONLY) {
         return res.status(403).json({
           success: false,
           code: e.code,
@@ -248,7 +249,7 @@ export async function scrapeController(
         });
       }
 
-      if (e.code === "SCRAPE_ACTIONS_NOT_SUPPORTED") {
+      if (e.code === ScrapeError.ACTIONS_NOT_SUPPORTED) {
         return res.status(400).json({
           success: false,
           code: e.code,
@@ -256,7 +257,7 @@ export async function scrapeController(
         });
       }
 
-      return res.status(e.code === "SCRAPE_TIMEOUT" ? 408 : 500).json({
+      return res.status(e.code === ScrapeError.TIMEOUT ? 408 : 500).json({
         success: false,
         code: e.code,
         error: e.message,
@@ -284,7 +285,7 @@ export async function scrapeController(
       });
       return res.status(500).json({
         success: false,
-        code: "UNKNOWN_ERROR",
+        code: CommonError.UNKNOWN,
         error: getErrorContactMessage(id),
       });
     }

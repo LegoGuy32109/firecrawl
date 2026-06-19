@@ -1,6 +1,6 @@
 import { Response } from "express";
 import { config } from "../../config";
-import { RequestWithAuth } from "./types";
+import { JobState, RequestWithAuth } from "./types";
 import {
   getExtract,
   getExtractExpiry,
@@ -13,6 +13,9 @@ import {
 } from "../../lib/supabase-jobs";
 import { logger as _logger } from "../../lib/logger";
 import { getJobFromGCS } from "../../lib/gcs-jobs";
+import { CommonError, LifecycleError } from "../../lib/error-codes";
+import { makeResponder, Responder } from "./response-enveloper";
+import { deserializeTransportableError } from "../../lib/error-serde";
 
 async function getExtractData(id: string): Promise<any> {
   // Try GCS first if configured
@@ -30,44 +33,72 @@ async function getExtractData(id: string): Promise<any> {
   return [];
 }
 
+function sendAsyncStatus(
+  r: Responder,
+  body: Record<string, unknown>,
+  jobState: JobState.Processing | JobState.Completed,
+) {
+  const withState = { ...body, jobState };
+  return jobState === JobState.Processing
+    ? r.processing(withState)
+    : r.ok(withState);
+}
+
 export async function extractStatusController(
   req: RequestWithAuth<{ jobId: string }, any, any>,
   res: Response,
 ) {
+  const r = makeResponder(req, res);
   const extractRequest = config.USE_DB_AUTHENTICATION
     ? await supabaseGetExtractRequestByIdDirect(req.params.jobId)
     : null;
+  if (config.USE_DB_AUTHENTICATION && !extractRequest) {
+    return r.fail(LifecycleError.JOB_NOT_FOUND, "Extract job not found");
+  }
+
   if (config.USE_DB_AUTHENTICATION) {
-    if (!extractRequest || extractRequest.team_id !== req.auth.team_id) {
-      return res.status(404).json({
-        success: false,
-        error: "Extract job not found",
-      });
+    if (extractRequest.team_id !== req.auth.team_id) {
+      return r.fail(LifecycleError.JOB_WRONG_TEAM, "Extract job not found");
     }
 
     if (extractRequest.kind === "agent") {
       const agent = await supabaseGetAgentByIdDirect(req.params.jobId);
+
+      if (agent && !agent.is_successful) {
+        const failedError = deserializeTransportableError(agent.error ?? "");
+        return r.asyncFail(
+          failedError?.code ?? CommonError.UNKNOWN,
+          failedError?.message ?? agent.error ?? "Extract job failed",
+          {
+            expiresAt: new Date(
+              new Date(
+                agent.created_at ?? extractRequest.created_at,
+              ).getTime() +
+                1000 * 60 * 60 * 24,
+            ).toISOString(),
+            creditsUsed: agent?.credits_cost,
+          },
+        );
+      }
 
       let data: any = undefined;
       if (agent?.is_successful) {
         data = await getJobFromGCS(agent.id);
       }
 
-      return res.status(200).json({
-        success: true,
-        status: !agent
-          ? "processing"
-          : agent.is_successful
-            ? "completed"
-            : "failed",
-        error: agent?.error || undefined,
-        data,
-        expiresAt: new Date(
-          new Date(agent?.created_at ?? extractRequest.created_at).getTime() +
-            1000 * 60 * 60 * 24,
-        ).toISOString(),
-        creditsUsed: agent?.credits_cost,
-      });
+      const jobState = !agent ? JobState.Processing : JobState.Completed;
+      return sendAsyncStatus(
+        r,
+        {
+          data,
+          expiresAt: new Date(
+            new Date(agent?.created_at ?? extractRequest.created_at).getTime() +
+              1000 * 60 * 60 * 24,
+          ).toISOString(),
+          creditsUsed: agent?.credits_cost,
+        },
+        jobState,
+      );
     }
   }
 
@@ -85,27 +116,46 @@ export async function extractStatusController(
           data = await getExtractData(req.params.jobId);
         }
 
-        return res.status(200).json({
-          success: dbExtract.is_successful,
-          data,
-          status: dbExtract.is_successful ? "completed" : "failed",
-          error: dbExtract.error || undefined,
-          expiresAt: new Date(
-            new Date(dbExtract.created_at).getTime() + 1000 * 60 * 60 * 24,
-          ).toISOString(),
-        });
+        if (!dbExtract.is_successful) {
+          const failedError = deserializeTransportableError(
+            dbExtract.error ?? "",
+          );
+          return r.asyncFail(
+            failedError?.code ?? CommonError.UNKNOWN,
+            failedError?.message ?? dbExtract.error ?? "Extract job failed",
+            {
+              expiresAt: new Date(
+                new Date(dbExtract.created_at).getTime() + 1000 * 60 * 60 * 24,
+              ).toISOString(),
+            },
+          );
+        }
+
+        return sendAsyncStatus(
+          r,
+          {
+            data,
+            expiresAt: new Date(
+              new Date(dbExtract.created_at).getTime() + 1000 * 60 * 60 * 24,
+            ).toISOString(),
+          },
+          JobState.Completed,
+        );
       }
     }
 
     // Fall back to extractRequest info
-    return res.status(200).json({
-      success: true,
-      data: [],
-      status: "processing",
-      expiresAt: new Date(
-        new Date(extractRequest.created_at).getTime() + 1000 * 60 * 60 * 24,
-      ).toISOString(),
-    });
+    return sendAsyncStatus(
+      r,
+      {
+        data: [],
+        expiresAt: new Date(
+          new Date(extractRequest?.created_at ?? Date.now()).getTime() +
+            1000 * 60 * 60 * 24,
+        ).toISOString(),
+      },
+      JobState.Processing,
+    );
   }
 
   // Get result data if completed
@@ -114,34 +164,55 @@ export async function extractStatusController(
     data = await getExtractData(req.params.jobId);
   }
 
-  return res.status(200).json({
-    success: redisExtract.status === "failed" ? false : true,
-    data,
-    status: redisExtract.status,
-    error: (() => {
-      if (typeof redisExtract.error === "string") return redisExtract.error;
-      if (redisExtract.error && typeof redisExtract.error === "object") {
-        return typeof redisExtract.error.message === "string"
-          ? redisExtract.error.message
-          : typeof redisExtract.error.error === "string"
-            ? redisExtract.error.error
-            : JSON.stringify(redisExtract.error);
-      }
-      return undefined;
-    })(),
-    expiresAt: (await getExtractExpiry(req.params.jobId)).toISOString(),
-    steps: redisExtract.showSteps ? redisExtract.steps : undefined,
-    llmUsage: redisExtract.showLLMUsage ? redisExtract.llmUsage : undefined,
-    sources: redisExtract.showSources ? redisExtract.sources : undefined,
-    costTracking: redisExtract.showCostTracking
-      ? redisExtract.costTracking
-      : undefined,
-    sessionIds: redisExtract.sessionIds ? redisExtract.sessionIds : undefined,
-    tokensUsed: redisExtract.tokensBilled
-      ? redisExtract.tokensBilled
-      : undefined,
-    creditsUsed: redisExtract.creditsBilled
-      ? redisExtract.creditsBilled
-      : undefined,
-  });
+  if (redisExtract.status === "failed") {
+    const failedError =
+      typeof redisExtract.error === "string"
+        ? deserializeTransportableError(redisExtract.error)
+        : null;
+    const errorMessage =
+      typeof redisExtract.error === "string"
+        ? redisExtract.error
+        : redisExtract.error && typeof redisExtract.error === "object"
+          ? typeof redisExtract.error.message === "string"
+            ? redisExtract.error.message
+            : typeof redisExtract.error.error === "string"
+              ? redisExtract.error.error
+              : JSON.stringify(redisExtract.error)
+          : "Extract job failed";
+    return r.asyncFail(
+      failedError?.code ?? CommonError.UNKNOWN,
+      failedError?.message ?? errorMessage,
+      {
+        expiresAt: (await getExtractExpiry(req.params.jobId)).toISOString(),
+        creditsUsed: redisExtract.creditsBilled
+          ? redisExtract.creditsBilled
+          : undefined,
+        data,
+      },
+    );
+  }
+
+  return sendAsyncStatus(
+    r,
+    {
+      data,
+      expiresAt: (await getExtractExpiry(req.params.jobId)).toISOString(),
+      steps: redisExtract.showSteps ? redisExtract.steps : undefined,
+      llmUsage: redisExtract.showLLMUsage ? redisExtract.llmUsage : undefined,
+      sources: redisExtract.showSources ? redisExtract.sources : undefined,
+      costTracking: redisExtract.showCostTracking
+        ? redisExtract.costTracking
+        : undefined,
+      sessionIds: redisExtract.sessionIds ? redisExtract.sessionIds : undefined,
+      tokensUsed: redisExtract.tokensBilled
+        ? redisExtract.tokensBilled
+        : undefined,
+      creditsUsed: redisExtract.creditsBilled
+        ? redisExtract.creditsBilled
+        : undefined,
+    },
+    redisExtract.status === "completed"
+      ? JobState.Completed
+      : JobState.Processing,
+  );
 }

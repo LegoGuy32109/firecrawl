@@ -15,8 +15,11 @@ const config: KnipConfig = {
   ignore: [
     "native/**",
     "src/scraper/scrapeURL/engines/fire-engine/branding-script/**",
+    "src/admin/playground/client/**",
+    "src/lib/live.ts",
   ],
   ignoreDependencies: ["undici-types", "stripe"],
+  ignoreBinaries: ["psql"],
 };
 
 export default config;

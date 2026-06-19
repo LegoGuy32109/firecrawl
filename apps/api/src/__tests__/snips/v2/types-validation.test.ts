@@ -187,6 +187,20 @@ describe("V2 Types Validation", () => {
       ).toThrow();
     });
 
+    it("should reject changeTracking with a singular mode field", () => {
+      expect(() =>
+        scrapeRequestSchema.parse({
+          url: "https://example.com",
+          formats: [
+            {
+              type: "changeTracking",
+              mode: "json",
+            } as any,
+          ],
+        } satisfies ScrapeRequestInput),
+      ).toThrow();
+    });
+
     it("should accept valid scrape request with changeTracking format", () => {
       const input: ScrapeRequestInput = {
         url: "https://example.com",

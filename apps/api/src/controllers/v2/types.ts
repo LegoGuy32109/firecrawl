@@ -16,6 +16,8 @@ import {
 } from "../v1/types";
 import type { InternalOptions } from "../../scraper/scrapeURL";
 import { ErrorCodes } from "../../lib/error";
+import type { ErrorDetails, WarningDetails } from "../../lib/error-details";
+import type { WarningCodes } from "../../lib/error-codes";
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { integrationSchema } from "../../utils/integration";
@@ -50,7 +52,14 @@ export const URL = z.preprocess(
     .refine(x => {
       if (config.TEST_SUITE_SELF_HOSTED && config.ALLOW_LOCAL_WEBHOOKS) {
         if (
-          /^https?:\/\/(localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?([\/?#]|$)/i.test(
+          /^https?:\/\/(localhost|host\.docker\.internal|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?([\/?#]|$)/i.test(
+            x as string,
+          )
+        ) {
+          return true;
+        }
+        if (
+          /^https?:\/\/(test-site|replay-fault)(:\d+)?([\/?#]|$)/i.test(
             x as string,
           )
         ) {
@@ -62,6 +71,15 @@ export const URL = z.preprocess(
       );
     }, "URL must have a valid top-level domain or be a valid path")
     .refine(x => {
+      if (
+        config.TEST_SUITE_SELF_HOSTED &&
+        config.ALLOW_LOCAL_WEBHOOKS &&
+        /^https?:\/\/(test-site|replay-fault)(:\d+)?([\/?#]|$)/i.test(
+          x as string,
+        )
+      ) {
+        return true;
+      }
       try {
         checkUrl(x as string);
         return true;
@@ -1199,6 +1217,8 @@ export type Document = {
   highlights?: string;
   branding?: BrandingProfile;
   warning?: string;
+  warnings?: Warning[];
+  live?: LiveMetadata;
   attributes?: {
     selector: string;
     attribute: string;
@@ -1283,7 +1303,13 @@ export type Document = {
     cachedAt?: string;
     creditsUsed?: number;
     postprocessorsUsed?: string[];
+    live?: LiveMetadata;
     indexId?: string; // ID used to store the document in the index (GCS)
+    engineAttempts?: Array<{
+      engine: string;
+      success: boolean;
+      error?: string;
+    }>;
     concurrencyLimited?: boolean;
     concurrencyQueueDurationMs?: number;
     // [key: string]: string | string[] | number | { smartScrape: number; other: number; total: number } | undefined;
@@ -1311,23 +1337,162 @@ export type VideoItem = {
   metadata?: Record<string, unknown>;
 };
 
-export type ErrorResponse = {
+export type LiveMetadata = {
+  mode: "single" | "multi";
+  status: "streaming" | "completed" | "unavailable" | "warning";
+  sessionId?: string;
+  scrapeId?: string;
+  activeSessionId?: string;
+  liveViewUrl?: string;
+  liveViewWsUrl?: string;
+  screenshotUrl?: string;
+  recordingUrl?: string;
+  framesCaptured?: number;
+  recordingDurationMs?: number;
+  warning?: string;
+  warnings?: Warning[];
+  error?: {
+    code?: ErrorCodes | WarningCodes;
+    message: string;
+    details?: Record<string, unknown>;
+  };
+  sessions?: {
+    scrapeId?: string;
+    sessionId: string;
+    status: "streaming" | "completed" | "unavailable" | "warning";
+    liveViewUrl?: string;
+    liveViewWsUrl?: string;
+    screenshotUrl?: string;
+    recordingUrl?: string;
+    framesCaptured?: number;
+    recordingDurationMs?: number;
+    warning?: string;
+  }[];
+};
+
+export enum ResponseStatus {
+  Ok = "ok",
+  Warning = "warning",
+  Processing = "processing",
+  Failed = "failed",
+}
+
+export enum JobState {
+  Processing = "processing",
+  Completed = "completed",
+  Cancelled = "cancelled",
+  Failed = "failed",
+}
+
+export enum DiagnosticStatus {
+  Ok = "ok",
+  Warning = "warning",
+  Failed = "failed",
+  Skipped = "skipped",
+  TimedOut = "timed_out",
+}
+
+export type PrivacyMode =
+  | "disabled"
+  | "allowed"
+  | "forced"
+  | "request"
+  | "not_applicable";
+
+// Resolved once per request by route-group middleware (see resolve-privacy.ts); the responder
+// reads it and applies `reduced` to every response. Only `reduced` changes behavior; `mode` and
+// `zeroDataRetention` are reported metadata.
+export type RequestPrivacy = {
+  zeroDataRetention: boolean;
+  mode: PrivacyMode;
+  reduced: boolean;
+};
+
+declare global {
+  namespace Express {
+    interface Request {
+      privacy?: RequestPrivacy;
+    }
+  }
+}
+
+export type DiagnosticStep = {
+  name: string;
+  status: DiagnosticStatus;
+  code?: ErrorCodes | WarningCodes;
+  message?: string;
+  durationMs?: number;
+  startedAt?: string;
+  endedAt?: string;
+  details?: Record<string, unknown>;
+};
+
+export type Diagnostics = {
+  privacy: {
+    zeroDataRetention: boolean;
+    mode: PrivacyMode;
+    reduced: boolean;
+  };
+  traceId?: string;
+  durationMs?: number;
+  steps?: DiagnosticStep[];
+  sources?: Record<string, DiagnosticStep>;
+  actions?: DiagnosticStep[];
+};
+
+export type Warning = {
+  code: WarningCodes;
+  message: string;
+  details?: WarningDetails;
+};
+
+export type ResponseCore = {
+  success: boolean;
+  status: ResponseStatus;
+  diagnostics: Diagnostics;
+  warning?: string;
+  warnings?: Warning[];
+  live?: LiveMetadata;
+  liveViewUrl?: string;
+  liveViewWsUrl?: string;
+};
+
+type ErrorCore = ResponseCore & {
   success: false;
-  code?: ErrorCodes;
+  status: ResponseStatus.Failed;
+  code: ErrorCodes;
   error: string;
-  details?: any;
+  errorId?: string;
+  details?: ErrorDetails;
+};
+
+export type StrictErrorResponse = ErrorCore & {
   sponsor_status?: string;
   login_url?: string;
 };
 
+export type ErrorResponse = StrictErrorResponse;
+
+export type AsyncJobFailureResponse<TData = unknown> = ErrorCore & {
+  jobState: JobState.Failed;
+  failureCount?: number;
+  failuresByCode?: Partial<Record<ErrorCodes, number>>;
+  data?: TData;
+  creditsUsed?: number;
+  expiresAt?: string;
+  createdAt?: string;
+  completedAt?: string;
+  duration?: number;
+};
+
 export type ScrapeResponse =
   | ErrorResponse
-  | {
+  | (ResponseCore & {
       success: true;
       warning?: string;
       data: Document;
       scrape_id?: string;
-    };
+    });
 
 export interface URLTrace {
   url: string;
@@ -1366,45 +1531,48 @@ export interface ExtractResponse {
 
 export type AgentResponse =
   | ErrorResponse
-  | {
-      success: boolean;
+  | (ResponseCore & {
+      success: true;
       id: string;
-    };
+    });
 
 export type AgentStatusResponse =
   | ErrorResponse
-  | {
-      success: boolean;
-      status: "processing" | "completed" | "failed";
+  | (ResponseCore & {
+      success: true;
+      status:
+        | ResponseStatus.Processing
+        | ResponseStatus.Failed
+        | ResponseStatus.Ok;
       error?: string;
       data?: any;
       model?: "spark-1-pro" | "spark-1-mini";
       expiresAt: string;
       creditsUsed?: number;
-    };
+    });
 
 export type AgentCancelResponse =
   | ErrorResponse
-  | {
-      success: boolean;
-    };
+  | (ResponseCore & {
+      success: true;
+    });
 
 export type CrawlResponse =
   | ErrorResponse
-  | {
+  | (ResponseCore & {
       success: true;
       id: string;
       url: string;
-    };
+    });
 
 export type BatchScrapeResponse =
   | ErrorResponse
-  | {
+  | (ResponseCore & {
       success: true;
       id: string;
       url: string;
       invalidURLs?: string[];
-    };
+    });
 
 // Map document interface (transitioned from v1)
 export interface MapDocument {
@@ -1416,12 +1584,12 @@ export interface MapDocument {
 // V2 Map Response with dictionary format
 export type MapResponse =
   | ErrorResponse
-  | {
+  | (ResponseCore & {
       success: true;
       id: string;
       links?: MapDocument[];
       warning?: string;
-    };
+    });
 
 export type CrawlStatusParams = {
   jobId: string;
@@ -1433,17 +1601,24 @@ export type ConcurrencyCheckParams = {
 
 export type ConcurrencyCheckResponse =
   | ErrorResponse
-  | {
+  | (ResponseCore & {
       success: true;
       concurrency: number;
       maxConcurrency: number;
-    };
+    });
 
 export type CrawlStatusResponse =
   | ErrorResponse
-  | {
+  | (AsyncJobFailureResponse<Document[]> & {
+      completed: number;
+      total: number;
+    })
+  | (ResponseCore & {
       success: true;
-      status: "scraping" | "completed" | "failed" | "cancelled";
+      status:
+        | ResponseStatus.Processing
+        | ResponseStatus.Ok
+        | ResponseStatus.Failed;
       completed: number;
       total: number;
       creditsUsed: number;
@@ -1454,24 +1629,11 @@ export type CrawlStatusResponse =
       next?: string;
       data: Document[];
       warning?: string;
-    }
-  | {
-      success: false;
-      status: "failed";
-      error: string;
-      completed: number;
-      total: number;
-      creditsUsed: number;
-      expiresAt: string;
-      createdAt?: string;
-      completedAt?: string;
-      duration?: number;
-      data: Document[];
-    };
+    });
 
 export type OngoingCrawlsResponse =
   | ErrorResponse
-  | {
+  | (ResponseCore & {
       success: true;
       crawls: {
         id: string;
@@ -1480,11 +1642,12 @@ export type OngoingCrawlsResponse =
         created_at: string;
         options: CrawlerOptions;
       }[];
-    };
+    });
 
 export type CrawlErrorsResponse =
   | ErrorResponse
-  | {
+  | (ResponseCore & {
+      success: true;
       errors: {
         id: string;
         timestamp?: string;
@@ -1493,7 +1656,7 @@ export type CrawlErrorsResponse =
         error: string;
       }[];
       robotsBlocked: string[];
-    };
+    });
 
 type AuthObject = {
   team_id: string;
@@ -2141,18 +2304,8 @@ export const searchFeedbackSchema = z
 export type SearchFeedbackRequest = z.infer<typeof searchFeedbackSchema>;
 export type SearchFeedbackRequestInput = z.input<typeof searchFeedbackSchema>;
 
-export type SearchFeedbackErrorCode =
-  | "SEARCH_NOT_FOUND"
-  | "FEEDBACK_WINDOW_EXPIRED"
-  | "SEARCH_FAILED"
-  | "PREVIEW_TEAM_NOT_ALLOWED"
-  | "TEAM_OPTED_OUT"
-  | "INVALID_BODY"
-  | "DB_DISABLED"
-  | "INTERNAL";
-
 export type SearchFeedbackResponse =
-  | (ErrorResponse & { feedbackErrorCode?: SearchFeedbackErrorCode })
+  | ErrorResponse
   | {
       success: true;
       feedbackId: string;
@@ -2255,17 +2408,8 @@ export type EndpointFeedbackRequestInput = z.input<
   typeof endpointFeedbackSchema
 >;
 
-export type EndpointFeedbackErrorCode =
-  | "JOB_NOT_FOUND"
-  | "FEEDBACK_WINDOW_EXPIRED"
-  | "PREVIEW_TEAM_NOT_ALLOWED"
-  | "TEAM_OPTED_OUT"
-  | "INVALID_BODY"
-  | "DB_DISABLED"
-  | "INTERNAL";
-
 export type EndpointFeedbackResponse =
-  | (ErrorResponse & { feedbackErrorCode?: EndpointFeedbackErrorCode })
+  | ErrorResponse
   | {
       success: true;
       feedbackId: string;

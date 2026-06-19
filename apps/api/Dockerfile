@@ -51,15 +51,21 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path \
     && chmod -R a+w $RUSTUP_HOME $CARGO_HOME
 
-# Copy source files
+# Copy dependency manifests and native workspace sources first. The native
+# workspace builds during install, so keep it in the dependency cache layer
+# while avoiding invalidation from ordinary API source edits.
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
-COPY . .
+COPY native/package.json native/Cargo.toml native/build.rs ./native/
+COPY native/src ./native/src
 
 # Install dependencies
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/native/target \
     pnpm install --frozen-lockfile
+
+# Copy the rest of the source after dependencies are installed.
+COPY . .
 
 # Build the application
 RUN pnpm run build

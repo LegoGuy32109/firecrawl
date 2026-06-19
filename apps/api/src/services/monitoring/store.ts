@@ -4,6 +4,7 @@ import { and, asc, count, desc, eq, isNull, ne } from "drizzle-orm";
 import { db, dbRr } from "../../db/connection";
 import * as schema from "../../db/schema";
 import { monitoringClaimDueMonitors } from "../../db/rpc";
+import { logger as _logger } from "../../lib/logger";
 import { shouldParsePDF } from "../../controllers/v2/types";
 import {
   getNextMonitorRunAt,
@@ -20,6 +21,9 @@ import type {
   MonitorTarget,
   UpdateMonitorRequest,
 } from "./types";
+
+const logger = _logger.child({ module: "monitoring-store" });
+let monitoringClaimRpcUnavailable = false;
 
 export function hashMonitorUrl(url: string): Buffer {
   return createHash("sha256").update(url).digest();
@@ -1002,11 +1006,57 @@ export async function claimDueMonitors(params: {
   limit: number;
   leaseSeconds: number;
 }): Promise<MonitorRow[]> {
-  const data = await run(
-    () => monitoringClaimDueMonitors<MonitorRow>(params),
-    "Failed to claim due monitors",
+  if (monitoringClaimRpcUnavailable) return [];
+
+  try {
+    return await run(
+      () => monitoringClaimDueMonitors<MonitorRow>(params),
+      "Failed to claim due monitors",
+    );
+  } catch (error) {
+    if (isMissingMonitoringClaimRpcError(error)) {
+      if (!monitoringClaimRpcUnavailable) {
+        monitoringClaimRpcUnavailable = true;
+        logger.info(
+          "Skipping due monitor claims because the monitoring RPC is unavailable",
+        );
+      }
+      return [];
+    }
+    throw error;
+  }
+}
+
+function isMissingMonitoringClaimRpcError(error: unknown): boolean {
+  const message = collectErrorMessages(error).join(" ").toLowerCase();
+  return (
+    message.includes("monitoring_claim_due_monitors") &&
+    (message.includes("does not exist") ||
+      message.includes("failed query") ||
+      message.includes("undefined function") ||
+      message.includes("42883"))
   );
-  return data;
+}
+
+function collectErrorMessages(error: unknown): string[] {
+  const messages: string[] = [];
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof Error && typeof current.message === "string") {
+      messages.push(current.message);
+      current = current.cause;
+      continue;
+    }
+    if (typeof current === "string") {
+      messages.push(current);
+    }
+    break;
+  }
+
+  return messages;
 }
 
 export async function deferMonitorClaim(

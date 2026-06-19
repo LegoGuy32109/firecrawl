@@ -28,6 +28,7 @@ vi.mock("../../services/idempotency/validate", () => ({
 vi.mock("geoip-country", () => ({ lookup: vi.fn(() => null) }));
 
 import { checkCreditsMiddleware } from "../../routes/shared";
+import { BillingError } from "../../lib/error-codes";
 import { autumnService } from "../../services/autumn/autumn.service";
 
 const checkCreditsMock = autumnService.checkCredits as MockedFunction<
@@ -85,13 +86,25 @@ describe("checkCreditsMiddleware – Autumn overage handling", () => {
     expect(req.body.limit).toBe(100);
   });
 
-  it("blocks with 402 when Autumn denies and no remaining credits", async () => {
+  it("uses the v2 envelope and error code for v2 requests", async () => {
     checkCreditsMock.mockResolvedValue({ allowed: false, remaining: 0 });
 
-    const req = buildReq();
+    const req = buildReq({ baseUrl: "/v2", path: "/v2/crawl" });
     const { res } = await runMiddleware(req);
 
     expect(res.status).toHaveBeenCalledWith(402);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        status: "failed",
+        code: BillingError.INSUFFICIENT_CREDITS,
+        diagnostics: expect.objectContaining({
+          privacy: expect.objectContaining({
+            mode: "disabled",
+          }),
+        }),
+      }),
+    );
   });
 
   it("adjusts crawl limit down when Autumn denies but some credits remain", async () => {

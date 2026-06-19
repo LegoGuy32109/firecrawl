@@ -1,0 +1,76 @@
+# docker-compose.playground.yaml
+#
+# Playground demo stack. Layered on top of docker-compose.yaml to bring up
+# Firecrawl with persistence enabled and the Drizzle schema applied, so
+# /v2/scrape and /v2/scrape/:jobId/interact both work end-to-end against a
+# fresh clone with no env editing.
+#
+# Run from repo root:
+#   docker compose -f docker-compose.yaml -f docker-compose.playground.yaml up
+#
+# The API listens on http://localhost:3002. Authorize with:
+#   Authorization: Bearer fc-3d478a296e59403e85c794aba81ffd2a
+#
+# (Any non-empty Bearer token works — apps/api/scripts/local-db-setup.sql
+# defines auth_credit_usage_chunk_47 to accept any key. The fc-... key is the
+# convention used by the playground client and existing tests.)
+
+services:
+  replay-fault:
+    # Minimal stateful HTTP server for F5a/F5b CLI tests.
+    # Serves /replay-fault/element and /replay-fault/route, each keyed by
+    # ?token=<uuid>. Visit counts reset when the container restarts, so use a
+    # fresh token per test run.
+    build:
+      context: apps/test-site
+      dockerfile_inline: |
+        FROM node:22-alpine
+        WORKDIR /app
+        COPY replay-fault-server.mjs .
+        EXPOSE 4322
+        CMD ["node", "replay-fault-server.mjs", "4322"]
+    ports:
+      - "4322:4322"
+    networks:
+      - backend
+
+  nuq-postgres:
+    # initdb runs every .sql in /docker-entrypoint-initdb.d in alpha order on
+    # first DB creation. nuq-postgres' Dockerfile already installs 010-nuq.sql
+    # (queue schema). Mount the Firecrawl Drizzle migration and local seed on
+    # top so a fresh `docker compose up` boots with the full schema + the
+    # mock auth function that lets any Bearer token through.
+    volumes:
+      - ./apps/api/drizzle/20260618153654_cynical_hannibal_king/migration.sql:/docker-entrypoint-initdb.d/020-firecrawl-schema.sql:ro
+      - ./apps/api/scripts/local-db-setup.sql:/docker-entrypoint-initdb.d/030-firecrawl-local.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  playwright-service:
+    environment:
+      ALLOW_LOCAL_WEBHOOKS: "true"
+
+  api:
+    restart: unless-stopped
+    environment:
+      # Persistence ON so /v2/scrape writes a `scrapes` row that
+      # /v2/scrape/:jobId/interact can look up. Without this, interact always
+      # returns JOB_NOT_FOUND because log_job.ts skips DB writes.
+      USE_DB_AUTHENTICATION: "true"
+      # Drizzle reads DATABASE_URL directly (apps/api/src/db/connection.ts).
+      # The POSTGRES_* parts in common-env only drive the harness's container
+      # management code, which is bypassed under --start-docker.
+      DATABASE_URL: "postgresql://postgres:postgres@nuq-postgres:5432/postgres"
+      DATABASE_REPLICA_URL: "postgresql://postgres:postgres@nuq-postgres:5432/postgres"
+      INDEX_DATABASE_URL: "postgresql://postgres:postgres@nuq-postgres:5432/postgres"
+      DISABLE_BLOCKLIST: "true"
+      BULL_AUTH_KEY: "playground-local"
+      ALLOW_LOCAL_WEBHOOKS: "true"
+      TEST_SUITE_SELF_HOSTED: "true"
+    depends_on:
+      nuq-postgres:
+        condition: service_healthy

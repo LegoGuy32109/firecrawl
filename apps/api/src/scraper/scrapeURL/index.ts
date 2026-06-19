@@ -77,7 +77,12 @@ import {
   ScrapeJobTimeoutError,
   CrawlDenialError,
   ActionsNotSupportedError,
+  LocalFeatureUnsupportedError,
 } from "../../lib/error";
+
+const useFireEngine =
+  config.FIRE_ENGINE_BETA_URL !== "" &&
+  config.FIRE_ENGINE_BETA_URL !== undefined;
 import { htmlTransform } from "./lib/removeUnwantedElements";
 import { postprocessors } from "./postprocessors";
 import { rewriteUrl } from "./lib/rewriteUrl";
@@ -85,6 +90,22 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
+import { ScrapeWarning } from "../../lib/error-codes";
+import type { Warning } from "../../controllers/v2/types";
+
+type WarnableDocument = Document & {
+  warning?: string;
+  warnings?: Warning[];
+};
+
+function appendWarning(
+  document: WarnableDocument,
+  warning: Warning,
+  message: string,
+) {
+  document.warning = message + (document.warning ? " " + document.warning : "");
+  document.warnings = [...(document.warnings ?? []), warning];
+}
 
 export type ScrapeUrlResponse =
   | {
@@ -680,7 +701,27 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
     // TODO: handle sitemap data, see WebScraper/index.ts:280
     // TODO: ScrapeEvents
 
+    if (!useFireEngine && meta.mock === null) {
+      const fireEngineOnlyFeature = ["audio", "video", "stealthProxy"].find(
+        feature => meta.featureFlags.has(feature as FeatureFlag),
+      );
+
+      if (fireEngineOnlyFeature !== undefined) {
+        throw new LocalFeatureUnsupportedError(fireEngineOnlyFeature);
+      }
+    }
+
     const fallbackList = await buildFallbackList(meta);
+
+    if (fallbackList.length === 0) {
+      const fireEngineOnlyFeature = ["audio", "video", "stealthProxy"].find(
+        feature => meta.featureFlags.has(feature as FeatureFlag),
+      );
+
+      if (fireEngineOnlyFeature !== undefined) {
+        throw new LocalFeatureUnsupportedError(fireEngineOnlyFeature);
+      }
+    }
 
     // Check if actions are requested but no engines support them
     if (meta.featureFlags.has("actions")) {
@@ -716,6 +757,7 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
     const remainingEngines = [...fallbackList];
     let enginePromises: EngineBundlePromise[] = [];
     const enginesAttempted: string[] = [];
+    const engineErrors: Map<string, string> = new Map();
 
     meta.abort.throwIfAborted();
 
@@ -870,6 +912,14 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
               );
             }
 
+            // Record the engine failure for diagnostic steps
+            engineErrors.set(
+              error.engine,
+              error.error instanceof Error
+                ? error.error.message
+                : String(error.error),
+            );
+
             // Filter out the failed engine
             enginePromises = enginePromises.filter(
               x => x.engine !== error.engine,
@@ -999,6 +1049,12 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
         contentType: engineResult.contentType,
         timezone: engineResult.timezone,
         proxyUsed: engineResult.proxyUsed ?? "basic",
+        ...(engineResult.live ? { live: engineResult.live } : {}),
+        ...(config.TEST_SUITE_SELF_HOSTED
+          ? {
+              engine: result.engine,
+            }
+          : {}),
         ...(fallbackList.find(x =>
           ["index", "index;documents"].includes(x.engine),
         )
@@ -1012,6 +1068,13 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
               }
           : {}),
         postprocessorsUsed: engineResult.postprocessorsUsed,
+        engineAttempts: enginesAttempted.map(engine => ({
+          engine,
+          success: engine === result.engine,
+          ...(engineErrors.has(engine)
+            ? { error: engineErrors.get(engine) }
+            : {}),
+        })),
       },
     };
 
@@ -1021,10 +1084,18 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
         engine: result.engine,
         unsupportedFeatures: result.unsupportedFeatures,
       });
-      document.warning =
-        document.warning !== undefined
-          ? document.warning + " " + warning
-          : warning;
+      appendWarning(
+        document as WarnableDocument,
+        {
+          code: ScrapeWarning.ENGINE_PARTIAL_FEATURES,
+          message: warning,
+          details: {
+            unsupportedFeatures: [...result.unsupportedFeatures],
+            engine: result.engine,
+          },
+        },
+        warning,
+      );
     }
 
     // NOTE: for sitemap, we don't need all the transformers, need to skip unused ones

@@ -33,11 +33,19 @@ import {
 import { logRequest } from "../../services/logging/log_job";
 import type { BillingMetadata } from "../../services/billing/types";
 import { getScrapeZDR } from "../../lib/zdr-helpers";
+import { makeResponder } from "./response-enveloper";
+import {
+  AuthError,
+  GatingError,
+  LifecycleError,
+  RequestError,
+} from "../../lib/error-codes";
 
 export async function batchScrapeController(
   req: RequestWithAuth<{}, BatchScrapeResponse, BatchScrapeRequest>,
   res: Response<BatchScrapeResponse>,
 ) {
+  const r = makeResponder(req, res);
   const preNormalizedBody = { ...req.body };
   if (req.body?.ignoreInvalidURLs === true) {
     req.body = batchScrapeRequestSchemaNoURLValidation.parse(req.body);
@@ -47,10 +55,13 @@ export async function batchScrapeController(
 
   const permissions = checkPermissions(req.body, req.acuc?.flags);
   if (permissions.error) {
-    return res.status(403).json({
-      success: false,
-      error: permissions.error,
-    });
+    // NOTE: ZDR_NOT_SUPPORTED is 400 in the catalog (was 403); URL_BLOCKED is 403.
+    return r.fail(
+      permissions.error.toLowerCase().includes("zero data retention")
+        ? LifecycleError.ZDR_NOT_SUPPORTED
+        : GatingError.URL_BLOCKED,
+      permissions.error,
+    );
   }
 
   const zeroDataRetention =
@@ -62,15 +73,10 @@ export async function batchScrapeController(
     config.AGENT_INTEROP_SECRET &&
     req.body.__agentInterop.auth !== config.AGENT_INTEROP_SECRET
   ) {
-    return res.status(403).json({
-      success: false,
-      error: "Invalid agent interop.",
-    });
+    // NOTE: INVALID_API_KEY is 401 in the catalog (was 403).
+    return r.fail(AuthError.INTEROP_FORBIDDEN, "Invalid agent interop.");
   } else if (req.body.__agentInterop && !config.AGENT_INTEROP_SECRET) {
-    return res.status(403).json({
-      success: false,
-      error: "Agent interop is not enabled.",
-    });
+    return r.fail(AuthError.INTEROP_FORBIDDEN, "Agent interop is not enabled.");
   }
 
   const id = req.body.appendToId ?? uuidv7();
@@ -124,19 +130,13 @@ export async function batchScrapeController(
       )
     ) {
       if (!res.headersSent) {
-        return res.status(403).json({
-          success: false,
-          error: UNSUPPORTED_SITE_MESSAGE,
-        });
+        return r.fail(GatingError.URL_BLOCKED, UNSUPPORTED_SITE_MESSAGE);
       }
     }
   }
 
   if (urls.length === 0) {
-    return res.status(400).json({
-      success: false,
-      error: "No valid URLs provided",
-    });
+    return r.fail(RequestError.BAD_REQUEST, "No valid URLs provided");
   }
 
   logger.debug("Batch scrape " + id + " starting", {
@@ -185,10 +185,7 @@ export async function batchScrapeController(
 
   if (req.body.appendToId) {
     if (!sc || sc.team_id !== req.auth.team_id) {
-      return res.status(404).json({
-        success: false,
-        error: "Job not found",
-      });
+      return r.fail(LifecycleError.JOB_NOT_FOUND, "Job not found");
     }
   }
 
@@ -282,8 +279,7 @@ export async function batchScrapeController(
 
   const protocol = req.protocol;
 
-  return res.status(200).json({
-    success: true,
+  return r.ok({
     id,
     url: `${protocol}://${req.get("host")}/v2/batch/scrape/${id}`,
     invalidURLs,

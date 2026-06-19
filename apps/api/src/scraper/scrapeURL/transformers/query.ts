@@ -8,6 +8,22 @@ import {
   parseMarkdownToSentences,
   assembleAnswer,
 } from "../../../lib/highlight-spans";
+import { QueryWarning } from "../../../lib/error-codes";
+import type { Warning } from "../../../controllers/v2/types";
+
+type WarnableDocument = Document & {
+  warning?: string;
+  warnings?: Warning[];
+};
+
+function pushWarning(
+  document: WarnableDocument,
+  warning: Warning,
+  message: string,
+) {
+  document.warning = message + (document.warning ? " " + document.warning : "");
+  document.warnings = [...(document.warnings ?? []), warning];
+}
 
 const PROMPT_TAGS = /(<\/?)(query|page|lines)([\s>])/gi;
 function escapePromptTags(text: string): string {
@@ -207,25 +223,40 @@ export async function performQuery(
   }
 
   if (meta.internalOptions.zeroDataRetention) {
-    document.warning =
-      "Query mode is not supported with zero data retention." +
-      (document.warning ? " " + document.warning : "");
+    pushWarning(
+      document as WarnableDocument,
+      {
+        code: QueryWarning.ZDR_UNSUPPORTED,
+        message: "Query mode is not supported with zero data retention.",
+      },
+      "Query mode is not supported with zero data retention.",
+    );
     return document;
   }
 
   if (document.markdown === undefined) {
-    document.warning =
-      "Query mode is not supported without markdown content." +
-      (document.warning ? " " + document.warning : "");
+    pushWarning(
+      document as WarnableDocument,
+      {
+        code: QueryWarning.NO_MARKDOWN,
+        message: "Query mode is not supported without markdown content.",
+      },
+      "Query mode is not supported without markdown content.",
+    );
     return document;
   }
 
   const markdown = document.markdown!;
 
   if (!markdown || markdown.trim() === "") {
-    document.warning =
-      "Query was skipped because the markdown content is empty." +
-      (document.warning ? " " + document.warning : "");
+    pushWarning(
+      document as WarnableDocument,
+      {
+        code: QueryWarning.EMPTY_MARKDOWN,
+        message: "Query was skipped because the markdown content is empty.",
+      },
+      "Query was skipped because the markdown content is empty.",
+    );
     return document;
   }
 
@@ -244,9 +275,14 @@ export async function performQuery(
     if (answer !== null) {
       document.answer = answer;
     } else {
-      document.warning =
-        "Query generation failed after all models." +
-        (document.warning ? " " + document.warning : "");
+      pushWarning(
+        document as WarnableDocument,
+        {
+          code: QueryWarning.GENERATION_FAILED,
+          message: "Query generation failed after all models.",
+        },
+        "Query generation failed after all models.",
+      );
     }
   }
 
@@ -261,9 +297,14 @@ export async function performQuery(
     if (highlights !== null) {
       document.highlights = highlights;
     } else {
-      document.warning =
-        "Highlights generation failed after all models." +
-        (document.warning ? " " + document.warning : "");
+      pushWarning(
+        document as WarnableDocument,
+        {
+          code: QueryWarning.HIGHLIGHTS_FAILED,
+          message: "Highlights generation failed after all models.",
+        },
+        "Highlights generation failed after all models.",
+      );
     }
   }
 

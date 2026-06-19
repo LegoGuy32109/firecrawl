@@ -18,6 +18,16 @@ import {
   getRoutePattern,
 } from "../lib/http-metrics";
 import { UNSUPPORTED_SITE_MESSAGE } from "../lib/strings";
+import {
+  errorResponse,
+  makeResponder,
+} from "../controllers/v2/response-enveloper";
+import {
+  AuthError,
+  BillingError,
+  GatingError,
+  RequestError,
+} from "../lib/error-codes";
 import * as geoip from "geoip-country";
 import { isSelfHosted } from "../lib/deployment";
 import { validate as isUuid } from "uuid";
@@ -28,6 +38,41 @@ import {
   autumnService,
   CREDITS_FEATURE_ID,
 } from "../services/autumn/autumn.service";
+
+function isV2Request(req: Request): boolean {
+  return req.baseUrl === "/v2" || req.originalUrl.startsWith("/v2/");
+}
+
+function isKeylessAuthMessage(error: string): boolean {
+  return (
+    error === "Unauthorized" ||
+    error.includes("Token missing") ||
+    error.includes("not available without an API key") ||
+    error.includes("can't be used without an API key from here")
+  );
+}
+
+function respondRequestError(
+  req: Request,
+  res: Response,
+  code: AuthError | BillingError | GatingError | RequestError,
+  error: string,
+  legacyStatus: number,
+  legacyBody?: Record<string, unknown>,
+  opts: Parameters<typeof errorResponse>[3] = {},
+) {
+  if (isV2Request(req)) {
+    return makeResponder(req as any, res).fail(code, error, opts);
+  }
+
+  // raw-response: legacy non-v2 response body
+  return res.status(legacyStatus).json(
+    legacyBody ?? {
+      success: false,
+      error,
+    },
+  );
+}
 
 export function checkCreditsMiddleware(
   _minimum?: number,
@@ -52,38 +97,67 @@ export function checkCreditsMiddleware(
         const sponsor = req.acuc._agentSponsor;
 
         if (sponsor.status === "blocked") {
-          return res.status(403).json({
-            success: false,
-            error: "This API key has been blocked by the account holder.",
-          });
+          return respondRequestError(
+            req,
+            res,
+            AuthError.TEAM_SUSPENDED,
+            "This API key has been blocked by the account holder.",
+            403,
+          );
         }
 
         if (sponsor.status === "pending") {
           const deadline = new Date(sponsor.verification_deadline);
           if (deadline < new Date()) {
-            return res.status(403).json({
-              success: false,
-              error: "sponsor_verification_expired",
-              message:
-                "Sponsor verification has expired. The account holder needs to log in to confirm.",
-              login_url: "https://firecrawl.dev/signin",
-            });
+            return respondRequestError(
+              req,
+              res,
+              BillingError.SPONSOR_VERIFICATION_EXPIRED,
+              "Sponsor verification has expired. The account holder needs to log in to confirm.",
+              403,
+              {
+                success: false,
+                error: "sponsor_verification_expired",
+                message:
+                  "Sponsor verification has expired. The account holder needs to log in to confirm.",
+                login_url: "https://firecrawl.dev/signin",
+              },
+              {
+                details: { expiredAt: sponsor.verification_deadline },
+                login_url: "https://firecrawl.dev/signin",
+              },
+            );
           }
 
           // Enforce 50-credit cap for unverified agent keys
           const UNVERIFIED_CREDIT_LIMIT = 50;
           if (req.acuc.adjusted_credits_used >= UNVERIFIED_CREDIT_LIMIT) {
-            return res.status(402).json({
-              success: false,
-              error: "unverified_credit_limit_reached",
-              message:
-                "This agent key has used its 50 unverified credits. Ask the account holder to confirm the key to unlock full access.",
-              credit_limit: UNVERIFIED_CREDIT_LIMIT,
-              credits_used: req.acuc.adjusted_credits_used,
-              sponsor_status: "pending",
-              login_url: "https://firecrawl.dev/signin",
-              upgrade_url: "https://firecrawl.dev/pricing",
-            });
+            return respondRequestError(
+              req,
+              res,
+              BillingError.UNVERIFIED_CREDIT_LIMIT,
+              "This agent key has used its 50 unverified credits. Ask the account holder to confirm the key to unlock full access.",
+              402,
+              {
+                success: false,
+                error: "unverified_credit_limit_reached",
+                message:
+                  "This agent key has used its 50 unverified credits. Ask the account holder to confirm the key to unlock full access.",
+                credit_limit: UNVERIFIED_CREDIT_LIMIT,
+                credits_used: req.acuc.adjusted_credits_used,
+                sponsor_status: "pending",
+                login_url: "https://firecrawl.dev/signin",
+                upgrade_url: "https://firecrawl.dev/pricing",
+              },
+              {
+                details: {
+                  balance: req.acuc.adjusted_credits_used,
+                  required: UNVERIFIED_CREDIT_LIMIT,
+                },
+                sponsor_status: "pending",
+                login_url: "https://firecrawl.dev/signin",
+              },
+            );
           }
 
           // Force index-only mode for all pre-confirmation agent requests
@@ -174,19 +248,30 @@ export function checkCreditsMiddleware(
           !res.headersSent &&
           req.auth.team_id !== "8c528896-7882-4587-a4b6-768b721b0b53"
         ) {
-          return res.status(402).json({
-            success: false,
-            error:
-              "Insufficient " +
-              currencyName +
-              " to perform this request. For more " +
-              currencyName +
-              ", you can upgrade your plan at " +
-              (currencyName === "credits"
-                ? "https://firecrawl.dev/pricing or try changing the request limit to a lower value"
-                : "https://www.firecrawl.dev/extract#pricing") +
-              ".",
-          });
+          const message =
+            "Insufficient " +
+            currencyName +
+            " to perform this request. For more " +
+            currencyName +
+            ", you can upgrade your plan at " +
+            (currencyName === "credits"
+              ? "https://firecrawl.dev/pricing or try changing the request limit to a lower value"
+              : "https://www.firecrawl.dev/extract#pricing") +
+            ".";
+          return respondRequestError(
+            req,
+            res,
+            BillingError.INSUFFICIENT_CREDITS,
+            message,
+            402,
+            undefined,
+            {
+              details: {
+                balance: remainingCredits,
+                required: requestedCredits,
+              },
+            },
+          );
         }
       }
       next();
@@ -224,6 +309,30 @@ export function authMiddleware(
           if (auth.status === 401 || auth.agentAuthDiscovery) {
             applyAgentAuthDiscoveryHeader(res);
           }
+          if (isV2Request(req)) {
+            const error = auth.error ?? "Unauthorized";
+            const code = isKeylessAuthMessage(error)
+              ? error === "Unauthorized" || error.includes("Token missing")
+                ? AuthError.MISSING_API_KEY
+                : AuthError.KEY_NOT_KEYLESS_ELIGIBLE
+              : error.includes("OAuth token")
+                ? AuthError.OAUTH_TOKEN_EXPIRED
+                : error.includes("Invalid token")
+                  ? AuthError.INVALID_API_KEY
+                  : AuthError.MISSING_API_KEY;
+            return makeResponder(req as any, res).fail(code, error, {
+              details:
+                code === AuthError.INVALID_API_KEY
+                  ? { reason: error }
+                  : undefined,
+              login_url:
+                auth.status === 401
+                  ? "https://firecrawl.dev/signin"
+                  : undefined,
+            });
+          }
+
+          // raw-response: legacy non-v2 auth failure body.
           return res
             .status(auth.status)
             .json({ success: false, error: auth.error });
@@ -258,9 +367,19 @@ export function idempotencyMiddleware(
       const isIdempotencyValid = await validateIdempotencyKey(req);
       if (!isIdempotencyValid) {
         if (!res.headersSent) {
-          return res
-            .status(409)
-            .json({ success: false, error: "Idempotency key already used" });
+          return respondRequestError(
+            req,
+            res,
+            GatingError.IDEMPOTENCY_CONFLICT,
+            "Idempotency key already used",
+            409,
+            undefined,
+            {
+              details: {
+                key: String(req.headers["x-idempotency-key"] ?? ""),
+              },
+            },
+          );
         }
       }
       createIdempotencyKey(req);
@@ -281,10 +400,20 @@ export function blocklistMiddleware(
     })
   ) {
     if (!res.headersSent) {
-      return res.status(403).json({
-        success: false,
-        error: UNSUPPORTED_SITE_MESSAGE,
-      });
+      return respondRequestError(
+        req,
+        res,
+        GatingError.URL_BLOCKED,
+        UNSUPPORTED_SITE_MESSAGE,
+        403,
+        undefined,
+        {
+          details: {
+            url: typeof req.body.url === "string" ? req.body.url : undefined,
+            reason: UNSUPPORTED_SITE_MESSAGE,
+          },
+        },
+      );
     }
   }
   next();
@@ -338,12 +467,21 @@ export function countryCheck(
       country: country.country,
       teamId: req.auth.team_id,
     });
-    return res.status(403).json({
-      success: false,
-      error: isSelfHosted()
+    return respondRequestError(
+      req,
+      res,
+      GatingError.COUNTRY_RESTRICTED,
+      isSelfHosted()
         ? "Use of headers, actions, and the FIRE-1 agent is not allowed by default in your country. Please check your server configuration."
         : "Use of headers, actions, and the FIRE-1 agent is not allowed by default in your country. Please contact us at help@firecrawl.com",
-    });
+      403,
+      undefined,
+      {
+        details: {
+          country: country.country,
+        },
+      },
+    );
   }
 
   next();
@@ -359,10 +497,13 @@ export function validateJobIdParam(
   next: NextFunction,
 ) {
   if (!isValidJobId(req.params.jobId)) {
-    return res.status(400).json({
-      success: false,
-      error: "Invalid job ID format. Job ID must be a valid UUID.",
-    });
+    return respondRequestError(
+      req,
+      res,
+      RequestError.BAD_REQUEST,
+      "Invalid job ID format. Job ID must be a valid UUID.",
+      400,
+    );
   }
 
   next();

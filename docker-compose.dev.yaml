@@ -1,0 +1,34 @@
+services:
+  redis:
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  nuq-postgres:
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./apps/api/drizzle/20260618153654_cynical_hannibal_king/migration.sql:/docker-entrypoint-initdb.d/020-firecrawl-schema.sql:ro
+      - ./apps/api/scripts/local-db-setup.sql:/docker-entrypoint-initdb.d/030-firecrawl-local.sql:ro
+
+  playwright-service:
+    ports:
+      - "3000:3000"
+
+  replay-fault:
+    build:
+      context: apps/test-site
+      dockerfile_inline: |
+        FROM node:22-alpine
+        WORKDIR /app
+        COPY replay-fault-server.mjs .
+        EXPOSE 4322
+        CMD ["node", "replay-fault-server.mjs", "4322"]
+    ports:
+      - "4322:4322"
+    networks:
+      - backend

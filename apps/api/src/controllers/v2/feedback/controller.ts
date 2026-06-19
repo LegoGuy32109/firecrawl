@@ -6,6 +6,8 @@ import {
   RequestWithAuth,
   endpointFeedbackSchema,
 } from "../types";
+import { makeResponder } from "../response-enveloper";
+import { RequestError } from "../../../lib/error-codes";
 import { recordEndpointFeedback } from "./record";
 import { endpointFeedbackRecordOptions } from "./record-options";
 import { toFeedbackInput } from "./request-input";
@@ -14,16 +16,15 @@ export async function feedbackController(
   req: RequestWithAuth<{}, EndpointFeedbackResponse, EndpointFeedbackRequest>,
   res: Response<EndpointFeedbackResponse>,
 ) {
+  const r = makeResponder(req, res);
+
   let parsedBody: EndpointFeedbackRequest;
   try {
     parsedBody = endpointFeedbackSchema.parse(req.body);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid request body",
+      return r.fail(RequestError.BAD_REQUEST, "Invalid request body", {
         details: error.issues,
-        feedbackErrorCode: "INVALID_BODY",
       });
     }
     throw error;
@@ -38,5 +39,8 @@ export async function feedbackController(
     }),
   );
 
-  return res.status(result.status).json(result.body);
+  // raw-response: feedback endpoint returns the stored envelope directly.
+  return res
+    .status(result.status)
+    .json(result.body as EndpointFeedbackResponse);
 }

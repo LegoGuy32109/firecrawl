@@ -1,6 +1,21 @@
-import type { TeamFlags } from "../controllers/v2/types";
+import type { PrivacyMode, TeamFlags } from "../controllers/v2/types";
 
 type OrgFlagMode = "disabled" | "allowed" | "forced";
+
+/**
+ * Maps resolved ZDR inputs to the diagnostics PrivacyMode. Promoted from duplicate copies in
+ * scrape.ts / parse.ts (see SPEC-RESPONDER-IMPL RA). Only `forced`/`request` drive diagnostics
+ * reduction.
+ */
+export function getPrivacyMode(
+  zeroDataRetention: boolean,
+  requestZeroDataRetention: boolean,
+  forcedByTeam: boolean,
+): PrivacyMode {
+  if (forcedByTeam) return "forced";
+  if (requestZeroDataRetention) return "request";
+  return zeroDataRetention ? "allowed" : "disabled";
+}
 
 type ScrapeZDRMode = OrgFlagMode;
 type SearchZDRMode = "disabled" | "allowed" | "forced-zdr" | "forced-anon";

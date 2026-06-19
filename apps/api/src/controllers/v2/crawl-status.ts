@@ -20,6 +20,7 @@ import { configDotenv } from "dotenv";
 import { logger } from "../../lib/logger";
 import { creditsBilledByCrawlId } from "../../db/rpc";
 import { getJobFromGCS } from "../../lib/gcs-jobs";
+import { makeResponder } from "./response-enveloper";
 import {
   scrapeQueue,
   NuQJob,
@@ -29,6 +30,14 @@ import {
 import { ScrapeJobSingleUrls } from "../../types";
 import { redisEvictConnection } from "../../../src/services/redis";
 import { isBaseDomain, extractBaseDomain } from "../../lib/url-utils";
+import {
+  CommonError,
+  CrawlWarning,
+  LifecycleError,
+  RequestError,
+} from "../../lib/error-codes";
+import { deserializeTransportableError } from "../../lib/error-serde";
+import type { Warning } from "./types";
 configDotenv();
 
 export type PseudoJob<T> = {
@@ -177,13 +186,11 @@ export async function crawlStatusController(
   res: Response<CrawlStatusResponse>,
   isBatch = false,
 ) {
+  const r = makeResponder(req, res);
   const uuidReg =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (!req.params.jobId || !uuidReg.test(req.params.jobId)) {
-    return res.status(400).json({
-      success: false,
-      error: "Invalid job ID",
-    });
+    return r.fail(RequestError.BAD_REQUEST, "Invalid job ID");
   }
 
   const start =
@@ -200,8 +207,15 @@ export async function crawlStatusController(
   );
   const sc = await getCrawl(req.params.jobId);
 
-  if (!group || (!groupAnyJob && (!sc || sc.team_id !== req.auth.team_id))) {
-    return res.status(404).json({ success: false, error: "Job not found" });
+  if (sc && sc.team_id !== req.auth.team_id) {
+    return r.fail(LifecycleError.JOB_WRONG_TEAM, "Job not found");
+  }
+
+  if (!group || !groupAnyJob) {
+    return r.fail(
+      sc ? LifecycleError.JOB_EXPIRED : LifecycleError.JOB_NOT_FOUND,
+      "Job not found",
+    );
   }
 
   const zeroDataRetention = !!(
@@ -252,21 +266,25 @@ export async function crawlStatusController(
   // if the crawl failed during kickoff, return immediately without fetching/processing jobs (there are none)
   if (outputBulkA.status === "failed" && crawlError) {
     const createdAtMs = sc?.createdAt;
-    return res.status(200).json({
-      success: false,
-      error: crawlError,
-      status: "failed",
-      completed: 0,
-      total: 0,
-      creditsUsed: outputBulkA.creditsUsed ?? 0,
-      expiresAt: (await getCrawlExpiry(req.params.jobId)).toISOString(),
-      data: [],
-      ...(createdAtMs && {
-        createdAt: new Date(createdAtMs).toISOString(),
-        completedAt: new Date(createdAtMs).toISOString(),
-        duration: 0,
-      }),
-    });
+    const failedError = deserializeTransportableError(crawlError);
+    return r.asyncFail(
+      failedError?.code ?? CommonError.UNKNOWN,
+      failedError?.message ?? crawlError,
+      {
+        data: [],
+        failureCount: 1,
+        failuresByCode: {
+          [failedError?.code ?? CommonError.UNKNOWN]: 1,
+        },
+        creditsUsed: outputBulkA.creditsUsed ?? 0,
+        expiresAt: (await getCrawlExpiry(req.params.jobId)).toISOString(),
+        ...(createdAtMs && {
+          createdAt: new Date(createdAtMs).toISOString(),
+          completedAt: new Date(createdAtMs).toISOString(),
+          duration: 0,
+        }),
+      },
+    );
   }
 
   let outputBulkB: {
@@ -328,6 +346,7 @@ export async function crawlStatusController(
 
   // Check for robots.txt blocked URLs and add warning if found
   let warning: string | undefined;
+  const warnings: Warning[] = [];
   try {
     const robotsBlocked = await redisEvictConnection.smembers(
       "crawl:" + req.params.jobId + ":robots_blocked",
@@ -362,12 +381,24 @@ export async function crawlStatusController(
         const baseDomain = extractBaseDomain(crawl.originUrl);
         if (baseDomain) {
           warning = `Only ${resultCount} result(s) found. For broader coverage, try crawling with crawlEntireDomain=true or start from a higher-level path like ${baseDomain}`;
+          warnings.push({
+            code: CrawlWarning.FEW_RESULTS,
+            message: warning,
+            details: {
+              resultCount,
+              baseDomain,
+            },
+          });
         }
       }
     }
   }
 
   const status = outputBulkA.status ?? "scraping";
+  const jobState: "processing" | "completed" | "cancelled" | "failed" =
+    status === "scraping"
+      ? "processing"
+      : (status as "completed" | "cancelled" | "failed");
   const createdAtMs = sc?.createdAt;
   const lastDoneMs =
     status !== "scraping"
@@ -381,9 +412,34 @@ export async function crawlStatusController(
     ? Math.max(0, ((completedAtMs ?? Date.now()) - createdAtMs) / 1000)
     : undefined;
 
-  return res.status(200).json({
-    success: true,
-    status,
+  if (jobState === "failed") {
+    const failedError = deserializeTransportableError(crawlError ?? "");
+    return r.asyncFail(
+      failedError?.code ?? CommonError.UNKNOWN,
+      failedError?.message ?? crawlError ?? "Crawl failed",
+      {
+        data: outputBulkB.data,
+        failureCount: 1,
+        failuresByCode: {
+          [failedError?.code ?? CommonError.UNKNOWN]: 1,
+        },
+        creditsUsed: outputBulkA.creditsUsed ?? 0,
+        expiresAt: (await getCrawlExpiry(req.params.jobId)).toISOString(),
+        ...(createdAtMs && { createdAt: new Date(createdAtMs).toISOString() }),
+        ...(completedAtMs && {
+          completedAt: new Date(completedAtMs).toISOString(),
+        }),
+        ...(durationSeconds !== undefined && { duration: durationSeconds }),
+      },
+    );
+  }
+
+  const terminalJobState =
+    jobState === "processing"
+      ? "processing"
+      : (jobState as "completed" | "cancelled");
+
+  const body = {
     completed: outputBulkA.completed ?? 0,
     total: outputBulkA.total ?? 0,
     creditsUsed: outputBulkA.creditsUsed ?? 0,
@@ -396,5 +452,12 @@ export async function crawlStatusController(
     }),
     ...(durationSeconds !== undefined && { duration: durationSeconds }),
     ...(warning && { warning }),
-  });
+    jobState: terminalJobState,
+  };
+
+  // In-flight → status:"processing"; terminal completed/cancelled → ok, or warning if "few results".
+  if (terminalJobState === "processing") {
+    return r.processing(body);
+  }
+  return warnings.length > 0 ? r.warn(body, warnings) : r.ok(body);
 }

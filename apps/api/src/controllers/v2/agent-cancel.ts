@@ -1,32 +1,34 @@
 import { Response } from "express";
-import { AgentCancelResponse, RequestWithAuth } from "./types";
+import { AgentCancelResponse, JobState, RequestWithAuth } from "./types";
 import {
   supabaseGetAgentByIdDirect,
   supabaseGetAgentRequestByIdDirect,
 } from "../../lib/supabase-jobs";
 import { config } from "../../config";
+import { LifecycleError } from "../../lib/error-codes";
+import { makeResponder } from "./response-enveloper";
 
 export async function agentCancelController(
   req: RequestWithAuth<{ jobId: string }, AgentCancelResponse, any>,
   res: Response<AgentCancelResponse>,
 ) {
+  const r = makeResponder(req, res);
   const agentRequest = await supabaseGetAgentRequestByIdDirect(
     req.params.jobId,
   );
 
   if (!agentRequest || agentRequest.team_id !== req.auth.team_id) {
-    return res.status(404).json({
-      success: false,
-      error: "Agent job not found",
-    });
+    return r.fail(
+      !agentRequest
+        ? LifecycleError.JOB_NOT_FOUND
+        : LifecycleError.JOB_WRONG_TEAM,
+      "Agent job not found",
+    );
   }
 
   const agent = await supabaseGetAgentByIdDirect(req.params.jobId);
   if (agent) {
-    return res.status(409).json({
-      success: false,
-      error: "Agent already finished",
-    });
+    return r.fail(LifecycleError.JOB_CANCELLED, "Agent already finished");
   }
 
   const resp = await fetch(
@@ -40,13 +42,12 @@ export async function agentCancelController(
   );
 
   if (resp.status === 409) {
-    return res.status(409).json({
-      success: false,
-      error: "Agent is already cancelled",
-    });
+    return r.ok({
+      jobState: JobState.Cancelled,
+    } as any);
   }
 
-  return res.status(200).json({
-    success: true,
-  });
+  return r.ok({
+    jobState: JobState.Cancelled,
+  } as any);
 }

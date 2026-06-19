@@ -17,6 +17,7 @@ import {
   getConcurrencyLimitActiveJobsCount,
   getConcurrencyQueueJobsCount,
 } from "../../lib/concurrency-limit";
+import { makeResponder } from "./response-enveloper";
 
 type QueueStatusResponse = {
   success: boolean;
@@ -33,6 +34,8 @@ export async function queueStatusController(
   req: RequestWithAuth<{}, undefined, QueueStatusResponse>,
   res: Response<QueueStatusResponse>,
 ) {
+  const r = makeResponder(req, res);
+
   let otherACUC: AuthCreditUsageChunkFromTeam | null = null;
   if (!req.acuc?.is_extract) {
     otherACUC = await getACUCTeam(
@@ -87,9 +90,7 @@ export async function queueStatusController(
     "most-recent-success:" + req.auth.team_id,
   );
 
-  return res.status(200).json({
-    success: true,
-
+  return r.ok({
     jobsInQueue: activeJobsOfTeam + queuedJobsOfTeam,
     activeJobsInQueue: activeJobsOfTeam,
     waitingJobsInQueue: queuedJobsOfTeam,
@@ -97,7 +98,6 @@ export async function queueStatusController(
       req.acuc?.concurrency ?? 1,
       otherACUC?.concurrency ?? 1,
     ),
-
     mostRecentSuccess: mostRecentSuccess
       ? new Date(mostRecentSuccess).toISOString()
       : null,
