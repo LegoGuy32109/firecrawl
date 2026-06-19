@@ -55,7 +55,6 @@ export const inflight = signal<boolean>(false);
 export const sessionId = signal<string | null>(null);
 export const liveViewUrl = signal<string | null>(null);
 export const activeInteractJobId = signal<string | null>(null);
-export const interactive = signal<boolean>(false);
 export const recording = signal<boolean>(false);
 export const actions = signal<FirecrawlAction[]>([]);
 export const recordingUrl = signal<string | null>(null);

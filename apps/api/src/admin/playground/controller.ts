@@ -27,7 +27,6 @@ try {
 }
 
 const safeEnv = escapeHtml(config.ENV ?? "unknown");
-const safeLlmProxyUrl = escapeHtml(config.LOCAL_LLM_PROXY_URL ?? "");
 const safeTestApiKey = escapeHtml(
   config.TEST_API_KEY ?? "fc-3d478a296e59403e85c794aba81ffd2a",
 );
@@ -41,7 +40,7 @@ const html = `<!doctype html>
   <style>${css}</style>
 </head>
 <body>
-  <div id="root" data-env="${safeEnv}" data-llm-proxy-url="${safeLlmProxyUrl}" data-default-api-key="${safeTestApiKey}"></div>
+  <div id="root" data-env="${safeEnv}" data-default-api-key="${safeTestApiKey}"></div>
 <script>${bundle}</script>
 </body>
 </html>`;

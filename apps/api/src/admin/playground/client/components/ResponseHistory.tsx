@@ -24,7 +24,6 @@ import { WarningList } from "./WarningList";
 import { EmptyState } from "./ui/EmptyState";
 import { Button } from "./ui/Button";
 import { JsonView } from "./JsonView";
-import { LiveView } from "./LiveView";
 
 type ModalState = { type: "delete"; id: string } | { type: "clear" } | null;
 
@@ -356,8 +355,6 @@ export function ResponseHistory() {
 
   return (
     <div className="playground-stack">
-      {feature === "interact" && view !== "history" && <LiveView />}
-
       <div className="playground-row playground-row--between">
         <div className="playground-panel__label" style={{ marginBottom: 0 }}>
           {headerLabel}
