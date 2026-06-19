@@ -24,7 +24,6 @@ function resetState() {
   requestBody.value = {};
   requestDrafts.value = defaults.drafts;
   historyEntries.value = [];
-  window.localStorage.clear();
 }
 
 describe("ResponseHistory", () => {
@@ -49,7 +48,6 @@ describe("ResponseHistory", () => {
         durationMs: 1,
         warningCount: 0,
         pending: false,
-        persisted: true,
         ui: {
           open: false,
           panel: "response",

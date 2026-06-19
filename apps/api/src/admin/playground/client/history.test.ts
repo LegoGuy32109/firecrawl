@@ -1,23 +1,15 @@
 import {
-  applyPersistenceBudget,
   clearCompletedHistory,
   createPendingEntry,
   deriveTarget,
   extractCreditsUsed,
   finalizeHistoryEntry,
-  getDefaultState,
   insertPendingEntry,
-  loadPersistedHistory,
-  normalizeHistory,
   normalizeWarnings,
   removeHistoryEntry,
   restoreRequestBody,
-  savePersistedHistory,
-  serializePersistedHistory,
   setHistoryEntryUiState,
   type PlaygroundHistoryEntry,
-  type PersistedWorkspaceState,
-  type StorageAdapter,
 } from "./history";
 
 function completedEntry(
@@ -38,21 +30,12 @@ function completedEntry(
     creditsUsed: 1,
     warningCount: 0,
     pending: false,
-    persisted: true,
     ui: {
       open: false,
       panel: "response",
       responseTab: "response",
     },
     ...overrides,
-  };
-}
-
-function storage(value: string | null): StorageAdapter {
-  return {
-    getItem: () => value,
-    setItem: () => {},
-    removeItem: () => {},
   };
 }
 
@@ -126,92 +109,5 @@ describe("playground history helpers", () => {
     ).toBe(true);
     expect(removeHistoryEntry(completed, "pending-1")).toHaveLength(0);
     expect(clearCompletedHistory([pending, completed[0]])).toHaveLength(1);
-  });
-
-  it("persists only completed entries within budget and discards pending storage records", () => {
-    const first = completedEntry({
-      id: "entry-a",
-      requestBody: { url: "https://example.com/a" },
-      target: "example.com/a",
-      body: { success: true, data: { metadata: { creditsUsed: 2 } } },
-      creditsUsed: 2,
-    });
-    const second = completedEntry({
-      id: "entry-b",
-      requestBody: { url: "https://example.com/b" },
-      target: "example.com/b",
-      body: { success: true, data: { metadata: { creditsUsed: 3 } } },
-      creditsUsed: 3,
-    });
-    const pending = createPendingEntry({
-      id: "entry-c",
-      feature: "scrape",
-      method: "POST",
-      endpoint: "/v2/scrape",
-      requestBody: { url: "https://example.com/c" },
-      target: "example.com/c",
-      startedAt: 3000,
-    });
-
-    const state: PersistedWorkspaceState = {
-      ...getDefaultState(),
-      activeView: "history",
-      activeFeature: "scrape",
-      entries: [first, second, pending],
-    };
-
-    const budget = serializePersistedHistory({
-      ...state,
-      entries: [first],
-    }).length;
-    const saved = applyPersistenceBudget(state, budget);
-    expect(saved.persistedEntryIds).toEqual(["entry-a"]);
-    expect(saved.overflowEntryIds).toEqual(["entry-b"]);
-    expect(
-      saved.state.entries.find(entry => entry.id === "entry-a")?.persisted,
-    ).toBe(true);
-    expect(
-      saved.state.entries.find(entry => entry.id === "entry-b")?.persisted,
-    ).toBe(false);
-    expect(
-      saved.state.entries.find(entry => entry.id === "entry-c")?.persisted,
-    ).toBe(false);
-    expect(
-      JSON.parse(serializePersistedHistory(saved.state)).entries,
-    ).toHaveLength(1);
-
-    const persisted = loadPersistedHistory(
-      storage(
-        JSON.stringify({
-          ...state,
-          entries: [first, pending],
-        }),
-      ),
-    );
-    expect(persisted.entries).toHaveLength(1);
-    expect(persisted.entries[0].id).toBe("entry-a");
-
-    const invalid = loadPersistedHistory(storage("{not-json"));
-    expect(invalid).toEqual(getDefaultState());
-  });
-
-  it("marks entries not saved when storage write fails", () => {
-    const state: PersistedWorkspaceState = {
-      ...getDefaultState(),
-      entries: [completedEntry({ id: "entry-quota" })],
-    };
-    const adapter: StorageAdapter = {
-      getItem: () => null,
-      setItem: () => {
-        throw new Error("quota");
-      },
-      removeItem: () => {},
-    };
-
-    const next = savePersistedHistory(adapter, state);
-    expect(next.state.entries[0].persisted).toBe(false);
-    expect(
-      JSON.parse(serializePersistedHistory(next.state)).entries,
-    ).toHaveLength(0);
   });
 });

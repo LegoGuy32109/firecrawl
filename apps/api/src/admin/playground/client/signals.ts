@@ -1,11 +1,8 @@
 import { effect, signal } from "@preact/signals";
 import {
   getDefaultState,
-  loadPersistedHistory,
-  savePersistedHistory,
-  HISTORY_STORAGE_KEY,
   type DockMode,
-  type PersistedWorkspaceState,
+  type PlaygroundWorkspaceState,
   type PlaygroundHistoryEntry,
   type PlaygroundView,
 } from "./history";
@@ -47,7 +44,7 @@ export const apiKey = signal<string>("");
 export const activeFeature = signal<Feature>("scrape");
 export const activeView = signal<ActiveView>("scrape");
 export const requestBody = signal<Record<string, unknown>>({});
-export const requestDrafts = signal<PersistedWorkspaceState["drafts"]>(
+export const requestDrafts = signal<PlaygroundWorkspaceState["drafts"]>(
   getDefaultState().drafts,
 );
 export const historyEntries = signal<PlaygroundHistoryEntry[]>([]);
@@ -73,15 +70,14 @@ export function openInInteract(scrapeId: string): void {
   const newDraft = { jobId: scrapeId };
   requestDrafts.value = { ...requestDrafts.value, interact: newDraft };
   clearLiveSession();
-  // Switch feature BEFORE writing requestBody so the draft-persistence
-  // effect saves into drafts.interact, not drafts.scrape.
+  // Switch feature before writing requestBody so the draft effect updates
+  // drafts.interact, not drafts.scrape.
   activeFeature.value = "interact";
   activeView.value = "interact";
   requestBody.value = newDraft;
 }
 
 const hasWindow = typeof window !== "undefined";
-const storage = hasWindow ? window.localStorage : null;
 const defaultApiKey = hasWindow
   ? (document.getElementById("root")?.dataset.defaultApiKey ??
     "fc-3d478a296e59403e85c794aba81ffd2a")
@@ -90,18 +86,6 @@ let hydratedFeature: Feature | null = null;
 
 if (defaultApiKey) {
   apiKey.value = defaultApiKey;
-}
-
-if (storage) {
-  const persisted = loadPersistedHistory(storage);
-  activeView.value = persisted.activeView;
-  activeFeature.value = persisted.activeFeature;
-  requestDockMode.value = persisted.requestDockMode;
-  lastVisibleDockMode.value = persisted.lastVisibleDockMode;
-  requestRailWidth.value = persisted.requestRailWidth;
-  requestDrafts.value = persisted.drafts;
-  historyEntries.value = persisted.entries;
-  requestBody.value = persisted.drafts[persisted.activeFeature] ?? {};
 }
 
 effect(() => {
@@ -121,43 +105,3 @@ effect(() => {
   if (JSON.stringify(drafts[active] ?? {}) === JSON.stringify(current)) return;
   requestDrafts.value = { ...drafts, [active]: current };
 });
-
-if (storage) {
-  let persistTimer: number | null = null;
-  effect(() => {
-    if (persistTimer) window.clearTimeout(persistTimer);
-    persistTimer = window.setTimeout(() => {
-      const state = {
-        version: 1 as const,
-        activeView: activeView.value,
-        activeFeature: activeFeature.value,
-        requestDockMode: requestDockMode.value,
-        lastVisibleDockMode: lastVisibleDockMode.value,
-        requestRailWidth: requestRailWidth.value,
-        drafts: requestDrafts.value,
-        entries: historyEntries.value,
-      };
-      try {
-        const next = savePersistedHistory(storage, state);
-        if (
-          JSON.stringify(
-            historyEntries.value.map(entry => ({
-              id: entry.id,
-              persisted: entry.persisted,
-            })),
-          ) !==
-          JSON.stringify(
-            next.state.entries.map(entry => ({
-              id: entry.id,
-              persisted: entry.persisted,
-            })),
-          )
-        ) {
-          historyEntries.value = next.state.entries;
-        }
-      } catch {
-        // persistence is best-effort
-      }
-    }, 150);
-  });
-}

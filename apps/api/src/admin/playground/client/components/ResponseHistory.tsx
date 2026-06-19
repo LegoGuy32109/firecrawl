@@ -166,11 +166,6 @@ function EntryHeader({
             {entry.warningCount} warning{entry.warningCount === 1 ? "" : "s"}
           </span>
         )}
-        {!entry.persisted && !entry.pending && (
-          <span className="playground-chip playground-chip--muted">
-            not saved
-          </span>
-        )}
         {!entry.pending && (
           <Button
             type="button"
