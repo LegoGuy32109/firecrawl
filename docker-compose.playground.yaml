@@ -55,6 +55,7 @@ services:
       ALLOW_LOCAL_WEBHOOKS: "true"
 
   api:
+    restart: unless-stopped
     environment:
       # Persistence ON so /v2/scrape writes a `scrapes` row that
       # /v2/scrape/:jobId/interact can look up. Without this, interact always

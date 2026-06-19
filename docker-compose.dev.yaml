@@ -11,6 +11,9 @@ services:
   nuq-postgres:
     ports:
       - "5432:5432"
+    volumes:
+      - ./apps/api/drizzle/20260618153654_cynical_hannibal_king/migration.sql:/docker-entrypoint-initdb.d/020-firecrawl-schema.sql:ro
+      - ./apps/api/scripts/local-db-setup.sql:/docker-entrypoint-initdb.d/030-firecrawl-local.sql:ro
 
   playwright-service:
     ports:
@@ -19,3 +22,17 @@ services:
   llm-proxy:
     ports:
       - "3001:3001"
+
+  replay-fault:
+    build:
+      context: apps/test-site
+      dockerfile_inline: |
+        FROM node:22-alpine
+        WORKDIR /app
+        COPY replay-fault-server.mjs .
+        EXPOSE 4322
+        CMD ["node", "replay-fault-server.mjs", "4322"]
+    ports:
+      - "4322:4322"
+    networks:
+      - backend
