@@ -12,8 +12,9 @@ import { UNSUPPORTED_SITE_MESSAGE } from "../../lib/strings";
 import { isUrlBlocked } from "../../scraper/WebScraper/utils/blocklist";
 import { logger as _logger } from "../../lib/logger";
 import { logRequest } from "../../services/logging/log_job";
-import { config } from "../../config";
 import { getScrapeZDR } from "../../lib/zdr-helpers";
+import { makeResponder } from "./response-enveloper";
+import { ExtractError, RequestError } from "../../lib/error-codes";
 
 /**
  * Extracts data from the provided URLs based on the request parameters.
@@ -26,15 +27,15 @@ export async function extractController(
   req: RequestWithAuth<{}, ExtractResponse, ExtractRequest>,
   res: Response<ExtractResponse>,
 ) {
+  const r = makeResponder(req, res);
   const originalRequest = { ...req.body };
   req.body = extractRequestSchema.parse(req.body);
 
   if (getScrapeZDR(req.acuc?.flags) === "forced") {
-    return res.status(400).json({
-      success: false,
-      error:
-        "Your team has zero data retention enabled. This is not supported on extract. Please contact support@firecrawl.com to unblock this feature.",
-    });
+    return r.fail(
+      RequestError.BAD_REQUEST,
+      "Your team has zero data retention enabled. This is not supported on extract. Please contact support@firecrawl.com to unblock this feature.",
+    );
   }
 
   const extractId = uuidv7();
@@ -50,11 +51,10 @@ export async function extractController(
   });
 
   if (req.body.agent?.model === "v3-beta") {
-    return res.status(400).json({
-      success: false,
-      error:
-        "Use the new /agent endpoint instead of passing agent.model=v3-beta into /extract.",
-    });
+    return r.fail(
+      RequestError.BAD_REQUEST,
+      "Use the new /agent endpoint instead of passing agent.model=v3-beta into /extract.",
+    );
   }
 
   const invalidURLs: string[] =
@@ -67,10 +67,7 @@ export async function extractController(
 
   if (invalidURLs.length > 0 && !req.body.ignoreInvalidURLs) {
     if (!res.headersSent) {
-      return res.status(403).json({
-        success: false,
-        error: UNSUPPORTED_SITE_MESSAGE,
-      });
+      return r.fail(ExtractError.NO_VALID_URLS, UNSUPPORTED_SITE_MESSAGE);
     }
   }
 
@@ -112,8 +109,7 @@ export async function extractController(
     apiKeyId: req.acuc?.api_key_id ?? undefined,
   });
 
-  return res.status(200).json({
-    success: true,
+  return r.ok({
     id: extractId,
     urlTrace: [],
     ...(invalidURLs.length > 0 && req.body.ignoreInvalidURLs

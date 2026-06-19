@@ -15,6 +15,7 @@ import {
   traceInteract,
   InteractTraceMetadata,
 } from "./langsmith";
+import { DiagnosticStep, DiagnosticStatus } from "../../controllers/v2/types";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -205,6 +206,7 @@ export async function executePromptViaBrowserAgent(
   stepTimeout: number,
   logger: typeof _logger,
   trace?: BrowserAgentTraceContext,
+  onStep?: (step: DiagnosticStep) => void,
 ): Promise<AgentResult> {
   const debugLog = new AgentDebugLog(browserId);
   debugLog.add(`=== AGENT RUN ===`);
@@ -228,6 +230,7 @@ export async function executePromptViaBrowserAgent(
   const allOutputs: string[] = [];
   let lastSnapshotResult = initialSnapshot;
   const actionLog: string[] = [];
+  let llmStepStart: number | undefined;
 
   const browserTool = tool({
     description:
@@ -249,12 +252,25 @@ export async function executePromptViaBrowserAgent(
       }
 
       try {
+        const stepStart = Date.now();
         const result = await execInBrowser(
           browserId,
           code,
           stepTimeout,
           "agent_action",
         );
+        onStep?.({
+          name: "browser-action",
+          status:
+            result.exitCode !== 0 || result.killed
+              ? DiagnosticStatus.Failed
+              : DiagnosticStatus.Ok,
+          durationMs: Date.now() - stepStart,
+          details: {
+            code,
+            result: result.result || result.stderr || undefined,
+          },
+        });
         const output = (result.stdout || result.result || "").trim();
 
         // Ensure only one tab exists and it's in the foreground for live view
@@ -364,6 +380,7 @@ export async function executePromptViaBrowserAgent(
         ? { providerOptions: { langsmith } as Record<string, any> }
         : {}),
       prepareStep: async ({ stepNumber, messages }) => {
+        llmStepStart = Date.now();
         if (actionLog.length === 0) return {};
         return {
           messages: [
@@ -380,11 +397,23 @@ export async function executePromptViaBrowserAgent(
           ],
         };
       },
-      onStepFinish: ({ text, toolCalls }) => {
+      onStepFinish: ({ text, toolCalls, usage }) => {
+        const durationMs = llmStepStart ? Date.now() - llmStepStart : undefined;
+        llmStepStart = undefined;
         if (toolCalls?.length) {
           debugLog.add(`[Step: ${toolCalls.length} tool call(s)]`);
         }
         if (text) debugLog.add(`Assistant: ${text}`);
+        onStep?.({
+          name: "llm-step",
+          status: DiagnosticStatus.Ok,
+          ...(durationMs !== undefined ? { durationMs } : {}),
+          details: {
+            toolCalls: toolCalls?.map(tc => tc.toolName) ?? [],
+            outputTokens: usage?.outputTokens,
+            text: text || undefined,
+          },
+        });
       },
     });
 

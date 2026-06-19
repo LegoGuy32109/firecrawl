@@ -924,8 +924,8 @@ async function startServices(command?: string[]): Promise<Services> {
   if (
     command &&
     Array.isArray(command) &&
-    command[0] === "pnpm" &&
-    command[1].startsWith("test:snips")
+    ((command[0] === "pnpm" && command[1].startsWith("test:snips")) ||
+      command[0] === "vitest")
   ) {
     logger.info(`Waiting for API on localhost:${PORT}`);
     await waitForPort(Number(PORT), "localhost");

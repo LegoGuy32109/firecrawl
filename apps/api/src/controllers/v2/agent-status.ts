@@ -1,5 +1,5 @@
 import { Response } from "express";
-import { AgentStatusResponse, RequestWithAuth } from "./types";
+import { AgentStatusResponse, JobState, RequestWithAuth } from "./types";
 import {
   supabaseGetAgentByIdDirect,
   supabaseGetAgentRequestByIdDirect,
@@ -7,20 +7,26 @@ import {
 import { logger as _logger, logger } from "../../lib/logger";
 import { getJobFromGCS } from "../../lib/gcs-jobs";
 import { config } from "../../config";
+import { CommonError, LifecycleError } from "../../lib/error-codes";
+import { makeResponder } from "./response-enveloper";
+import { deserializeTransportableError } from "../../lib/error-serde";
 
 export async function agentStatusController(
   req: RequestWithAuth<{ jobId: string }, AgentStatusResponse, any>,
   res: Response<AgentStatusResponse>,
 ) {
+  const r = makeResponder(req, res);
   const agentRequest = await supabaseGetAgentRequestByIdDirect(
     req.params.jobId,
   );
 
   if (!agentRequest || agentRequest.team_id !== req.auth.team_id) {
-    return res.status(404).json({
-      success: false,
-      error: "Agent job not found",
-    });
+    return r.fail(
+      !agentRequest
+        ? LifecycleError.JOB_NOT_FOUND
+        : LifecycleError.JOB_WRONG_TEAM,
+      "Agent job not found",
+    );
   }
 
   const agent = await supabaseGetAgentByIdDirect(req.params.jobId);
@@ -73,14 +79,23 @@ export async function agentStatusController(
     data = await getJobFromGCS(agent.id);
   }
 
-  return res.status(200).json({
-    success: true,
-    status: !agent
-      ? "processing"
-      : agent.is_successful
-        ? "completed"
-        : "failed",
-    error: agent?.error || undefined,
+  if (agent && !agent.is_successful) {
+    const failedError = deserializeTransportableError(agent.error ?? "");
+    return r.asyncFail(
+      failedError?.code ?? CommonError.UNKNOWN,
+      failedError?.message ?? agent.error ?? "Agent job failed",
+      {
+        expiresAt: new Date(
+          new Date(agent.created_at ?? agentRequest.created_at).getTime() +
+            1000 * 60 * 60 * 24,
+        ).toISOString(),
+        creditsUsed: agent?.credits_cost,
+      },
+    );
+  }
+
+  const successStatus = !agent ? JobState.Processing : JobState.Completed;
+  const body = {
     data,
     model,
     expiresAt: new Date(
@@ -88,5 +103,7 @@ export async function agentStatusController(
         1000 * 60 * 60 * 24,
     ).toISOString(),
     creditsUsed: agent?.credits_cost,
-  });
+    jobState: successStatus,
+  } as any;
+  return successStatus === "processing" ? r.processing(body) : r.ok(body);
 }

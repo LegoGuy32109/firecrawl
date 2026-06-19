@@ -1,4 +1,6 @@
 import { rewriteUrl } from "../../scraper/scrapeURL/lib/rewriteUrl";
+import { ReplayFailedAt } from "../error-details";
+import { BrowserServiceError } from "./browser-service-client";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,6 +26,13 @@ interface ScrapeReplayContext {
   targetUrl: string;
   waitForMs: number;
   actions: ReplayAction[];
+  headers?: Record<string, string>;
+  mobile?: boolean;
+  location?: {
+    country?: string;
+    languages?: string[];
+  };
+  skipTlsVerification?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -38,6 +47,57 @@ function clampPositiveInteger(value: unknown, max: number): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   if (value <= 0) return undefined;
   return Math.min(Math.floor(value), max);
+}
+
+const REPLAY_FAILURE_SENTINEL = "__FIRECRAWL_REPLAY_FAILURE__";
+
+function extractReplayFailureText(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (value instanceof BrowserServiceError) {
+    if (value.bodyText) {
+      try {
+        const parsed = JSON.parse(value.bodyText) as { stderr?: unknown };
+        if (typeof parsed.stderr === "string") return parsed.stderr;
+      } catch {
+        if (value.bodyText.trim()) return value.bodyText;
+      }
+    }
+    return value.message || undefined;
+  }
+  if (value instanceof Error) return value.message;
+  return undefined;
+}
+
+export function parseReplayFailure(value: unknown): ReplayFailedAt | undefined {
+  const text = extractReplayFailureText(value);
+  if (!text) return undefined;
+
+  const marker = `${REPLAY_FAILURE_SENTINEL}:`;
+  const markerIndex = text.indexOf(marker);
+  if (markerIndex < 0) return undefined;
+
+  const payloadText = text.slice(markerIndex + marker.length).trim();
+  if (!payloadText) return undefined;
+
+  try {
+    const payload = JSON.parse(payloadText) as Partial<ReplayFailedAt>;
+    if (
+      typeof payload.actionIndex !== "number" ||
+      typeof payload.actionType !== "string"
+    ) {
+      return undefined;
+    }
+    return {
+      actionIndex: payload.actionIndex,
+      actionNumber:
+        typeof payload.actionNumber === "number"
+          ? payload.actionNumber
+          : payload.actionIndex + 1,
+      actionType: payload.actionType,
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -166,14 +226,49 @@ export function buildReplayContextFromScrape(scrape: ScrapeContextRow): {
     };
   }
 
-  const waitForMs = clampPositiveInteger(scrape.options.waitFor, 60_000) ?? 0;
-  const actions = sanitizeReplayActions(scrape.options.actions);
+  const replayOptions = scrape.options as Record<string, unknown>;
+  const waitForMs = clampPositiveInteger(replayOptions.waitFor, 60_000) ?? 0;
+  const actions = sanitizeReplayActions(replayOptions.actions);
+  const headersOption = replayOptions.headers;
+  const headers =
+    isRecord(headersOption) &&
+    Object.values(headersOption).every(value => typeof value === "string")
+      ? (headersOption as Record<string, string>)
+      : undefined;
+  const mobileOption = replayOptions.mobile;
+  const mobile = typeof mobileOption === "boolean" ? mobileOption : undefined;
+  const skipTlsVerificationOption = replayOptions.skipTlsVerification;
+  const skipTlsVerification =
+    typeof skipTlsVerificationOption === "boolean"
+      ? skipTlsVerificationOption
+      : undefined;
+  const locationOption = replayOptions.location;
+  const location =
+    isRecord(locationOption) &&
+    (typeof locationOption.country === "string" ||
+      Array.isArray(locationOption.languages))
+      ? {
+          ...(typeof locationOption.country === "string"
+            ? { country: locationOption.country }
+            : {}),
+          ...(Array.isArray(locationOption.languages) &&
+          locationOption.languages.every(
+            language => typeof language === "string",
+          )
+            ? { languages: locationOption.languages }
+            : {}),
+        }
+      : undefined;
 
   return {
     context: {
       targetUrl,
       waitForMs,
       actions,
+      ...(headers ? { headers } : {}),
+      ...(mobile !== undefined ? { mobile } : {}),
+      ...(location ? { location } : {}),
+      ...(skipTlsVerification !== undefined ? { skipTlsVerification } : {}),
     },
   };
 }
@@ -205,10 +300,18 @@ export function buildReplayScript(context: ScrapeReplayContext): string {
   const payload = JSON.stringify(context);
   return `
 const replay = ${payload};
+const REPLAY_FAILURE_SENTINEL = ${JSON.stringify(REPLAY_FAILURE_SENTINEL)};
 
-const failReplay = (step, error) => {
+const failReplay = (actionIndex, actionType, error) => {
   const reason = error instanceof Error ? error.message : String(error ?? "unknown error");
-  throw new Error(\`\${step}: \${reason}\`);
+  const actionNumber = actionIndex + 1;
+  const structured = JSON.stringify({
+    actionIndex,
+    actionNumber,
+    actionType,
+    reason,
+  });
+  throw new Error(\`Replay action #\${actionNumber} (\${actionType}): \${reason} \${REPLAY_FAILURE_SENTINEL}:\${structured}\`);
 };
 
 const listReplayPages = () => page.context().pages().filter(candidate => !candidate.isClosed());
@@ -280,9 +383,12 @@ const syncReplayPage = async () => {
 };
 
 try {
+  if (replay.headers && Object.keys(replay.headers).length > 0) {
+    await page.setExtraHTTPHeaders(replay.headers);
+  }
   await page.goto(replay.targetUrl, { waitUntil: "domcontentloaded" });
 } catch (error) {
-  failReplay("Failed to load scrape URL", error);
+  throw new Error(\`Failed to load scrape URL: \${error instanceof Error ? error.message : String(error ?? "unknown error")}\`);
 }
 
 await syncReplayPage();
@@ -361,7 +467,7 @@ for (let i = 0; i < replay.actions.length; i += 1) {
 
     await syncReplayPage();
   } catch (error) {
-    failReplay(step, error);
+    failReplay(i, action.type, error);
   }
 }
 

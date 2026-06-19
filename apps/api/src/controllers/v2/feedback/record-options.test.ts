@@ -31,8 +31,6 @@ describe("feedback record options", () => {
 
     expect(options.endpoint).toBe("search");
     expect(options.requireSuccessfulJob).toBe(true);
-    expect(options.notFoundCode).toBe("SEARCH_NOT_FOUND");
-    expect(options.failedJobCode).toBe("SEARCH_FAILED");
     expect(options.maxAgeSec).toBe(17);
     expect(options.dailyCapCredits).toBe(3);
     expect(options.refundFeatureId).toBe(SEARCH_CREDITS_FEATURE_ID);
@@ -53,8 +51,6 @@ describe("feedback record options", () => {
 
     expect(options.endpoint).toBe("search");
     expect(options.requireSuccessfulJob).toBe(true);
-    expect(options.notFoundCode).toBe("SEARCH_NOT_FOUND");
-    expect(options.failedJobCode).toBe("SEARCH_FAILED");
     expect(options.maxAgeSec).toBe(29);
     expect(options.dailyCapCredits).toBe(7);
     expect(options.refundFeatureId).toBe(SEARCH_CREDITS_FEATURE_ID);
@@ -70,8 +66,6 @@ describe("feedback record options", () => {
 
     expect(options.endpoint).toBe("map");
     expect(options.requireSuccessfulJob).toBeUndefined();
-    expect(options.notFoundCode).toBeUndefined();
-    expect(options.failedJobCode).toBeUndefined();
     expect(options.maxAgeSec).toBeUndefined();
     expect(options.dailyCapCredits).toBeUndefined();
     expect(options.refundFeatureId).toBeUndefined();

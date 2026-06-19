@@ -2,11 +2,18 @@ vi.mock("uuid", () => ({
   v7: () => "test-uuid-v7",
 }));
 
+import type { MockedFunction } from "vitest";
+import { monitoringClaimDueMonitors } from "../../db/rpc";
 import {
   calculateMonitorCheckActualCreditsFromPages,
+  claimDueMonitors,
   estimateMonitorCreditsPerRun,
 } from "./store";
 import type { MonitorTarget } from "./types";
+
+vi.mock("../../db/rpc", () => ({
+  monitoringClaimDueMonitors: vi.fn(),
+}));
 
 describe("monitoring store credit helpers", () => {
   it("estimates goal-enabled scrape monitors from scrape option costs", () => {
@@ -119,6 +126,26 @@ describe("monitoring store credit helpers", () => {
         targets,
       ),
     ).toBe(34);
+  });
+
+  it("treats a missing monitoring claim rpc as unavailable locally", async () => {
+    const mockMonitoringClaimDueMonitors =
+      monitoringClaimDueMonitors as MockedFunction<
+        typeof monitoringClaimDueMonitors
+      >;
+    mockMonitoringClaimDueMonitors.mockRejectedValue(
+      new Error(
+        "Failed query: select * from monitoring_claim_due_monitors(p_worker_id => $1, p_limit => $2, p_lease_seconds => $3)",
+      ),
+    );
+
+    await expect(
+      claimDueMonitors({
+        workerId: "worker-1",
+        limit: 10,
+        leaseSeconds: 60,
+      }),
+    ).resolves.toEqual([]);
   });
 
   it("treats enhanced proxy metadata as premium for fallback billing", () => {

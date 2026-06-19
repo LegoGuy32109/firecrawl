@@ -14,6 +14,15 @@ import {
 import { v7 as uuidv7 } from "uuid";
 import { hasFormatOfType } from "../../lib/format-utils";
 import { TransportableError } from "../../lib/error";
+import {
+  AgentError,
+  AuthError,
+  BillingError,
+  CommonError,
+  RequestError,
+  ScrapeError,
+} from "../../lib/error-codes";
+import { errorCodeToHttpStatus } from "../../lib/error-catalog";
 import { NuQJob } from "../../services/worker/nuq";
 import { checkPermissions } from "../../lib/permissions";
 import { withSpan, setSpanAttributes, SpanKind } from "../../lib/otel-tracer";
@@ -35,6 +44,7 @@ import {
 import { projectScrapeCredits } from "../../lib/keyless-credit-projection";
 import { applyAgentAuthDiscoveryHeader } from "../../lib/agent-auth-discovery";
 import path from "node:path";
+import { makeResponder } from "./response-enveloper";
 
 const AGENT_INTEROP_CONCURRENCY_BOOST = 3;
 const SUPPORTED_PARSE_FILE_TYPES =
@@ -192,14 +202,13 @@ export function parseMultipartPayloadMiddleware(
   res: Response,
   next: NextFunction,
 ): void {
+  const r = makeResponder(req, res);
   const file = (req as Request & { file?: Express.Multer.File }).file;
   if (!file) {
-    res.status(400).json({
-      success: false,
-      code: "BAD_REQUEST",
-      error:
-        "Missing file upload. Send multipart/form-data with a 'file' field and optional 'options' JSON string.",
-    });
+    r.fail(
+      RequestError.BAD_REQUEST,
+      "Missing file upload. Send multipart/form-data with a 'file' field and optional 'options' JSON string.",
+    );
     return;
   }
 
@@ -208,43 +217,38 @@ export function parseMultipartPayloadMiddleware(
 
   if (rawOptions !== undefined) {
     if (typeof rawOptions !== "string") {
-      res.status(400).json({
-        success: false,
-        code: "BAD_REQUEST",
-        error: "The 'options' field must be a JSON string.",
-      });
+      r.fail(
+        RequestError.BAD_REQUEST,
+        "The 'options' field must be a JSON string.",
+      );
       return;
     }
 
     try {
       const parsed = JSON.parse(rawOptions);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        res.status(400).json({
-          success: false,
-          code: "BAD_REQUEST",
-          error: "The 'options' field must parse to a JSON object.",
-        });
+        r.fail(
+          RequestError.BAD_REQUEST_INVALID_JSON,
+          "The 'options' field must parse to a JSON object.",
+        );
         return;
       }
       optionsPayload = parsed as Record<string, unknown>;
     } catch (error) {
-      res.status(400).json({
-        success: false,
-        code: "BAD_REQUEST",
-        error:
-          "Invalid JSON in the 'options' field. Provide a valid JSON string.",
-      });
+      r.fail(
+        RequestError.BAD_REQUEST_INVALID_JSON,
+        "Invalid JSON in the 'options' field. Provide a valid JSON string.",
+      );
       return;
     }
   }
 
   const kind = detectUploadedFileKind(file.originalname || "", file.mimetype);
   if (!kind) {
-    res.status(400).json({
-      success: false,
-      code: "UNSUPPORTED_FILE_TYPE",
-      error: `Unsupported upload type. Supported file extensions: ${SUPPORTED_PARSE_FILE_TYPES}`,
-    });
+    r.fail(
+      RequestError.BAD_REQUEST,
+      `Unsupported upload type. Supported file extensions: ${SUPPORTED_PARSE_FILE_TYPES}`,
+    );
     return;
   }
 
@@ -265,6 +269,7 @@ export async function parseController(
   req: RequestWithAuth<{}, ScrapeResponse, ParseRequest>,
   res: Response<ScrapeResponse>,
 ) {
+  const r = makeResponder(req, res);
   return withSpan(
     "api.parse.request",
     async span => {
@@ -273,7 +278,10 @@ export async function parseController(
       const controllerStartTime = new Date().getTime();
 
       const jobId = uuidv7();
+      const forcedByTeam = getScrapeZDR(req.acuc?.flags) === "forced";
       const preNormalizedBody = sanitizeParseRequestForLogs(req.body);
+      const zeroDataRetention =
+        forcedByTeam || (req.body.zeroDataRetention ?? false);
 
       setSpanAttributes(span, {
         "parse.job_id": jobId,
@@ -299,11 +307,10 @@ export async function parseController(
           "parse.status_code": 400,
           "parse.error": unsupportedOptionError,
         });
-        return res.status(400).json({
-          success: false,
-          code: "PARSE_UNSUPPORTED_OPTIONS",
-          error: unsupportedOptionError,
-        });
+        return r.fail(
+          RequestError.PARSE_UNSUPPORTED_OPTIONS,
+          unsupportedOptionError,
+        );
       }
 
       const permissions = await withSpan(
@@ -323,15 +330,9 @@ export async function parseController(
           "parse.error": permissions.error,
           "parse.status_code": 403,
         });
-        return res.status(403).json({
-          success: false,
-          error: permissions.error,
-        });
+        return r.fail(RequestError.FORBIDDEN, permissions.error);
       }
 
-      const zeroDataRetention =
-        getScrapeZDR(req.acuc?.flags) === "forced" ||
-        (req.body.zeroDataRetention ?? false);
       const billing: BillingMetadata = req.body.__agentInterop
         ? { endpoint: "agent" as const, jobId }
         : { endpoint: "parse" as const, jobId };
@@ -341,15 +342,12 @@ export async function parseController(
         config.AGENT_INTEROP_SECRET &&
         req.body.__agentInterop.auth !== config.AGENT_INTEROP_SECRET
       ) {
-        return res.status(403).json({
-          success: false,
-          error: "Invalid agent interop.",
-        });
+        return r.fail(AuthError.INTEROP_FORBIDDEN, "Invalid agent interop.");
       } else if (req.body.__agentInterop && !config.AGENT_INTEROP_SECRET) {
-        return res.status(403).json({
-          success: false,
-          error: "Agent interop is not enabled.",
-        });
+        return r.fail(
+          AuthError.INTEROP_FORBIDDEN,
+          "Agent interop is not enabled.",
+        );
       }
 
       const shouldBill = req.body.__agentInterop?.shouldBill ?? true;
@@ -377,10 +375,10 @@ export async function parseController(
         );
         if (!reservation.ok) {
           applyAgentAuthDiscoveryHeader(res);
-          return res.status(429).json({
-            success: false,
-            error: KEYLESS_CREDITS_MESSAGE,
-          });
+          return r.fail(
+            BillingError.INSUFFICIENT_CREDITS,
+            KEYLESS_CREDITS_MESSAGE,
+          );
         }
         reservedKeylessCredits = projectedKeylessCredits;
       }
@@ -552,7 +550,7 @@ export async function parseController(
         }
 
         const timeoutErr =
-          e instanceof TransportableError && e.code === "SCRAPE_TIMEOUT";
+          e instanceof TransportableError && e.code === ScrapeError.TIMEOUT;
 
         setSpanAttributes(span, {
           "parse.error": e instanceof Error ? e.message : String(e),
@@ -568,49 +566,18 @@ export async function parseController(
             });
           }
 
-          if (e.code === "SCRAPE_NO_CACHED_DATA") {
-            setSpanAttributes(span, {
-              "parse.status_code": 404,
-            });
-            return res.status(404).json({
-              success: false,
-              code: e.code,
-              error: e.message,
-            });
-          }
-
-          if (e.code === "AGENT_INDEX_ONLY") {
-            setSpanAttributes(span, {
-              "parse.status_code": 403,
-            });
-            return res.status(403).json({
-              success: false,
-              code: e.code,
-              error: e.message,
-              sponsor_status: "pending",
-              login_url: "https://firecrawl.dev/signin",
-            });
-          }
-
-          if (e.code === "SCRAPE_ACTIONS_NOT_SUPPORTED") {
-            setSpanAttributes(span, {
-              "parse.status_code": 400,
-            });
-            return res.status(400).json({
-              success: false,
-              code: e.code,
-              error: e.message,
-            });
-          }
-
-          const statusCode = e.code === "SCRAPE_TIMEOUT" ? 408 : 500;
+          // Status is driven by the error catalog; no manual ladder.
           setSpanAttributes(span, {
-            "parse.status_code": statusCode,
+            "parse.status_code": errorCodeToHttpStatus(e.code),
           });
-          return res.status(statusCode).json({
-            success: false,
-            code: e.code,
-            error: e.message,
+          return r.fail(e.code, e.message, {
+            details: e.details,
+            ...(e.code === AgentError.INDEX_ONLY
+              ? {
+                  sponsor_status: "pending",
+                  login_url: "https://firecrawl.dev/signin",
+                }
+              : {}),
           });
         } else {
           const id = uuidv7();
@@ -637,10 +604,8 @@ export async function parseController(
             "parse.status_code": 500,
             "parse.error_id": id,
           });
-          return res.status(500).json({
-            success: false,
-            code: "UNKNOWN_ERROR",
-            error: getErrorContactMessage(id),
+          return r.fail(CommonError.UNKNOWN, getErrorContactMessage(id), {
+            errorId: id,
           });
         }
       } finally {
@@ -714,8 +679,7 @@ export async function parseController(
         concurrencyQueueDurationMs: lockTime || undefined,
       });
 
-      return res.status(200).json({
-        success: true,
+      return r.ok({
         data: {
           ...doc!,
           metadata: {

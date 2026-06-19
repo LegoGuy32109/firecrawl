@@ -2,6 +2,7 @@ import { Response } from "express";
 import { config } from "../../config";
 import { logger as _logger } from "../../lib/logger";
 import {
+  DiagnosticStatus,
   Document,
   FormatObject,
   RequestWithAuth,
@@ -12,6 +13,15 @@ import {
 import { v7 as uuidv7 } from "uuid";
 import { hasFormatOfType } from "../../lib/format-utils";
 import { TransportableError } from "../../lib/error";
+import {
+  AgentError,
+  AuthError,
+  BillingError,
+  CommonError,
+  RequestError,
+  ScrapeError,
+} from "../../lib/error-codes";
+import { errorCodeToHttpStatus, parseErrorCode } from "../../lib/error-catalog";
 import { NuQJob } from "../../services/worker/nuq";
 import { checkPermissions } from "../../lib/permissions";
 import { withSpan, setSpanAttributes, SpanKind } from "../../lib/otel-tracer";
@@ -24,6 +34,7 @@ import { getErrorContactMessage } from "../../lib/deployment";
 import { captureExceptionWithZdrCheck } from "../../services/sentry";
 import type { BillingMetadata } from "../../services/billing/types";
 import { getScrapeZDR } from "../../lib/zdr-helpers";
+import { makeResponder } from "./response-enveloper";
 import {
   KEYLESS_CREDITS_MESSAGE,
   adjustKeylessCredits,
@@ -32,13 +43,32 @@ import {
 } from "../../lib/keyless";
 import { projectScrapeCredits } from "../../lib/keyless-credit-projection";
 import { applyAgentAuthDiscoveryHeader } from "../../lib/agent-auth-discovery";
+import type { ActionStatus } from "../../lib/error-details";
 
 const AGENT_INTEROP_CONCURRENCY_BOOST = 3;
+
+function coerceDiagnosticStatus(
+  status: ActionStatus["status"],
+): DiagnosticStatus {
+  switch (status) {
+    case "ok":
+      return DiagnosticStatus.Ok;
+    case "failed":
+      return DiagnosticStatus.Failed;
+    case "skipped":
+      return DiagnosticStatus.Skipped;
+    case "timed_out":
+      return DiagnosticStatus.TimedOut;
+    default:
+      return DiagnosticStatus.Failed;
+  }
+}
 
 export async function scrapeController(
   req: RequestWithAuth<{}, ScrapeResponse, ScrapeRequest>,
   res: Response<ScrapeResponse>,
 ) {
+  const r = makeResponder(req, res);
   return withSpan(
     "api.scrape.request",
     async span => {
@@ -48,7 +78,12 @@ export async function scrapeController(
       const controllerStartTime = new Date().getTime();
 
       const jobId = uuidv7();
+      const forcedByTeam = getScrapeZDR(req.acuc?.flags) === "forced";
       const preNormalizedBody = { ...req.body };
+      const zeroDataRetention =
+        forcedByTeam || (req.body.zeroDataRetention ?? false) || false;
+      const effectiveZeroDataRetention =
+        zeroDataRetention || (req.body.lockdown ?? false);
 
       // Set initial span attributes
       setSpanAttributes(span, {
@@ -85,16 +120,9 @@ export async function scrapeController(
           "scrape.error": permissions.error,
           "scrape.status_code": 403,
         });
-        return res.status(403).json({
-          success: false,
-          error: permissions.error,
-        });
+        return r.fail(RequestError.FORBIDDEN, permissions.error);
       }
 
-      const zeroDataRetention =
-        getScrapeZDR(req.acuc?.flags) === "forced" ||
-        (req.body.zeroDataRetention ?? false) ||
-        (req.body.lockdown ?? false);
       const billing: BillingMetadata = req.body.__agentInterop
         ? { endpoint: "agent" as const, jobId }
         : { endpoint: "scrape" as const, jobId };
@@ -104,15 +132,12 @@ export async function scrapeController(
         config.AGENT_INTEROP_SECRET &&
         req.body.__agentInterop.auth !== config.AGENT_INTEROP_SECRET
       ) {
-        return res.status(403).json({
-          success: false,
-          error: "Invalid agent interop.",
-        });
+        return r.fail(AuthError.INTEROP_FORBIDDEN, "Invalid agent interop.");
       } else if (req.body.__agentInterop && !config.AGENT_INTEROP_SECRET) {
-        return res.status(403).json({
-          success: false,
-          error: "Agent interop is not enabled.",
-        });
+        return r.fail(
+          AuthError.INTEROP_FORBIDDEN,
+          "Agent interop is not enabled.",
+        );
       }
 
       const shouldBill = req.body.__agentInterop?.shouldBill ?? true;
@@ -127,7 +152,7 @@ export async function scrapeController(
           ? projectScrapeCredits(
               req.body,
               req.acuc?.flags ?? null,
-              zeroDataRetention,
+              effectiveZeroDataRetention,
             )
           : 0;
       let reservedKeylessCredits = 0;
@@ -140,10 +165,10 @@ export async function scrapeController(
         );
         if (!reservation.ok) {
           applyAgentAuthDiscoveryHeader(res);
-          return res.status(429).json({
-            success: false,
-            error: KEYLESS_CREDITS_MESSAGE,
-          });
+          return r.fail(
+            BillingError.INSUFFICIENT_CREDITS,
+            KEYLESS_CREDITS_MESSAGE,
+          );
         }
         reservedKeylessCredits = projectedKeylessCredits;
       }
@@ -155,7 +180,7 @@ export async function scrapeController(
         scrapeId: jobId,
         teamId: req.auth.team_id,
         team_id: req.auth.team_id,
-        zeroDataRetention,
+        zeroDataRetention: effectiveZeroDataRetention,
       });
 
       const middlewareTime = controllerStartTime - middlewareStartTime;
@@ -179,7 +204,7 @@ export async function scrapeController(
           origin: req.body.origin ?? "api",
           integration: req.body.integration,
           target_hint: req.body.url,
-          zeroDataRetention: zeroDataRetention || false,
+          zeroDataRetention: effectiveZeroDataRetention,
           api_key_id: req.acuc?.api_key_id ?? null,
         }).catch(err =>
           logger.warn("Background request log failed", { error: err, jobId }),
@@ -187,7 +212,7 @@ export async function scrapeController(
       }
 
       setSpanAttributes(span, {
-        "scrape.zero_data_retention": zeroDataRetention,
+        "scrape.zero_data_retention": effectiveZeroDataRetention,
         "scrape.origin": req.body.origin,
         "scrape.timeout": req.body.timeout,
       });
@@ -281,7 +306,7 @@ export async function scrapeController(
                         : false,
                       unnormalizedSourceURL: preNormalizedBody.url,
                       bypassBilling: isDirectToBullMQ || !shouldBill,
-                      zeroDataRetention,
+                      zeroDataRetention: effectiveZeroDataRetention,
                       teamFlags: req.acuc?.flags ?? null,
                       agentIndexOnly: (req as any).agentIndexOnly ?? false,
                     },
@@ -290,7 +315,7 @@ export async function scrapeController(
                     integration: req.body.integration,
                     billing,
                     startTime: controllerStartTime,
-                    zeroDataRetention,
+                    zeroDataRetention: effectiveZeroDataRetention,
                     apiKeyId: req.acuc?.api_key_id ?? null,
                     concurrencyLimited: limited,
                     keylessReserved: reservedKeylessCredits > 0,
@@ -321,7 +346,7 @@ export async function scrapeController(
         }
 
         const timeoutErr =
-          e instanceof TransportableError && e.code === "SCRAPE_TIMEOUT";
+          e instanceof TransportableError && e.code === ScrapeError.TIMEOUT;
 
         setSpanAttributes(span, {
           "scrape.error": e instanceof Error ? e.message : String(e),
@@ -336,72 +361,63 @@ export async function scrapeController(
               error: e,
             });
           }
-          // DNS resolution errors should return 200 with success: false
-          if (e.code === "SCRAPE_DNS_RESOLUTION_ERROR") {
-            setSpanAttributes(span, {
-              "scrape.status_code": 200,
-            });
-            return res.status(200).json({
-              success: false,
-              code: e.code,
-              error: e.message,
-            });
+          const actionStatuses = (
+            e.details as
+              | {
+                  actionStatuses?: ActionStatus[];
+                }
+              | undefined
+          )?.actionStatuses;
+          if (e.code === ScrapeError.ACTION && Array.isArray(actionStatuses)) {
+            for (const status of actionStatuses) {
+              const parsedCode =
+                status.code !== undefined
+                  ? parseErrorCode(status.code)
+                  : undefined;
+              r.step(
+                {
+                  name: status.name,
+                  status: coerceDiagnosticStatus(status.status),
+                  ...(status.message !== undefined
+                    ? { message: status.message }
+                    : {}),
+                  ...(status.actionNumber !== undefined
+                    ? { actionNumber: status.actionNumber }
+                    : {}),
+                  ...(status.startedAt !== undefined
+                    ? { startedAt: status.startedAt }
+                    : {}),
+                  ...(status.endedAt !== undefined
+                    ? { endedAt: status.endedAt }
+                    : {}),
+                  ...(status.details !== undefined
+                    ? { details: status.details }
+                    : {}),
+                  ...(status.durationMs !== undefined
+                    ? { durationMs: status.durationMs }
+                    : {}),
+                  ...(parsedCode !== undefined
+                    ? { code: parsedCode }
+                    : status.status === DiagnosticStatus.Failed
+                      ? { code: ScrapeError.ACTION }
+                      : {}),
+                },
+                "actions",
+              );
+            }
           }
-
-          if (e.code === "SCRAPE_NO_CACHED_DATA") {
-            setSpanAttributes(span, {
-              "scrape.status_code": 404,
-            });
-            return res.status(404).json({
-              success: false,
-              code: e.code,
-              error: e.message,
-            });
-          }
-
-          if (e.code === "SCRAPE_LOCKDOWN_CACHE_MISS") {
-            setSpanAttributes(span, {
-              "scrape.status_code": 404,
-            });
-            return res.status(404).json({
-              success: false,
-              code: e.code,
-              error: e.message,
-            });
-          }
-
-          if (e.code === "AGENT_INDEX_ONLY") {
-            setSpanAttributes(span, {
-              "scrape.status_code": 403,
-            });
-            return res.status(403).json({
-              success: false,
-              code: e.code,
-              error: e.message,
-              sponsor_status: "pending",
-              login_url: "https://firecrawl.dev/signin",
-            });
-          }
-
-          if (e.code === "SCRAPE_ACTIONS_NOT_SUPPORTED") {
-            setSpanAttributes(span, {
-              "scrape.status_code": 400,
-            });
-            return res.status(400).json({
-              success: false,
-              code: e.code,
-              error: e.message,
-            });
-          }
-
-          const statusCode = e.code === "SCRAPE_TIMEOUT" ? 408 : 500;
+          // Status (incl. DNS=200) is driven by the error catalog; no manual ladder.
           setSpanAttributes(span, {
-            "scrape.status_code": statusCode,
+            "scrape.status_code": errorCodeToHttpStatus(e.code),
           });
-          return res.status(statusCode).json({
-            success: false,
-            code: e.code,
-            error: e.message,
+          return r.fail(e.code, e.message, {
+            details: e.details,
+            ...(e.code === AgentError.INDEX_ONLY
+              ? {
+                  sponsor_status: "pending",
+                  login_url: "https://firecrawl.dev/signin",
+                }
+              : {}),
           });
         } else {
           const id = uuidv7();
@@ -422,16 +438,14 @@ export async function scrapeController(
               path: req.path,
               url: req.body.url,
             },
-            zeroDataRetention,
+            zeroDataRetention: effectiveZeroDataRetention,
           });
           setSpanAttributes(span, {
             "scrape.status_code": 500,
             "scrape.error_id": id,
           });
-          return res.status(500).json({
-            success: false,
-            code: "UNKNOWN_ERROR",
-            error: getErrorContactMessage(id),
+          return r.fail(CommonError.UNKNOWN, getErrorContactMessage(id), {
+            errorId: id,
           });
         }
       } finally {
@@ -491,6 +505,10 @@ export async function scrapeController(
 
       const formats: string[] =
         req.body.formats?.map((f: FormatObject) => f?.type) ?? [];
+      const live = (doc as any)?.metadata?.live as
+        | import("./types").LiveMetadata
+        | undefined;
+      const liveWarnings = live?.warnings?.length ? live.warnings : [];
 
       logger.info("Request metrics", {
         version: "v2",
@@ -508,8 +526,23 @@ export async function scrapeController(
         concurrencyQueueDurationMs: lockTime || undefined,
       });
 
-      return res.status(200).json({
-        success: true,
+      // Emit engine waterfall steps for the diagnostics waterfall.
+      for (const attempt of doc?.metadata?.engineAttempts ?? []) {
+        r.step(
+          {
+            name: "source",
+            status: attempt.success
+              ? DiagnosticStatus.Ok
+              : DiagnosticStatus.Failed,
+            message: attempt.engine,
+            details: attempt.error ? { error: attempt.error } : undefined,
+          },
+          "sources",
+          attempt.engine,
+        );
+      }
+
+      return r.ok({
         data: {
           ...doc!,
           metadata: {
@@ -521,6 +554,8 @@ export async function scrapeController(
           },
         },
         scrape_id: origin?.includes("website") ? jobId : undefined,
+        ...(live ? { live } : {}),
+        ...(liveWarnings.length > 0 ? { warnings: liveWarnings } : {}),
       });
     },
     {

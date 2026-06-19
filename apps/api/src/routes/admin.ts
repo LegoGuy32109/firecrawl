@@ -1,28 +1,44 @@
 import express from "express";
+import expressWs from "express-ws";
 import { config } from "../config";
-import { redisHealthController } from "../controllers/v0/admin/redis-health";
-import { autumnHealthController } from "../controllers/v0/admin/autumn-health";
+import { adminIndexController } from "../admin/admin-index";
+import { redisHealthController } from "../admin/redis-health";
+import { autumnHealthController } from "../admin/autumn-health";
 import { authMiddleware, checkCreditsMiddleware, wrap } from "./shared";
-import { acucCacheClearController } from "../controllers/v0/admin/acuc-cache-clear";
-import { checkFireEngine } from "../controllers/v0/admin/check-fire-engine";
-import { cclogController } from "../controllers/v0/admin/cclog";
-import { indexQueuePrometheus } from "../controllers/v0/admin/index-queue-prometheus";
-import { triggerPrecrawl } from "../controllers/v0/admin/precrawl";
-import {
-  metricsController,
-  nuqMetricsController,
-} from "../controllers/v0/admin/metrics";
+import { acucCacheClearController } from "../admin/acuc-cache-clear";
+import { checkFireEngine } from "../admin/check-fire-engine";
+import { cclogController } from "../admin/cclog";
+import { indexQueuePrometheus } from "../admin/index-queue-prometheus";
+import { triggerPrecrawl } from "../admin/precrawl";
+import { metricsController, nuqMetricsController } from "../admin/metrics";
 import { realtimeSearchController } from "../controllers/v2/f-search";
-import { concurrencyQueueBackfillController } from "../controllers/v0/admin/concurrency-queue-backfill";
-import { crawlMonitorController } from "../controllers/v0/admin/crawl-monitor";
+import { concurrencyQueueBackfillController } from "../admin/concurrency-queue-backfill";
+import { crawlMonitorController } from "../admin/crawl-monitor";
+import { playgroundController } from "../admin/playground/controller";
 import {
   handleIntegrationAdminCreateUserProxy,
   handleIntegrationAdminRotateProxy,
   handleIntegrationAdminValidateProxy,
 } from "../lib/admin-integration-integrations-proxy";
 import { RateLimiterMode } from "../types";
+import {
+  createPlaygroundSession,
+  deletePlaygroundSession,
+  getPlaygroundSession,
+} from "../admin/playground/session";
+import { listPlaygroundScrapes } from "../admin/playground/scrapes";
+import { createLivecastWS } from "../services/sessionLivecastWS";
+
+expressWs(express());
 
 export const adminRouter = express.Router();
+
+adminRouter.get(`/admin/${config.BULL_AUTH_KEY}`, adminIndexController);
+
+adminRouter.get(
+  `/admin/${config.BULL_AUTH_KEY}/playground`,
+  playgroundController,
+);
 
 adminRouter.get(
   `/admin/${config.BULL_AUTH_KEY}/redis-health`,
@@ -96,4 +112,41 @@ adminRouter.post(
 adminRouter.post(
   `/admin/integration/rotate-api-key`,
   wrap(handleIntegrationAdminRotateProxy),
+);
+
+// Playground admin routes inherit BULL_AUTH_KEY gating from these route paths.
+// The scrapes route also uses API auth because it returns team-scoped data.
+adminRouter.post(
+  `/admin/${config.BULL_AUTH_KEY}/playground/session`,
+  wrap(createPlaygroundSession),
+);
+
+adminRouter.get(
+  `/admin/${config.BULL_AUTH_KEY}/playground/session/:id`,
+  wrap(getPlaygroundSession),
+);
+
+adminRouter.get(
+  `/admin/${config.BULL_AUTH_KEY}/playground/scrapes`,
+  authMiddleware(RateLimiterMode.CrawlStatus),
+  wrap(listPlaygroundScrapes),
+);
+
+adminRouter.delete(
+  `/admin/${config.BULL_AUTH_KEY}/playground/session/:id`,
+  wrap(deletePlaygroundSession),
+);
+
+(adminRouter as any).ws(
+  `/admin/${config.BULL_AUTH_KEY}/playground/session/:id/view`,
+  createLivecastWS(req => {
+    if (!config.BROWSER_SERVICE_URL) return null;
+    const upstream = new URL(config.BROWSER_SERVICE_URL);
+    upstream.protocol = upstream.protocol === "https:" ? "wss:" : "ws:";
+    upstream.pathname = `/browsers/${req.params.id}/view/ws`;
+    if (config.BROWSER_SERVICE_API_KEY) {
+      upstream.searchParams.set("token", config.BROWSER_SERVICE_API_KEY);
+    }
+    return upstream.toString();
+  }),
 );

@@ -2,15 +2,20 @@ import { supabaseGetScrapeByIdOnlyData } from "../../lib/supabase-jobs";
 import { getJob } from "./crawl-status";
 import { logger as _logger } from "../../lib/logger";
 import { getScrapeZDR } from "../../lib/zdr-helpers";
+import {
+  CommonError,
+  LifecycleError,
+  RequestError,
+} from "../../lib/error-codes";
+import { makeResponder } from "./response-enveloper";
+import { deserializeTransportableError } from "../../lib/error-serde";
 
 export async function scrapeStatusController(req: any, res: any) {
+  const r = makeResponder(req, res);
   const uuidReg =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (!req.params.jobId || !uuidReg.test(req.params.jobId)) {
-    return res.status(400).json({
-      success: false,
-      error: "Invalid crawl ID",
-    });
+    return r.fail(RequestError.BAD_REQUEST, "Invalid crawl ID");
   }
 
   const logger = _logger.child({
@@ -23,27 +28,23 @@ export async function scrapeStatusController(req: any, res: any) {
   });
 
   if (getScrapeZDR(req.acuc?.flags) === "forced") {
-    return res.status(400).json({
-      success: false,
-      error:
-        "Your team has zero data retention enabled. This is not supported on scrape status. Please contact support@firecrawl.com to unblock this feature.",
-    });
+    return r.fail(
+      LifecycleError.ZDR_NOT_SUPPORTED,
+      "Your team has zero data retention enabled. This is not supported on scrape status. Please contact support@firecrawl.com to unblock this feature.",
+    );
   }
 
   const job = await supabaseGetScrapeByIdOnlyData(req.params.jobId, logger);
 
   if (!job) {
-    return res.status(404).json({
-      success: false,
-      error: "Job not found.",
-    });
+    return r.fail(LifecycleError.JOB_NOT_FOUND, "Job not found.");
   }
 
   if (job?.team_id !== req.auth.team_id) {
-    return res.status(403).json({
-      success: false,
-      error: "You are not allowed to access this resource.",
-    });
+    return r.fail(
+      LifecycleError.JOB_WRONG_TEAM,
+      "You are not allowed to access this resource.",
+    );
   }
 
   const jobData = await getJob(req.params.jobId, logger);
@@ -51,15 +52,32 @@ export async function scrapeStatusController(req: any, res: any) {
     ? jobData?.returnvalue[0]
     : jobData?.returnvalue;
 
-  if (!data) {
-    return res.status(404).json({
-      success: false,
-      error: "Job not found.",
-    });
+  if (jobData?.status === "failed") {
+    const failedError = deserializeTransportableError(
+      jobData.failedReason ?? "",
+    );
+    return r.asyncFail(
+      failedError?.code ?? CommonError.UNKNOWN,
+      failedError?.message ?? jobData.failedReason ?? "Job failed",
+      {
+        data,
+        expiresAt: new Date(
+          new Date(job.created_at).getTime() + 1000 * 60 * 60 * 24,
+        ).toISOString(),
+      },
+    );
   }
 
-  return res.status(200).json({
-    success: true,
+  if (!data) {
+    return r.fail(LifecycleError.JOB_NOT_FOUND, "Job not found.");
+  }
+
+  const body = {
     data,
-  });
+    expiresAt: new Date(
+      new Date(job.created_at).getTime() + 1000 * 60 * 60 * 24,
+    ).toISOString(),
+    jobState: jobData?.status === "completed" ? "completed" : "processing",
+  };
+  return jobData?.status === "completed" ? r.ok(body) : r.processing(body);
 }

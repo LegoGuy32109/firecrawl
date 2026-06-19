@@ -25,6 +25,9 @@ x-common-env: &common-env
   REDIS_URL: ${REDIS_URL:-redis://redis:6379}
   REDIS_RATE_LIMIT_URL: ${REDIS_URL:-redis://redis:6379}
   PLAYWRIGHT_MICROSERVICE_URL: ${PLAYWRIGHT_MICROSERVICE_URL:-http://playwright-service:3000/scrape}
+  PLAYWRIGHT_CDP_URL: ${PLAYWRIGHT_CDP_URL:-http://playwright-service:3000/scrape-cdp}
+  BROWSER_SERVICE_URL: ${BROWSER_SERVICE_URL:-http://playwright-service:3000}
+  BROWSER_SERVICE_API_KEY: ${BROWSER_SERVICE_API_KEY:-local-browser-service-secret}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
   POSTGRES_DB: ${POSTGRES_DB:-postgres}
@@ -40,6 +43,7 @@ x-common-env: &common-env
   MODEL_NAME: ${MODEL_NAME}
   MODEL_EMBEDDING_NAME: ${MODEL_EMBEDDING_NAME}
   OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
+  LOCAL_LLM_PROXY_URL: ${LOCAL_LLM_PROXY_URL:-}
   AUTUMN_SECRET_KEY: ${AUTUMN_SECRET_KEY}
   SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
   BULL_AUTH_KEY: ${BULL_AUTH_KEY}
@@ -72,10 +76,13 @@ services:
       PROXY_PASSWORD: ${PROXY_PASSWORD}
       ALLOW_LOCAL_WEBHOOKS: ${ALLOW_LOCAL_WEBHOOKS}
       BLOCK_MEDIA: ${BLOCK_MEDIA}
+      BROWSER_SERVICE_API_KEY: ${BROWSER_SERVICE_API_KEY:-local-browser-service-secret}
       # Configure maximum concurrent pages for Playwright browser instances
       MAX_CONCURRENT_PAGES: ${CRAWL_CONCURRENT_REQUESTS:-10}
     networks:
       - backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # Resource limits for Docker Compose (not Swarm)
     cpus: 2.0
     mem_limit: 4G
@@ -174,7 +181,9 @@ services:
   # FoundationDB queue backend (experimental). Enable by setting
   # NUQ_BACKEND=fdb; the api container reads the shared cluster file from the
   # fdb-cluster-file volume. Replaces nuq-postgres once stable.
+  # Profile-gated: only starts under `--profile full`.
   foundationdb:
+    profiles: ["full"]
     image: foundationdb/foundationdb:7.3.63
     environment:
       FDB_NETWORKING_MODE: container
@@ -191,8 +200,11 @@ services:
         max-file: "3"
         compress: "true"
 
+
   # one-shot: creates the database on first boot (no-op afterwards)
+  # Profile-gated alongside foundationdb.
   foundationdb-init:
+    profiles: ["full"]
     image: foundationdb/foundationdb:7.3.63
     depends_on:
       - foundationdb
@@ -213,3 +225,4 @@ networks:
 volumes:
   fdb-data:
   fdb-cluster-file:
+  codex-auth:

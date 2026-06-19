@@ -4,6 +4,8 @@ import { config } from "../config";
 import { RateLimiterMode } from "../types";
 import { SEARCH_CREDITS_FEATURE_ID } from "../services/autumn/autumn.service";
 import expressWs from "express-ws";
+import { makeResponder } from "../controllers/v2/response-enveloper";
+import { RequestError } from "../lib/error-codes";
 import { searchController } from "../controllers/v2/search";
 import { feedbackController } from "../controllers/v2/feedback/controller";
 import { searchFeedbackController } from "../controllers/v2/search-feedback";
@@ -68,6 +70,11 @@ import {
   scrapeStopInteractiveBrowserController,
 } from "../controllers/v2/scrape-browser";
 import {
+  resolveContentFreePrivacy,
+  resolveScrapePrivacy,
+  resolveSearchPrivacy,
+} from "../controllers/v2/resolve-privacy";
+import {
   confirmMonitorEmailController,
   createMonitorController,
   deleteMonitorController,
@@ -99,19 +106,18 @@ const parseUploadMiddleware: express.RequestHandler = (req, res, next) => {
       return next();
     }
 
+    const r = makeResponder(req as any, res);
     if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
-      return res.status(400).json({
-        success: false,
-        code: "BAD_REQUEST",
-        error: "Uploaded file exceeds maximum size of 50MB.",
-      });
+      return r.fail(
+        RequestError.BAD_REQUEST,
+        "Uploaded file exceeds maximum size of 50MB.",
+      );
     }
 
-    return res.status(400).json({
-      success: false,
-      code: "BAD_REQUEST",
-      error: err.message || "Invalid multipart form-data request.",
-    });
+    return r.fail(
+      RequestError.BAD_REQUEST,
+      err.message || "Invalid multipart form-data request.",
+    );
   });
 };
 
@@ -240,6 +246,7 @@ v2Router.get("/keyless/eligibility", wrap(keylessEligibilityController));
 v2Router.post(
   "/search",
   authMiddleware(RateLimiterMode.Search, { allowKeyless: true }),
+  resolveSearchPrivacy,
   countryCheck,
   checkCreditsMiddleware(undefined, SEARCH_CREDITS_FEATURE_ID),
   blocklistMiddleware,
@@ -249,6 +256,7 @@ v2Router.post(
 v2Router.post(
   "/search/:jobId/feedback",
   authMiddleware(RateLimiterMode.Account),
+  resolveContentFreePrivacy,
   validateJobIdParam,
   wrap(searchFeedbackController),
 );
@@ -256,12 +264,14 @@ v2Router.post(
 v2Router.post(
   "/feedback",
   authMiddleware(RateLimiterMode.Account),
+  resolveContentFreePrivacy,
   wrap(feedbackController),
 );
 
 v2Router.post(
   "/parse",
   authMiddleware(RateLimiterMode.Scrape, { allowKeyless: true }),
+  resolveScrapePrivacy,
   countryCheck,
   parseUploadMiddleware,
   parseMultipartPayloadMiddleware,
@@ -272,6 +282,7 @@ v2Router.post(
 v2Router.post(
   "/scrape",
   authMiddleware(RateLimiterMode.Scrape, { allowKeyless: true }),
+  resolveScrapePrivacy,
   countryCheck,
   checkCreditsMiddleware(1),
   blocklistMiddleware,
@@ -281,6 +292,7 @@ v2Router.post(
 v2Router.get(
   "/scrape/:jobId",
   authMiddleware(RateLimiterMode.CrawlStatus),
+  resolveScrapePrivacy,
   validateJobIdParam,
   wrap(scrapeStatusController),
 );
@@ -288,6 +300,7 @@ v2Router.get(
 v2Router.post(
   "/scrape/:jobId/interact",
   authMiddleware(RateLimiterMode.BrowserExecute, { allowKeyless: true }),
+  resolveScrapePrivacy,
   validateJobIdParam,
   wrap(scrapeInteractController),
 );
@@ -295,6 +308,7 @@ v2Router.post(
 v2Router.delete(
   "/scrape/:jobId/interact",
   authMiddleware(RateLimiterMode.BrowserExecute, { allowKeyless: true }),
+  resolveContentFreePrivacy,
   validateJobIdParam,
   wrap(scrapeStopInteractiveBrowserController),
 );
@@ -302,6 +316,7 @@ v2Router.delete(
 v2Router.post(
   "/batch/scrape",
   authMiddleware(RateLimiterMode.Scrape),
+  resolveScrapePrivacy,
   countryCheck,
   checkCreditsMiddleware(),
   blocklistMiddleware,
@@ -311,6 +326,7 @@ v2Router.post(
 v2Router.post(
   "/map",
   authMiddleware(RateLimiterMode.Map),
+  resolveScrapePrivacy,
   checkCreditsMiddleware(1),
   blocklistMiddleware,
   wrap(mapController),
@@ -319,6 +335,7 @@ v2Router.post(
 v2Router.post(
   "/crawl",
   authMiddleware(RateLimiterMode.Crawl),
+  resolveScrapePrivacy,
   countryCheck,
   checkCreditsMiddleware(),
   blocklistMiddleware,
@@ -329,6 +346,7 @@ v2Router.post(
 v2Router.post(
   "/crawl/params-preview",
   authMiddleware(RateLimiterMode.Crawl),
+  resolveContentFreePrivacy,
   checkCreditsMiddleware(),
   wrap(crawlParamsPreviewController),
 );
@@ -336,18 +354,21 @@ v2Router.post(
 v2Router.get(
   "/crawl/ongoing",
   authMiddleware(RateLimiterMode.CrawlStatus),
+  resolveContentFreePrivacy,
   wrap(ongoingCrawlsController),
 );
 
 v2Router.get(
   "/crawl/active",
   authMiddleware(RateLimiterMode.CrawlStatus),
+  resolveContentFreePrivacy,
   wrap(ongoingCrawlsController),
 );
 
 v2Router.get(
   "/crawl/:jobId",
   authMiddleware(RateLimiterMode.CrawlStatus),
+  resolveScrapePrivacy,
   validateJobIdParam,
   wrap(crawlStatusController),
 );
@@ -355,6 +376,7 @@ v2Router.get(
 v2Router.delete(
   "/crawl/:jobId",
   authMiddleware(RateLimiterMode.CrawlStatus),
+  resolveContentFreePrivacy,
   validateJobIdParam,
   wrap(crawlCancelController),
 );
@@ -374,6 +396,7 @@ v2Router.ws(
 v2Router.get(
   "/batch/scrape/:jobId",
   authMiddleware(RateLimiterMode.CrawlStatus),
+  resolveScrapePrivacy,
   validateJobIdParam,
   wrap((req: any, res: any) => crawlStatusController(req, res, true)),
 );
@@ -381,6 +404,7 @@ v2Router.get(
 v2Router.delete(
   "/batch/scrape/:jobId",
   authMiddleware(RateLimiterMode.CrawlStatus),
+  resolveContentFreePrivacy,
   validateJobIdParam,
   wrap(crawlCancelController),
 );
@@ -388,12 +412,14 @@ v2Router.delete(
 v2Router.get(
   "/batch/scrape/:jobId/errors",
   authMiddleware(RateLimiterMode.CrawlStatus),
+  resolveContentFreePrivacy,
   wrap(crawlErrorsController),
 );
 
 v2Router.get(
   "/crawl/:jobId/errors",
   authMiddleware(RateLimiterMode.CrawlStatus),
+  resolveContentFreePrivacy,
   validateJobIdParam,
   wrap(crawlErrorsController),
 );
@@ -401,6 +427,7 @@ v2Router.get(
 v2Router.post(
   "/extract",
   authMiddleware(RateLimiterMode.Extract),
+  resolveScrapePrivacy,
   deprecationMiddleware("v2_extract"),
   countryCheck,
   checkCreditsMiddleware(20),
@@ -411,6 +438,7 @@ v2Router.post(
 v2Router.get(
   "/extract/:jobId",
   authMiddleware(RateLimiterMode.ExtractStatus),
+  resolveScrapePrivacy,
   deprecationMiddleware("v2_extract_status"),
   validateJobIdParam,
   wrap(extractStatusController),
@@ -419,6 +447,7 @@ v2Router.get(
 v2Router.post(
   "/agent",
   authMiddleware(RateLimiterMode.Extract),
+  resolveScrapePrivacy,
   countryCheck,
   checkCreditsMiddleware(20),
   blocklistMiddleware,
@@ -428,6 +457,7 @@ v2Router.post(
 v2Router.get(
   "/agent/:jobId",
   authMiddleware(RateLimiterMode.ExtractStatus),
+  resolveScrapePrivacy,
   validateJobIdParam,
   wrap(agentStatusController),
 );
@@ -435,6 +465,7 @@ v2Router.get(
 v2Router.delete(
   "/agent/:jobId",
   authMiddleware(RateLimiterMode.ExtractStatus),
+  resolveContentFreePrivacy,
   validateJobIdParam,
   wrap(agentCancelController),
 );
@@ -442,48 +473,56 @@ v2Router.delete(
 v2Router.get(
   "/team/credit-usage",
   authMiddleware(RateLimiterMode.Account),
+  resolveContentFreePrivacy,
   wrap(creditUsageController),
 );
 
 v2Router.get(
   "/team/credit-usage/historical",
   authMiddleware(RateLimiterMode.Account),
+  resolveContentFreePrivacy,
   wrap(creditUsageHistoricalController),
 );
 
 v2Router.get(
   "/team/token-usage",
   authMiddleware(RateLimiterMode.Account),
+  resolveContentFreePrivacy,
   wrap(tokenUsageController),
 );
 
 v2Router.get(
   "/team/token-usage/historical",
   authMiddleware(RateLimiterMode.Account),
+  resolveContentFreePrivacy,
   wrap(tokenUsageHistoricalController),
 );
 
 v2Router.get(
   "/concurrency-check",
   authMiddleware(RateLimiterMode.CrawlStatus),
+  resolveContentFreePrivacy,
   wrap(concurrencyCheckController),
 );
 
 v2Router.get(
   "/team/queue-status",
   authMiddleware(RateLimiterMode.Account),
+  resolveContentFreePrivacy,
   wrap(queueStatusController),
 );
 
 v2Router.get(
   "/team/activity",
   authMiddleware(RateLimiterMode.Account),
+  resolveContentFreePrivacy,
   wrap(activityController),
 );
 
 v2Router.post(
   "/monitor",
   authMiddleware(RateLimiterMode.Crawl),
+  resolveScrapePrivacy,
   countryCheck,
   checkCreditsMiddleware(1),
   blocklistMiddleware,
@@ -493,6 +532,7 @@ v2Router.post(
 v2Router.get(
   "/monitor",
   authMiddleware(RateLimiterMode.CrawlStatus),
+  resolveContentFreePrivacy,
   wrap(listMonitorsController),
 );
 
@@ -501,18 +541,21 @@ v2Router.get(
 v2Router.post("/monitor/email/confirm", wrap(confirmMonitorEmailController));
 v2Router.post(
   "/monitor/email/unsubscribe",
+  resolveContentFreePrivacy,
   wrap(unsubscribeMonitorEmailController),
 );
 
 v2Router.get(
   "/monitor/:monitorId",
   authMiddleware(RateLimiterMode.CrawlStatus),
+  resolveContentFreePrivacy,
   wrap(getMonitorController),
 );
 
 v2Router.patch(
   "/monitor/:monitorId",
   authMiddleware(RateLimiterMode.Crawl),
+  resolveScrapePrivacy,
   countryCheck,
   checkCreditsMiddleware(1),
   blocklistMiddleware,
@@ -522,12 +565,14 @@ v2Router.patch(
 v2Router.delete(
   "/monitor/:monitorId",
   authMiddleware(RateLimiterMode.CrawlStatus),
+  resolveContentFreePrivacy,
   wrap(deleteMonitorController),
 );
 
 v2Router.post(
   "/monitor/:monitorId/run",
   authMiddleware(RateLimiterMode.Crawl),
+  resolveScrapePrivacy,
   countryCheck,
   checkCreditsMiddleware(1),
   blocklistMiddleware,
@@ -537,18 +582,21 @@ v2Router.post(
 v2Router.get(
   "/monitor/:monitorId/checks",
   authMiddleware(RateLimiterMode.CrawlStatus),
+  resolveContentFreePrivacy,
   wrap(listMonitorChecksController),
 );
 
 v2Router.get(
   "/monitor/:monitorId/checks/:checkId",
   authMiddleware(RateLimiterMode.CrawlStatus),
+  resolveContentFreePrivacy,
   wrap(getMonitorCheckController),
 );
 
 v2Router.post(
   "/browser",
   authMiddleware(RateLimiterMode.Browser),
+  resolveScrapePrivacy,
   countryCheck,
   checkCreditsMiddleware(2),
   wrap(browserCreateController),
@@ -557,18 +605,21 @@ v2Router.post(
 v2Router.get(
   "/browser",
   authMiddleware(RateLimiterMode.BrowserExecute),
+  resolveContentFreePrivacy,
   wrap(browserListController),
 );
 
 v2Router.post(
   "/browser/:sessionId/execute",
   authMiddleware(RateLimiterMode.BrowserExecute),
+  resolveScrapePrivacy,
   wrap(browserExecuteController),
 );
 
 v2Router.delete(
   "/browser/:sessionId",
   authMiddleware(RateLimiterMode.BrowserExecute),
+  resolveContentFreePrivacy,
   wrap(browserDeleteController),
 );
 
@@ -581,11 +632,13 @@ v2Router.post(
 v2Router.post(
   "/support/ask",
   authMiddleware(RateLimiterMode.SupportAsk),
+  resolveContentFreePrivacy,
   wrap(supportProxyController),
 );
 v2Router.post(
   "/support/docs-search",
   authMiddleware(RateLimiterMode.SupportDocsSearch),
+  resolveContentFreePrivacy,
   wrap(supportProxyController),
 );
 
@@ -608,6 +661,7 @@ if (isX402Enabled()) {
   v2Router.post(
     "/x402/search",
     authMiddleware(RateLimiterMode.Search),
+    resolveSearchPrivacy,
     countryCheck,
     blocklistMiddleware,
     paymentMiddleware(

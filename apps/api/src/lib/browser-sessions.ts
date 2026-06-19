@@ -1,4 +1,5 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { config } from "../config";
 import { deleteKey, getValue, setValue } from "../services/redis";
 import { db } from "../db/connection";
 import * as schema from "../db/schema";
@@ -31,6 +32,23 @@ interface BrowserSessionRow {
   updated_at: string; // ISO timestamp
 }
 
+type LocalBrowserSessionRow = BrowserSessionRow & {
+  deleted_at?: string | null;
+};
+
+const localBrowserSessions = new Map<string, LocalBrowserSessionRow>();
+
+function useDbBrowserSessions(): boolean {
+  return config.USE_DB_AUTHENTICATION === true;
+}
+
+function cloneLocalBrowserSession(
+  row: LocalBrowserSessionRow,
+): BrowserSessionRow {
+  const { deleted_at: _deletedAt, ...rest } = row;
+  return rest;
+}
+
 // ---------------------------------------------------------------------------
 // CRUD helpers
 // ---------------------------------------------------------------------------
@@ -38,6 +56,17 @@ interface BrowserSessionRow {
 export async function insertBrowserSession(
   row: Omit<BrowserSessionRow, "created_at" | "updated_at">,
 ): Promise<BrowserSessionRow> {
+  if (!useDbBrowserSessions()) {
+    const now = new Date().toISOString();
+    const full: LocalBrowserSessionRow = {
+      ...row,
+      created_at: now,
+      updated_at: now,
+    };
+    localBrowserSessions.set(full.id, full);
+    return cloneLocalBrowserSession(full);
+  }
+
   const now = new Date().toISOString();
   const full: BrowserSessionRow = {
     ...row,
@@ -79,6 +108,11 @@ export async function insertBrowserSession(
 export async function getBrowserSession(
   id: string,
 ): Promise<BrowserSessionRow | null> {
+  if (!useDbBrowserSessions()) {
+    const session = localBrowserSessions.get(id);
+    return session ? cloneLocalBrowserSession(session) : null;
+  }
+
   try {
     const [data] = await db
       .select()
@@ -97,11 +131,28 @@ export async function getBrowserSession(
 export async function getBrowserSessionFromScrape(
   id: string,
 ): Promise<BrowserSessionRow | null> {
+  if (!useDbBrowserSessions()) {
+    const session = [...localBrowserSessions.values()]
+      .filter(row => row.scrape_id === id)
+      .sort((a, b) => {
+        if (a.status === "active" && b.status !== "active") return -1;
+        if (a.status !== "active" && b.status === "active") return 1;
+        return (
+          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+        );
+      })[0];
+    return session ? cloneLocalBrowserSession(session) : null;
+  }
+
   try {
     const [data] = await db
       .select()
       .from(schema.browser_sessions)
       .where(eq(schema.browser_sessions.scrape_id, id))
+      .orderBy(
+        sql`case when ${schema.browser_sessions.status} = 'active' then 0 else 1 end`,
+        desc(schema.browser_sessions.updated_at),
+      )
       .limit(1);
     return (data ?? null) as BrowserSessionRow | null;
   } catch (error) {
@@ -116,6 +167,17 @@ export async function listBrowserSessions(
   teamId: string,
   opts?: { status?: BrowserSessionStatus },
 ): Promise<BrowserSessionRow[]> {
+  if (!useDbBrowserSessions()) {
+    return [...localBrowserSessions.values()]
+      .filter(row => row.team_id === teamId)
+      .filter(row => (opts?.status ? row.status === opts.status : true))
+      .sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      )
+      .map(cloneLocalBrowserSession);
+  }
+
   const conditions = [eq(schema.browser_sessions.team_id, teamId)];
   if (opts?.status) {
     conditions.push(eq(schema.browser_sessions.status, opts.status));
@@ -137,6 +199,15 @@ export async function listBrowserSessions(
 }
 
 export async function updateBrowserSessionActivity(id: string): Promise<void> {
+  if (!useDbBrowserSessions()) {
+    const session = localBrowserSessions.get(id);
+    if (session) {
+      session.updated_at = new Date().toISOString();
+      localBrowserSessions.set(id, session);
+    }
+    return;
+  }
+
   try {
     await db
       .update(schema.browser_sessions)
@@ -150,6 +221,13 @@ export async function updateBrowserSessionActivity(id: string): Promise<void> {
 export async function getBrowserSessionByBrowserId(
   browserId: string,
 ): Promise<BrowserSessionRow | null> {
+  if (!useDbBrowserSessions()) {
+    const session = [...localBrowserSessions.values()].find(
+      row => row.browser_id === browserId,
+    );
+    return session ? cloneLocalBrowserSession(session) : null;
+  }
+
   try {
     const [data] = await db
       .select()
@@ -168,27 +246,21 @@ export async function getBrowserSessionByBrowserId(
   }
 }
 
-export async function updateBrowserSessionStatus(
-  id: string,
-  status: BrowserSessionStatus,
-): Promise<void> {
-  try {
-    await db
-      .update(schema.browser_sessions)
-      .set({
-        status,
-        updated_at: new Date().toISOString(),
-        deleted_at: status === "destroyed" ? new Date().toISOString() : null,
-      })
-      .where(eq(schema.browser_sessions.id, id));
-  } catch (error) {
-    logger.warn("Failed to update browser session status", { error, id });
-  }
-}
-
 export async function claimBrowserSessionDestroyed(
   id: string,
 ): Promise<boolean> {
+  if (!useDbBrowserSessions()) {
+    const session = localBrowserSessions.get(id);
+    if (!session || session.status !== "active") {
+      return false;
+    }
+    session.status = "destroyed";
+    session.updated_at = new Date().toISOString();
+    session.deleted_at = session.updated_at;
+    localBrowserSessions.set(id, session);
+    return true;
+  }
+
   const now = new Date().toISOString();
   try {
     const data = await db
@@ -216,6 +288,16 @@ export async function updateBrowserSessionScrapeId(
   id: string,
   scrapeId: string,
 ): Promise<void> {
+  if (!useDbBrowserSessions()) {
+    const session = localBrowserSessions.get(id);
+    if (session) {
+      session.scrape_id = scrapeId;
+      session.updated_at = new Date().toISOString();
+      localBrowserSessions.set(id, session);
+    }
+    return;
+  }
+
   try {
     await db
       .update(schema.browser_sessions)
@@ -234,6 +316,16 @@ export async function updateBrowserSessionCreditsUsed(
   id: string,
   creditsUsed: number,
 ): Promise<void> {
+  if (!useDbBrowserSessions()) {
+    const session = localBrowserSessions.get(id);
+    if (session) {
+      session.credits_used = creditsUsed;
+      session.updated_at = new Date().toISOString();
+      localBrowserSessions.set(id, session);
+    }
+    return;
+  }
+
   try {
     await db
       .update(schema.browser_sessions)

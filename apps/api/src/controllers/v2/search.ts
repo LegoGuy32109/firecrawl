@@ -28,11 +28,20 @@ import type { BillingMetadata } from "../../services/billing/types";
 import { getSearchForcedKind, getSearchZDR } from "../../lib/zdr-helpers";
 import { projectSearchTotalCredits } from "../../lib/keyless-credit-projection";
 import { applyAgentAuthDiscoveryHeader } from "../../lib/agent-auth-discovery";
+import { makeResponder } from "./response-enveloper";
+import {
+  AuthError,
+  BillingError,
+  CommonError,
+  RequestError,
+  ScrapeError,
+} from "../../lib/error-codes";
 
 export async function searchController(
   req: RequestWithAuth<{}, SearchResponse, SearchRequest>,
   res: Response<SearchResponse>,
 ) {
+  const r = makeResponder(req, res);
   const middlewareStartTime =
     (req as any).requestTiming?.startTime || new Date().getTime();
   const controllerStartTime = new Date().getTime();
@@ -66,15 +75,12 @@ export async function searchController(
       config.AGENT_INTEROP_SECRET &&
       req.body.__agentInterop.auth !== config.AGENT_INTEROP_SECRET
     ) {
-      return res.status(403).json({
-        success: false,
-        error: "Invalid agent interop.",
-      });
+      return r.fail(AuthError.INTEROP_FORBIDDEN, "Invalid agent interop.");
     } else if (req.body.__agentInterop && !config.AGENT_INTEROP_SECRET) {
-      return res.status(403).json({
-        success: false,
-        error: "Agent interop is not enabled.",
-      });
+      return r.fail(
+        AuthError.INTEROP_FORBIDDEN,
+        "Agent interop is not enabled.",
+      );
     }
 
     const shouldBill = req.body.__agentInterop?.shouldBill ?? true;
@@ -108,11 +114,10 @@ export async function searchController(
     // Verify the team has searchZDR enabled before allowing enterprise ZDR/anon
     if (isZDROrAnon && !teamForcedKind) {
       if (searchZDRMode !== "allowed") {
-        return res.status(403).json({
-          success: false,
-          error:
-            "Zero Data Retention (ZDR) search is not enabled for your team. Contact support@firecrawl.com to enable this feature.",
-        });
+        return r.fail(
+          RequestError.BAD_REQUEST,
+          "Zero Data Retention (ZDR) search is not enabled for your team. Contact support@firecrawl.com to enable this feature.",
+        );
       }
     }
 
@@ -149,10 +154,10 @@ export async function searchController(
       );
       if (!reservation.ok) {
         applyAgentAuthDiscoveryHeader(res);
-        return res.status(429).json({
-          success: false,
-          error: KEYLESS_CREDITS_MESSAGE,
-        });
+        return r.fail(
+          BillingError.INSUFFICIENT_CREDITS,
+          KEYLESS_CREDITS_MESSAGE,
+        );
       }
       reservedKeylessCredits = projectedKeylessCredits;
     }
@@ -257,8 +262,7 @@ export async function searchController(
       scrapeful: result.shouldScrape,
     });
 
-    return res.status(200).json({
-      success: true,
+    return r.ok({
       data: result.response,
       creditsUsed: result.totalCredits,
       id: jobId,
@@ -273,19 +277,13 @@ export async function searchController(
 
     if (error instanceof z.ZodError) {
       logger.warn("Invalid request body", { error: error.issues });
-      return res.status(400).json({
-        success: false,
-        error: "Invalid request body",
+      return r.fail(RequestError.BAD_REQUEST, "Invalid request body", {
         details: error.issues,
       });
     }
 
     if (error instanceof ScrapeJobTimeoutError) {
-      return res.status(408).json({
-        success: false,
-        code: error.code,
-        error: error.message,
-      });
+      return r.fail(ScrapeError.TIMEOUT, error.message);
     }
 
     captureExceptionWithZdrCheck(error, {
@@ -295,9 +293,6 @@ export async function searchController(
       version: "v2",
       error,
     });
-    return res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    return r.fail(CommonError.UNKNOWN, error as Error);
   }
 }

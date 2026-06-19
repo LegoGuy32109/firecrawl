@@ -7,6 +7,12 @@ ENV CI=true
 
 RUN corepack enable
 
+# Docker build networks can be flaky with Debian mirrors. Keep the base image's
+# HTTP sources so apt does not need bootstrapped CA certs, but add retries and
+# force IPv4 to avoid common container IPv6 routing failures.
+RUN set -eux; \
+    printf 'Acquire::Retries "5";\nAcquire::ForceIPv4 "true";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' > /etc/apt/apt.conf.d/80-retries
+
 # Build Go shared library
 FROM golang:1.24 AS go-build
 WORKDIR /app
@@ -21,6 +27,7 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
+    ca-certificates \
     curl \
     build-essential \
     pkg-config \
@@ -44,15 +51,21 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path \
     && chmod -R a+w $RUSTUP_HOME $CARGO_HOME
 
-# Copy source files
+# Copy dependency manifests and native workspace sources first. The native
+# workspace builds during install, so keep it in the dependency cache layer
+# while avoiding invalidation from ordinary API source edits.
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
-COPY . .
+COPY native/package.json native/Cargo.toml native/build.rs ./native/
+COPY native/src ./native/src
 
 # Install dependencies
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/native/target \
     pnpm install --frozen-lockfile
+
+# Copy the rest of the source after dependencies are installed.
+COPY . .
 
 # Build the application
 RUN pnpm run build
@@ -65,6 +78,7 @@ FROM base AS runtime
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
+    ca-certificates \
     git \
     procps \
     curl \

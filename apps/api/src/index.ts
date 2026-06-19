@@ -33,11 +33,13 @@ import { cacheableLookup } from "./scraper/scrapeURL/lib/cacheableLookup";
 import { v2Router } from "./routes/v2";
 import { nuqShutdown } from "./services/worker/nuq";
 import { getErrorContactMessage } from "./lib/deployment";
+import { CommonError, RequestError } from "./lib/error-codes";
 import { initializeBlocklist } from "./scraper/WebScraper/utils/blocklist";
 import { initializeEngineForcing } from "./scraper/WebScraper/utils/engine-forcing";
 import responseTime from "response-time";
 import { shutdownWebhookQueue } from "./services/webhook";
 import { shutdownIndexerQueue } from "./services/indexing/indexer-queue";
+import { makeResponder } from "./controllers/v2/response-enveloper";
 
 const { createBullBoard } = require("@bull-board/api");
 const { BullMQAdapter } = require("@bull-board/api/bullMQAdapter");
@@ -79,7 +81,7 @@ if (config.EXPRESS_TRUST_PROXY) {
 const serverAdapter = new ExpressAdapter();
 serverAdapter.setBasePath(`/admin/${config.BULL_AUTH_KEY}/queues`);
 
-const { addQueue, removeQueue, setQueues, replaceQueues } = createBullBoard({
+createBullBoard({
   queues: [
     new BullMQAdapter(getGenerateLlmsTxtQueue()),
     new BullMQAdapter(getDeepResearchQueue()),
@@ -203,9 +205,19 @@ app.use(
           ? issues[0].message
           : "Bad Request";
 
+      if (req.originalUrl === "/v2" || req.originalUrl.startsWith("/v2/")) {
+        return makeResponder(req as any, res).fail(
+          RequestError.BAD_REQUEST,
+          customErrorMessage,
+          {
+            details: issues,
+          },
+        );
+      }
+
       res.status(400).json({
         success: false,
-        code: "BAD_REQUEST",
+        code: RequestError.BAD_REQUEST,
         error: customErrorMessage,
         details: issues,
       });
@@ -232,7 +244,7 @@ app.use(
     ) {
       return res.status(400).json({
         success: false,
-        code: "BAD_REQUEST_INVALID_JSON",
+        code: RequestError.BAD_REQUEST_INVALID_JSON,
         error: "Bad request, malformed JSON",
       });
     }
@@ -251,7 +263,7 @@ app.use(
     );
     res.status(500).json({
       success: false,
-      code: "UNKNOWN_ERROR",
+      code: CommonError.UNKNOWN,
       error: getErrorContactMessage(id),
     });
   },

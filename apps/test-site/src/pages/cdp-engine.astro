@@ -1,0 +1,71 @@
+---
+import BaseHead from "../components/BaseHead.astro";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <BaseHead
+      title="CDP Engine Fixture"
+      description="Fixture page for local CDP engine tests"
+    />
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <Header />
+    <main>
+      <h1>CDP Engine Fixture</h1>
+      <p id="action-state">before click</p>
+      <p id="js-state">before execute javascript</p>
+      <button id="reveal-action" type="button">Reveal action state</button>
+      <p id="mobile-state"></p>
+      <p id="geo-state">geolocation pending</p>
+    </main>
+    <Footer />
+    <script>
+      const mobileState = document.querySelector("#mobile-state");
+      if (mobileState) {
+        const isMobileUserAgent = /Mobi|Android|iPhone|iPad|iPod/i.test(
+          navigator.userAgent,
+        );
+        const isNarrowViewport = window.innerWidth <= 640;
+        mobileState.textContent =
+          isMobileUserAgent || isNarrowViewport
+            ? "mobile viewport or user agent"
+            : "desktop viewport or user agent";
+      }
+
+      document
+        .querySelector("#reveal-action")
+        ?.addEventListener("click", () => {
+          const state = document.querySelector("#action-state");
+          if (state) {
+            state.textContent = "post-click playwright cdp state";
+            state.setAttribute("data-ready", "true");
+          }
+        });
+
+      navigator.geolocation?.getCurrentPosition(
+        position => {
+          const state = document.querySelector("#geo-state");
+          if (state) {
+            const location = window.__firecrawlLocation;
+            state.textContent = `geo ${position.coords.latitude.toFixed(2)} ${position.coords.longitude.toFixed(2)} region ${location?.country?.toUpperCase() ?? "unknown"}`;
+          }
+        },
+        () => {
+          const state = document.querySelector("#geo-state");
+          if (state) {
+            state.textContent = "geolocation unavailable";
+          }
+        },
+      );
+    </script>
+  </body>
+</html>

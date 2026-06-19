@@ -1,4 +1,6 @@
 import crypto from "crypto";
+import request from "./lib";
+import WebSocket from "ws";
 import { config } from "../../../config";
 import {
   ALLOW_TEST_SUITE_WEBSITE,
@@ -15,9 +17,38 @@ import {
   scrapeInteractRaw,
   scrapeRaw,
   scrapeTimeout,
+  TEST_API_URL,
 } from "./lib";
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const fixtureUrl = `${TEST_SUITE_WEBSITE}/cdp-engine`;
+const replayFaultUrl = process.env.REPLAY_FAULT_URL ?? "";
+
+async function waitForFirstFrame(wsUrl: string, timeoutMs: number = 15000) {
+  return await new Promise<any>((resolve, reject) => {
+    const socket = new WebSocket(wsUrl);
+    const timeout = setTimeout(() => {
+      socket.close();
+      reject(new Error("Timed out waiting for live frame"));
+    }, timeoutMs);
+
+    socket.on("message", data => {
+      try {
+        const payload = JSON.parse(data.toString());
+        if (payload.type === "frame") {
+          clearTimeout(timeout);
+          socket.close();
+          resolve(payload);
+        }
+      } catch {}
+    });
+
+    socket.on("error", error => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+  });
+}
 
 async function interactWithReplicaRetry(
   jobId: string,
@@ -62,18 +93,18 @@ describe("Scrape browser interact replay", () => {
     ALLOW_TEST_SUITE_WEBSITE &&
     !!config.BROWSER_SERVICE_URL &&
     (TEST_PRODUCTION || HAS_FIRE_ENGINE);
+  const canRunReplayFaultPath = canRunReplayHappyPath && !!replayFaultUrl;
 
   itIf(canRunReplayHappyPath)(
     "replays scrape URL/waitFor/actions before interactive code runs",
     async () => {
       const marker = crypto.randomUUID();
-      const url = `${TEST_SUITE_WEBSITE}?testId=${crypto.randomUUID()}`;
       let scrapeId: string | null = null;
 
       try {
         const scrapeResponse = await scrapeRaw(
           {
-            url,
+            url: fixtureUrl,
             origin: "website-replay-test",
             waitFor: 500,
             actions: [
@@ -90,6 +121,7 @@ describe("Scrape browser interact replay", () => {
         expect(scrapeResponse.body.success).toBe(true);
         expect(typeof scrapeResponse.body.scrape_id).toBe("string");
         scrapeId = scrapeResponse.body.scrape_id as string;
+        await sleep(3000);
 
         const executeResponse = await interactWithReplicaRetry(
           scrapeId,
@@ -102,15 +134,205 @@ describe("Scrape browser interact replay", () => {
             `,
           },
           identity,
+          20,
         );
 
         expect(executeResponse.statusCode).toBe(200);
         expect(executeResponse.body.success).toBe(true);
         expect(executeResponse.body.stdout).toContain(marker);
+        expect(typeof executeResponse.body.sessionId).toBe("string");
+        expect(executeResponse.body.sessionId).toHaveLength(36);
+        expect(typeof executeResponse.body.liveViewUrl).toBe("string");
+        expect(executeResponse.body.liveViewUrl).toMatch(
+          new RegExp(
+            `^/admin/${config.BULL_AUTH_KEY}/playground/session/[^/]+/view$`,
+          ),
+        );
+        expect(executeResponse.body.live).toMatchObject({
+          status: "streaming",
+        });
+
+        const failureResponse = await interactWithReplicaRetry(
+          scrapeId,
+          {
+            language: "node",
+            timeout: 60,
+            code: "throw new Error('forced interact failure')",
+          },
+          identity,
+          10,
+        );
+
+        expect(failureResponse.statusCode).toBe(422);
+        expect(failureResponse.body.success).toBe(false);
+        expect(failureResponse.body.code).toBe("BROWSER_EXECUTION_FAILED");
+        expect(typeof failureResponse.body.details?.sessionId).toBe("string");
+        expect(failureResponse.body.details?.sessionId).toHaveLength(36);
+        expect(typeof failureResponse.body.liveViewUrl).toBe("string");
+        expect(failureResponse.body.liveViewUrl).toMatch(
+          new RegExp(
+            `^/admin/${config.BULL_AUTH_KEY}/playground/session/[^/]+/view$`,
+          ),
+        );
       } finally {
         if (scrapeId) {
-          await scrapeStopInteractiveBrowserRaw(scrapeId, identity);
+          const stopResponse = await scrapeStopInteractiveBrowserRaw(
+            scrapeId,
+            identity,
+          );
+          expect(stopResponse.statusCode).toBe(200);
+          expect(stopResponse.body.live).toMatchObject({
+            status: "completed",
+          });
+          expect(stopResponse.body.sessionDurationMs).toEqual(
+            expect.any(Number),
+          );
         }
+      }
+    },
+    scrapeTimeout,
+  );
+
+  itIf(canRunReplayFaultPath)(
+    "reports the failed replay action when original scrape actions cannot be reconstructed",
+    async () => {
+      const token = `replay-action-${crypto.randomUUID()}`;
+      const url = `${replayFaultUrl.replace(/\/$/, "")}/replay-fault/element?token=${token}`;
+
+      const scrapeResponse = await scrapeRaw(
+        {
+          url,
+          origin: "website-replay-action-failure-test",
+          actions: [
+            {
+              type: "click",
+              selector: "#replay-btn",
+            },
+          ],
+        },
+        identity,
+      );
+
+      expect(scrapeResponse.statusCode).toBe(200);
+      expect(scrapeResponse.body.success).toBe(true);
+      expect(typeof scrapeResponse.body.scrape_id).toBe("string");
+      expect(scrapeResponse.body.data?.markdown).toContain(
+        "Button clicked successfully during scrape actions",
+      );
+
+      const scrapeId = scrapeResponse.body.scrape_id as string;
+      await sleep(1000);
+
+      const interactResponse = await interactWithReplicaRetry(
+        scrapeId,
+        {
+          language: "node",
+          timeout: 30,
+          code: "console.log('this should not run before replay failure')",
+        },
+        identity,
+        20,
+      );
+
+      expect(interactResponse.statusCode).toBe(422);
+      expect(interactResponse.body.success).toBe(false);
+      expect(interactResponse.body.code).toBe("BROWSER_EXECUTION_FAILED");
+      expect(interactResponse.body.error).toContain(
+        "Failed to initialize browser session from the original scrape context",
+      );
+      expect(interactResponse.body.details?.replayFailedAt).toEqual({
+        actionIndex: 0,
+        actionNumber: 1,
+        actionType: "click",
+      });
+      expect(interactResponse.body.details?.stderrSnippet).toContain(
+        "Replay action #1 (click)",
+      );
+      expect(interactResponse.body.details?.pageUrl).toBe(url);
+      expect(typeof interactResponse.body.details?.screenshot).toBe("string");
+      expect(interactResponse.body.details.screenshot.length).toBeGreaterThan(
+        1000,
+      );
+    },
+    scrapeTimeout,
+  );
+
+  it.skip(
+    "creates a live browser session, streams a frame, and returns screenshot artifacts on delete",
+    async () => {
+      const createResponse = await request(TEST_API_URL)
+        .post("/v2/browser")
+        .set("Authorization", `Bearer ${identity.apiKey}`)
+        .set("Content-Type", "application/json")
+        .send({
+          ttl: 60,
+          activityTtl: 30,
+          streamWebView: true,
+        });
+
+      expect(createResponse.statusCode).toBe(200);
+      expect(createResponse.body.success).toBe(true);
+      expect(createResponse.body.live).toMatchObject({
+        status: "streaming",
+      });
+      expect(createResponse.body.liveViewUrl).toContain("/v2/live/browser/");
+      expect(createResponse.body.live.liveViewWsUrl).toContain(
+        "/v2/live/browser/",
+      );
+
+      const liveViewResponse = await request(TEST_API_URL).get(
+        createResponse.body.liveViewUrl,
+      );
+      expect(liveViewResponse.statusCode).toBe(200);
+      expect(liveViewResponse.headers["content-type"]).toContain("text/html");
+      expect(liveViewResponse.text).toContain("Request processing");
+
+      const wsUrl = new URL(
+        createResponse.body.live.liveViewWsUrl,
+        TEST_API_URL,
+      );
+      wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
+      const frame = await waitForFirstFrame(wsUrl.toString());
+      expect(frame).toMatchObject({
+        type: "frame",
+        mimeType: "image/jpeg",
+      });
+      expect(typeof frame.data).toBe("string");
+      expect(frame.data.length).toBeGreaterThan(0);
+
+      const deleteResponse = await request(TEST_API_URL)
+        .delete(`/v2/browser/${encodeURIComponent(createResponse.body.id)}`)
+        .set("Authorization", `Bearer ${identity.apiKey}`)
+        .send();
+
+      expect(deleteResponse.statusCode).toBe(200);
+      expect(deleteResponse.body.success).toBe(true);
+      expect(deleteResponse.body.live).toMatchObject({
+        status: "completed",
+      });
+      expect(deleteResponse.body.sessionDurationMs).toEqual(expect.any(Number));
+      expect(deleteResponse.body.live.screenshotUrl).toContain(
+        "/v2/live/browser/",
+      );
+
+      const screenshotResponse = await request(TEST_API_URL).get(
+        deleteResponse.body.live.screenshotUrl,
+      );
+      expect(screenshotResponse.statusCode).toBe(200);
+      expect(screenshotResponse.headers["content-type"]).toContain(
+        "image/jpeg",
+      );
+      expect(screenshotResponse.body.length).toBeGreaterThan(0);
+
+      if (deleteResponse.body.live.recordingUrl) {
+        const recordingResponse = await request(TEST_API_URL).get(
+          deleteResponse.body.live.recordingUrl,
+        );
+        expect(recordingResponse.statusCode).toBe(200);
+        expect(recordingResponse.headers["content-type"]).toContain(
+          "video/webm",
+        );
+        expect(recordingResponse.body.length).toBeGreaterThan(0);
       }
     },
     scrapeTimeout,
@@ -119,13 +341,12 @@ describe("Scrape browser interact replay", () => {
   itIf(canRunReplayHappyPath)(
     "keeps a non-blank replay tab in the foreground for follow-up execs",
     async () => {
-      const url = `${TEST_SUITE_WEBSITE}?testId=${crypto.randomUUID()}`;
       let scrapeId: string | null = null;
 
       try {
         const scrapeResponse = await scrapeRaw(
           {
-            url,
+            url: fixtureUrl,
             origin: "website-replay-test",
             actions: [
               {

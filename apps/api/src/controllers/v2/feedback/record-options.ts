@@ -23,8 +23,6 @@ export function searchFeedbackRecordOptions({
     jobId,
     feedback,
     requireSuccessfulJob: true,
-    notFoundCode: "SEARCH_NOT_FOUND",
-    failedJobCode: "SEARCH_FAILED",
     dbDisabledMessage:
       "Search feedback requires database authentication and is unavailable on this deployment.",
     windowExpiredMessage: `Search feedback must be submitted within ${config.SEARCH_FEEDBACK_MAX_AGE_SEC} seconds of the search.`,

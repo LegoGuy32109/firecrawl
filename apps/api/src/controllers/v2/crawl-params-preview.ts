@@ -1,10 +1,12 @@
 import { Response } from "express";
 import { z } from "zod";
-import { ErrorResponse, RequestWithAuth } from "./types";
+import { Diagnostics, ErrorResponse, RequestWithAuth } from "./types";
 import { logger as _logger } from "../../lib/logger";
 import { generateCrawlerOptionsFromPrompt } from "../../scraper/scrapeURL/transformers/llmExtract";
 import { CostTracking } from "../../lib/cost-tracking";
 import { buildPromptWithWebsiteStructure } from "../../lib/map-utils";
+import { makeResponder } from "./response-enveloper";
+import { RequestError } from "../../lib/error-codes";
 
 // Define the request schema for params preview
 // Only url and prompt are required/relevant for preview
@@ -20,6 +22,8 @@ type CrawlParamsPreviewRequest = z.infer<
 type CrawlParamsPreviewResponse =
   | {
       success: true;
+      status: "ok" | "warning";
+      diagnostics: Diagnostics;
       data?: {
         url: string;
         includePaths?: string[];
@@ -46,6 +50,7 @@ export async function crawlParamsPreviewController(
   >,
   res: Response<CrawlParamsPreviewResponse>,
 ) {
+  const r = makeResponder(req, res);
   const logger = _logger.child({
     module: "api/v2",
     method: "crawlParamsPreviewController",
@@ -106,19 +111,14 @@ export async function crawlParamsPreviewController(
       }
     });
 
-    return res.status(200).json({
-      success: true,
-      data: responseData,
-    });
+    return r.ok({ data: responseData });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({
-        success: false,
-        code: "BAD_REQUEST",
-        error:
-          "Invalid request parameters: " +
+      return r.fail(
+        RequestError.BAD_REQUEST,
+        "Invalid request parameters: " +
           error.issues.map(e => e.message).join(", "),
-      });
+      );
     }
 
     logger.error("Failed to generate crawler params preview", {
@@ -126,10 +126,9 @@ export async function crawlParamsPreviewController(
       prompt: req.body.prompt,
     });
 
-    return res.status(400).json({
-      success: false,
-      error:
-        "Failed to process natural language prompt. Please try rephrasing.",
-    });
+    return r.fail(
+      RequestError.BAD_REQUEST,
+      "Failed to process natural language prompt. Please try rephrasing.",
+    );
   }
 }

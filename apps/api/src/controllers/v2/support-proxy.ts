@@ -1,23 +1,22 @@
 import { Request, Response } from "express";
 import { config } from "../../config";
 import { logger } from "../../lib/logger";
+import { makeResponder } from "./response-enveloper";
+import { ProxyError } from "../../lib/error-codes";
 
 const SUPPORT_AGENT_BASE = config.SUPPORT_AGENT_URL;
 const SUPPORT_AGENT_BYPASS = config.SUPPORT_AGENT_VERCEL_BYPASS_SECRET;
 const PROXY_TIMEOUT_MS = 65_000;
 
-const FORWARDED_HEADERS = [
-  "authorization",
-  "idempotency-key",
-  "x-request-id",
-];
+const FORWARDED_HEADERS = ["authorization", "idempotency-key", "x-request-id"];
 
 export async function supportProxyController(
   req: Request,
   res: Response,
 ): Promise<void> {
+  const r = makeResponder(req, res);
   if (!SUPPORT_AGENT_BASE) {
-    res.status(503).json({ error: "support_agent_unavailable" });
+    r.fail(ProxyError.NOT_CONFIGURED, "Support agent proxy is not configured.");
     return;
   }
 
@@ -45,21 +44,34 @@ export async function supportProxyController(
       signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
     });
 
-    for (const name of ["content-type", "x-request-id", "x-idempotency-cached"]) {
+    for (const name of [
+      "content-type",
+      "x-request-id",
+      "x-idempotency-cached",
+    ]) {
       const value = upstream.headers.get(name);
       if (value) res.setHeader(name, value);
     }
 
     res.status(upstream.status);
     const body = await upstream.text();
+    // raw-response: streaming upstream proxy body
     res.send(body);
   } catch (err: unknown) {
     if (err instanceof DOMException && err.name === "TimeoutError") {
       logger.error("Support agent proxy timeout");
-      res.status(504).json({ error: "support_agent_timeout" });
+      r.fail(ProxyError.UPSTREAM_TIMEOUT, "Support agent proxy timed out.", {
+        details: { upstream: "support", timeoutMs: PROXY_TIMEOUT_MS },
+      });
       return;
     }
     logger.error("Support agent proxy error", { error: err });
-    res.status(502).json({ error: "support_agent_unreachable" });
+    r.fail(
+      ProxyError.UPSTREAM_UNAVAILABLE,
+      "Support agent proxy is unreachable.",
+      {
+        details: { upstream: "support" },
+      },
+    );
   }
 }

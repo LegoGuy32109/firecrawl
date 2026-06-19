@@ -4,9 +4,14 @@ import { logger as _logger } from "../../lib/logger";
 import { CostTracking } from "../../lib/cost-tracking";
 import {
   getSearchIndexClient,
-  SearchIndexClient,
   type SearchRequest,
 } from "../../lib/search-index-client";
+import { makeResponder } from "./response-enveloper";
+import {
+  CommonError,
+  DependencyError,
+  RequestError,
+} from "../../lib/error-codes";
 
 // Validation schemas
 const searchRequestSchema = z.object({
@@ -29,21 +34,11 @@ const searchRequestSchema = z.object({
     .prefault({}),
 });
 
-const searchChunksRequestSchema = z.object({
-  query: z.string().min(1).max(500),
-  limit: z.int().min(1).max(50).optional().prefault(20),
-  filters: z
-    .object({
-      domain: z.string().optional(),
-    })
-    .optional()
-    .prefault({}),
-});
-
 export async function realtimeSearchController(
   req: Request,
   res: Response,
 ): Promise<void> {
+  const r = makeResponder(req, res);
   const logger = _logger.child({
     module: "realtime-search-controller",
     method: "POST /admin/search",
@@ -55,9 +50,7 @@ export async function realtimeSearchController(
     const validationResult = searchRequestSchema.safeParse(req.body);
 
     if (!validationResult.success) {
-      res.status(400).json({
-        success: false,
-        error: "Invalid request parameters",
+      r.fail(RequestError.BAD_REQUEST, "Invalid request parameters", {
         details: validationResult.error.issues,
       });
       return;
@@ -76,10 +69,10 @@ export async function realtimeSearchController(
     const client = getSearchIndexClient();
 
     if (!client) {
-      res.status(503).json({
-        success: false,
-        error: "Search index service is not configured",
-      });
+      r.fail(
+        DependencyError.UNAVAILABLE,
+        "Search index service is not configured",
+      );
       return;
     }
 
@@ -98,8 +91,7 @@ export async function realtimeSearchController(
     const costTracking = new CostTracking();
     // Add search cost tracking here if needed
 
-    res.status(200).json({
-      success: true,
+    r.ok({
       data: result,
       costTracking: costTracking.toJSON(),
     });
@@ -108,11 +100,10 @@ export async function realtimeSearchController(
       error: (error as Error).message,
     });
 
-    res.status(500).json({
-      success: false,
-      error: "Internal server error",
-      message: (error as Error).message,
-    });
+    r.fail(
+      CommonError.UNKNOWN,
+      error instanceof Error ? error : "Internal server error",
+    );
   }
 }
 

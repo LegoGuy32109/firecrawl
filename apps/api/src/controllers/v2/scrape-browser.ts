@@ -35,6 +35,7 @@ import {
   buildReplayContextFromScrape,
   estimateReplayTimeoutSeconds,
   buildReplayScript,
+  parseReplayFailure,
 } from "../../lib/scrape-interact/scrape-replay";
 import {
   executePromptViaBrowserAgent,
@@ -63,6 +64,94 @@ import {
 } from "../../lib/browser-billing";
 import { autumnService } from "../../services/autumn/autumn.service";
 import { applyAgentAuthDiscoveryHeader } from "../../lib/agent-auth-discovery";
+import { makeResponder } from "./response-enveloper";
+import {
+  BillingError,
+  BrowserError,
+  CommonError,
+  ErrorCodes,
+  GatingError,
+  LifecycleError,
+} from "../../lib/error-codes";
+import type { ErrorDetails } from "../../lib/error-details";
+
+// ---------------------------------------------------------------------------
+// Failure-context capture — best-effort URL + screenshot from a live browser
+// session, used to enrich BROWSER_EXECUTION_FAILED responses so devs can see
+// what page the session was on and what it looked like when execution failed.
+// Screenshot is omitted under forced ZDR.
+// ---------------------------------------------------------------------------
+
+const SCREENSHOT_CAPTURE_SCRIPT =
+  "const __b=await page.screenshot({type:'jpeg',quality:70});console.log(__b.toString('base64'));";
+
+async function captureFailureContext(
+  browserId: string,
+  zdrForced: boolean,
+): Promise<{ pageUrl?: string; screenshot?: string }> {
+  let pageUrl: string | undefined;
+  let screenshot: string | undefined;
+  try {
+    const r = await browserServiceRequest<BrowserServiceExecResponse>(
+      "POST",
+      `/browsers/${browserId}/exec`,
+      {
+        code: "agent-browser get url",
+        language: "bash",
+        timeout: 5,
+        origin: "interact_failure_capture",
+      },
+    );
+    const url = (r.stdout || r.result || "").trim();
+    if (url) pageUrl = url;
+  } catch {}
+  if (!zdrForced) {
+    try {
+      const r = await browserServiceRequest<BrowserServiceExecResponse>(
+        "POST",
+        `/browsers/${browserId}/exec`,
+        {
+          code: SCREENSHOT_CAPTURE_SCRIPT,
+          language: "node",
+          timeout: 10,
+          origin: "interact_failure_capture",
+        },
+      );
+      const b64 = (r.stdout || "").trim();
+      if (b64) screenshot = b64;
+    } catch {}
+  }
+  return { pageUrl, screenshot };
+}
+
+function buildPlaygroundLiveViewUrl(browserId: string): string {
+  return `/admin/${config.BULL_AUTH_KEY}/playground/session/${encodeURIComponent(browserId)}/view`;
+}
+
+function parseBrowserExecFailure(
+  err: unknown,
+): BrowserServiceExecResponse | undefined {
+  if (!(err instanceof BrowserServiceError) || err.status !== 422) {
+    return undefined;
+  }
+
+  const raw = err.bodyText?.trim() || "";
+  if (!raw) return undefined;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<BrowserServiceExecResponse>;
+    if (typeof parsed.exitCode !== "number") return undefined;
+    return {
+      stdout: parsed.stdout ?? "",
+      result: parsed.result ?? "",
+      stderr: parsed.stderr ?? "",
+      exitCode: parsed.exitCode,
+      killed: parsed.killed ?? false,
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -90,6 +179,8 @@ const browserExecuteRequestSchema = z
     origin: z.string().optional(),
     integration: integrationSchema.optional().transform(val => val || null),
     existingSessionId: z.string().optional(),
+    sessionMode: z.enum(["reuse", "force-replay"]).optional(),
+    forceNewSession: z.boolean().optional(),
   })
   .refine(data => data.code || data.prompt, {
     message: "Either 'code' or 'prompt' must be provided.",
@@ -99,8 +190,8 @@ type BrowserExecuteRequest = z.infer<typeof browserExecuteRequestSchema>;
 
 interface BrowserExecuteResponse {
   success: boolean;
+  sessionId?: string;
   liveViewUrl?: string;
-  interactiveLiveViewUrl?: string;
   output?: string;
   stdout?: string;
   result?: string;
@@ -117,6 +208,110 @@ interface BrowserDeleteResponse {
   error?: string;
 }
 
+type BrowserSessionRecord = NonNullable<
+  Awaited<ReturnType<typeof getBrowserSession>>
+>;
+
+async function destroyInteractBrowserSession(
+  req: RequestWithAuth<any, any, any>,
+  session: BrowserSessionRecord,
+  logger: typeof _logger,
+): Promise<{ sessionDurationMs?: number; creditsBilled?: number }> {
+  let sessionDurationMs: number | undefined;
+  try {
+    const deleteResult =
+      await browserServiceRequest<BrowserServiceDeleteResponse>(
+        "DELETE",
+        `/browsers/${session.browser_id}`,
+      );
+    sessionDurationMs = deleteResult?.sessionDurationMs;
+  } catch (err) {
+    logger.warn("Failed to delete browser session via browser service", {
+      error: err,
+    });
+  }
+
+  const claimed = await claimBrowserSessionDestroyed(session.id);
+
+  invalidateActiveBrowserSessionCount(session.team_id).catch(() => {});
+  try {
+    await mirrorExternalSlotRelease(session.team_id, session.id);
+  } catch (error) {
+    logger.error(
+      "Failed to remove concurrency limiter entry for browser session",
+      {
+        error,
+        sessionId: session.id,
+        teamId: session.team_id,
+      },
+    );
+  }
+
+  if (!claimed) {
+    logger.info("Session already destroyed by another path, skipping billing", {
+      sessionId: session.id,
+    });
+    return {};
+  }
+
+  const wallClockMs = Date.now() - new Date(session.created_at).getTime();
+  const durationMs =
+    sessionDurationMs && sessionDurationMs > 0
+      ? sessionDurationMs
+      : wallClockMs;
+
+  const usedPrompt = await didBrowserSessionUsePrompt(session.id);
+  const rate = usedPrompt
+    ? INTERACT_CREDITS_PER_HOUR
+    : BROWSER_CREDITS_PER_HOUR;
+  const creditsBilled = calculateBrowserSessionCredits(durationMs, rate);
+
+  clearBrowserSessionPromptFlag(session.id).catch(() => {});
+
+  updateBrowserSessionCreditsUsed(session.id, creditsBilled).catch(error => {
+    logger.error("Failed to update credits_used on browser session", {
+      error,
+      sessionId: session.id,
+      creditsBilled,
+    });
+  });
+
+  billTeam(
+    req.auth.team_id,
+    req.acuc?.sub_id ?? undefined,
+    creditsBilled,
+    req.acuc?.api_key_id ?? null,
+    { endpoint: "interact", jobId: session.id },
+  ).catch(error => {
+    logger.error("Failed to bill team for interact session", {
+      error,
+      creditsBilled,
+      durationMs,
+    });
+  });
+
+  const reservedCredits = calculateBrowserSessionCredits(
+    session.ttl_total * 1000,
+    BROWSER_CREDITS_PER_HOUR,
+  );
+  adjustKeylessCredits(req.auth.team_id, creditsBilled - reservedCredits).catch(
+    () => {},
+  );
+  logKeylessCreditUsage(req.auth.team_id, creditsBilled).catch(() => {});
+
+  logger.info("Browser session destroyed", {
+    sessionDurationMs: durationMs,
+    creditsBilled,
+    usedPrompt,
+    rate,
+  });
+
+  return {
+    sessionDurationMs: durationMs,
+    creditsBilled,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // POST /v2/scrape/:jobId/interact
 // ---------------------------------------------------------------------------
@@ -127,12 +322,21 @@ export async function scrapeInteractController(
     BrowserExecuteResponse,
     BrowserExecuteRequest
   >,
-  res: Response<BrowserExecuteResponse>,
+  res: Response<any>,
 ) {
+  const r = makeResponder(req, res);
   req.body = browserExecuteRequestSchema.parse(req.body);
 
   const scrapeId = req.params.jobId;
-  const { code: rawCode, prompt, language, timeout, origin } = req.body;
+  const {
+    code: rawCode,
+    prompt,
+    language,
+    timeout,
+    origin,
+    sessionMode,
+    forceNewSession,
+  } = req.body;
 
   let logger = _logger.child({
     scrapeId,
@@ -147,7 +351,9 @@ export async function scrapeInteractController(
     scrapeId,
   )) as ScrapeContextRow | null;
   if (!scrape) {
-    return res.status(404).json({ success: false, error: "Job not found." });
+    return r.fail(LifecycleError.JOB_NOT_FOUND, "Job not found.", {
+      details: { jobId: scrapeId },
+    });
   }
   // Keyless scrapes are persisted under a deterministic per-IP UUID (the
   // `scrapes.team_id` column is a UUID, so the raw `preview_keyless_<ip>` string
@@ -155,19 +361,21 @@ export async function scrapeInteractController(
   const expectedScrapeTeam =
     keylessTeamUuid(req.auth.team_id) ?? req.auth.team_id;
   if (scrape.team_id !== expectedScrapeTeam) {
-    return res.status(403).json({ success: false, error: "Forbidden." });
+    return r.fail(LifecycleError.JOB_WRONG_TEAM, "Forbidden.", {
+      details: { jobId: scrapeId, teamId: scrape.team_id },
+    });
   }
 
   // --- Build replay context from original scrape ---
 
   const replay = buildReplayContextFromScrape(scrape);
   if (!replay.context) {
-    return res.status(409).json({
-      success: false,
-      error:
-        replay.error ??
+    // replay-context-unavailable: unprocessable scrape state, not a dependency failure.
+    return r.fail(
+      BrowserError.EXECUTION_FAILED,
+      replay.error ??
         "Replay context is unavailable for this scrape job. Please rerun the scrape.",
-    });
+    );
   }
   const replayContext = replay.context;
 
@@ -180,6 +388,40 @@ export async function scrapeInteractController(
   // --- Ensure a browser session exists (create + replay if needed) ---
 
   let session = await getBrowserSessionFromScrape(scrapeId);
+  const shouldForceReplay =
+    sessionMode === "force-replay" || forceNewSession === true;
+
+  if (session && session.team_id !== req.auth.team_id) {
+    return r.fail(BrowserError.SESSION_FORBIDDEN, "Forbidden.", {
+      details: { key: session.id },
+    });
+  }
+
+  if (session && shouldForceReplay) {
+    logger = logger.child({
+      sessionId: session.id,
+      browserId: session.browser_id,
+    });
+    logger.info("Force replay requested; destroying linked browser session", {
+      scrapeId,
+      sessionId: session.id,
+      browserId: session.browser_id,
+      status: session.status,
+    });
+    if (session.status === "active") {
+      await destroyInteractBrowserSession(req, session, logger);
+    }
+    session = null;
+  }
+
+  if (session?.status === "destroyed") {
+    logger.info("Ignoring destroyed linked browser session and replaying", {
+      scrapeId,
+      sessionId: session.id,
+      browserId: session.browser_id,
+    });
+    session = null;
+  }
 
   if (!session && req.body.existingSessionId) {
     const existing = await getBrowserSession(req.body.existingSessionId);
@@ -208,12 +450,14 @@ export async function scrapeInteractController(
     );
     if ("error" in created) {
       if (
-        created.status === 429 &&
-        created.body.error === KEYLESS_CREDITS_MESSAGE
+        created.code === BillingError.INSUFFICIENT_CREDITS &&
+        created.message === KEYLESS_CREDITS_MESSAGE
       ) {
         applyAgentAuthDiscoveryHeader(res);
       }
-      return res.status(created.status).json(created.body);
+      return r.fail(created.code, created.message, {
+        details: created.details,
+      });
     }
     session = created.session;
 
@@ -226,15 +470,6 @@ export async function scrapeInteractController(
       sessionId: session.id,
       browserId: session.browser_id,
     });
-  }
-
-  if (session.team_id !== req.auth.team_id) {
-    return res.status(403).json({ success: false, error: "Forbidden." });
-  }
-  if (session.status === "destroyed") {
-    return res
-      .status(410)
-      .json({ success: false, error: "Browser session has been destroyed." });
   }
 
   updateBrowserSessionActivity(session.id).catch(() => {});
@@ -292,13 +527,21 @@ export async function scrapeInteractController(
           zeroDataRetention: zdrForced,
           ...traceScrapeContext,
         },
+        step => r.step(step, "actions"),
       );
     } catch (err) {
       logger.error("Agent loop failed", { error: err });
-      return res.status(502).json({
-        success: false,
-        error: "Browser agent failed to execute the task.",
-      });
+      const browserExecFailure = parseBrowserExecFailure(err);
+      if (browserExecFailure) {
+        execResult = browserExecFailure;
+      } else {
+        // Browser service dependency failure, not the caller's fault.
+        return r.fail(
+          BrowserError.SERVICE_UNAVAILABLE,
+          "Browser agent failed to execute the task.",
+          { details: { dependency: "browser-service" } },
+        );
+      }
     }
 
     enqueueBrowserSessionActivity({
@@ -330,10 +573,17 @@ export async function scrapeInteractController(
       logger.error("Failed to execute code via browser service", {
         error: err,
       });
-      return res.status(502).json({
-        success: false,
-        error: "Failed to execute code in browser session.",
-      });
+      const browserExecFailure = parseBrowserExecFailure(err);
+      if (browserExecFailure) {
+        execResult = browserExecFailure;
+      } else {
+        // Browser service dependency failure, not the caller's fault.
+        return r.fail(
+          BrowserError.SERVICE_UNAVAILABLE,
+          "Failed to execute code in browser session.",
+          { details: { dependency: "browser-service" } },
+        );
+      }
     }
 
     enqueueBrowserSessionActivity({
@@ -358,18 +608,37 @@ export async function scrapeInteractController(
 
   const hasError = execResult.exitCode !== 0 || execResult.killed;
   const agentOutput = "output" in execResult ? execResult.output : undefined;
+  const liveViewUrl = buildPlaygroundLiveViewUrl(session.browser_id);
 
-  return res.status(200).json({
-    success: !hasError,
-    liveViewUrl: session.cdp_path,
-    interactiveLiveViewUrl: session.cdp_interactive_path,
+  if (hasError) {
+    // CHANGED: was 200 + success:false + no code; now 422 + EXECUTION_FAILED
+    // with rich diagnostic envelope: page URL + screenshot at the moment of
+    // failure plus a truncated stderr snippet (privacy-gated).
+    const capture = await captureFailureContext(session.browser_id, zdrForced);
+    const stderr = execResult.stderr ?? "";
+    const stderrSnippet =
+      !zdrForced && stderr ? stderr.slice(0, 500) : undefined;
+    return r.fail(BrowserError.EXECUTION_FAILED, stderr || "Execution failed", {
+      details: {
+        sessionId: session.id,
+        exitCode: execResult.exitCode,
+        killed: execResult.killed,
+        ...(capture.pageUrl !== undefined ? { pageUrl: capture.pageUrl } : {}),
+        ...(capture.screenshot !== undefined
+          ? { screenshot: capture.screenshot }
+          : {}),
+        ...(stderrSnippet ? { stderrSnippet } : {}),
+      },
+      liveViewUrl,
+    });
+  }
+
+  return r.ok({
+    sessionId: session.id,
+    liveViewUrl,
     ...(agentOutput ? { output: agentOutput } : {}),
     stdout: execResult.stdout,
     result: execResult.result,
-    stderr: execResult.stderr,
-    exitCode: execResult.exitCode,
-    killed: execResult.killed,
-    ...(hasError ? { error: execResult.stderr || "Execution failed" } : {}),
   });
 }
 
@@ -379,8 +648,9 @@ export async function scrapeInteractController(
 
 export async function scrapeStopInteractiveBrowserController(
   req: RequestWithAuth<{ jobId: string }, BrowserDeleteResponse>,
-  res: Response<BrowserDeleteResponse>,
+  res: Response<any>,
 ) {
+  const r = makeResponder(req, res);
   let logger = _logger.child({
     scrapeId: req.params.jobId,
     teamId: req.auth.team_id,
@@ -391,12 +661,12 @@ export async function scrapeStopInteractiveBrowserController(
   const session = await getBrowserSessionFromScrape(req.params.jobId);
 
   if (!session) {
-    return res
-      .status(404)
-      .json({ success: false, error: "Browser session not found." });
+    return r.fail(BrowserError.SESSION_NOT_FOUND, "Browser session not found.");
   }
   if (session.team_id !== req.auth.team_id) {
-    return res.status(403).json({ success: false, error: "Forbidden." });
+    return r.fail(BrowserError.SESSION_FORBIDDEN, "Forbidden.", {
+      details: { key: session.id },
+    });
   }
 
   logger = logger.child({
@@ -405,97 +675,12 @@ export async function scrapeStopInteractiveBrowserController(
   });
   logger.info("Deleting browser session");
 
-  let sessionDurationMs: number | undefined;
-  try {
-    const deleteResult =
-      await browserServiceRequest<BrowserServiceDeleteResponse>(
-        "DELETE",
-        `/browsers/${session.browser_id}`,
-      );
-    sessionDurationMs = deleteResult?.sessionDurationMs;
-  } catch (err) {
-    logger.warn("Failed to delete browser session via browser service", {
-      error: err,
-    });
-  }
+  const { sessionDurationMs, creditsBilled } =
+    await destroyInteractBrowserSession(req, session, logger);
 
-  const claimed = await claimBrowserSessionDestroyed(session.id);
-
-  invalidateActiveBrowserSessionCount(session.team_id).catch(() => {});
-  mirrorExternalSlotRelease(session.team_id, session.id).catch(error => {
-    logger.error(
-      "Failed to remove concurrency limiter entry for browser session",
-      {
-        error,
-        sessionId: session.id,
-        teamId: session.team_id,
-      },
-    );
-  });
-
-  if (!claimed) {
-    logger.info("Session already destroyed by another path, skipping billing", {
-      sessionId: session.id,
-    });
-    return res.status(200).json({ success: true });
-  }
-
-  const wallClockMs = Date.now() - new Date(session.created_at).getTime();
-  const durationMs =
-    sessionDurationMs && sessionDurationMs > 0
-      ? sessionDurationMs
-      : wallClockMs;
-
-  const usedPrompt = await didBrowserSessionUsePrompt(session.id);
-  const rate = usedPrompt
-    ? INTERACT_CREDITS_PER_HOUR
-    : BROWSER_CREDITS_PER_HOUR;
-  const creditsBilled = calculateBrowserSessionCredits(durationMs, rate);
-
-  clearBrowserSessionPromptFlag(session.id).catch(() => {});
-
-  updateBrowserSessionCreditsUsed(session.id, creditsBilled).catch(error => {
-    logger.error("Failed to update credits_used on browser session", {
-      error,
-      sessionId: session.id,
-      creditsBilled,
-    });
-  });
-
-  billTeam(
-    req.auth.team_id,
-    req.acuc?.sub_id ?? undefined,
-    creditsBilled,
-    req.acuc?.api_key_id ?? null,
-    { endpoint: "interact", jobId: session.id },
-  ).catch(error => {
-    logger.error("Failed to bill team for interact session", {
-      error,
-      creditsBilled,
-      durationMs,
-    });
-  });
-
-  const reservedCredits = calculateBrowserSessionCredits(
-    session.ttl_total * 1000,
-    BROWSER_CREDITS_PER_HOUR,
-  );
-  adjustKeylessCredits(req.auth.team_id, creditsBilled - reservedCredits).catch(
-    () => {},
-  );
-  logKeylessCreditUsage(req.auth.team_id, creditsBilled).catch(() => {});
-
-  logger.info("Browser session destroyed", {
-    sessionDurationMs: durationMs,
-    creditsBilled,
-    usedPrompt,
-    rate,
-  });
-
-  return res.status(200).json({
-    success: true,
-    sessionDurationMs: durationMs,
-    creditsBilled,
+  return r.ok({
+    ...(sessionDurationMs !== undefined ? { sessionDurationMs } : {}),
+    ...(creditsBilled !== undefined ? { creditsBilled } : {}),
   });
 }
 
@@ -515,23 +700,22 @@ async function createSessionForScrape(
   profile: { name: string; saveChanges: boolean } | undefined,
 ): Promise<
   | { session: Awaited<ReturnType<typeof insertBrowserSession>> }
-  | { status: number; body: { success: false; error: string }; error: true }
+  | { error: true; code: ErrorCodes; message: string; details?: ErrorDetails }
 > {
   const sessionId = uuidv7();
   const { ttl, activityTtl, streamWebView } = browserCreateRequestSchema.parse(
     {},
   );
   const integration = req.body?.integration ?? null;
+  const zdrForced = getScrapeZDR(req.acuc?.flags) === "forced";
 
   if (!config.BROWSER_SERVICE_URL) {
     return {
-      status: 503,
-      body: {
-        success: false,
-        error:
-          "Browser feature is not configured (BROWSER_SERVICE_URL is missing).",
-      },
       error: true,
+      code: BrowserError.SERVICE_UNAVAILABLE,
+      message:
+        "Browser feature is not configured (BROWSER_SERVICE_URL is missing).",
+      details: { dependency: "browser-service" },
     };
   }
 
@@ -549,12 +733,10 @@ async function createSessionForScrape(
   );
   if (!reservation.ok) {
     return {
-      status: 429,
-      body: {
-        success: false,
-        error: KEYLESS_CREDITS_MESSAGE,
-      },
       error: true,
+      code: BillingError.INSUFFICIENT_CREDITS,
+      message: KEYLESS_CREDITS_MESSAGE,
+      details: { required: estimatedCredits },
     };
   }
   const keylessReserved = estimatedCredits;
@@ -568,12 +750,10 @@ async function createSessionForScrape(
   if (autumnResult !== null && !autumnResult.allowed) {
     adjustKeylessCredits(req.auth.team_id, -keylessReserved).catch(() => {});
     return {
-      status: 402,
-      body: {
-        success: false,
-        error: `Insufficient credits for a ${ttl}s browser session (requires ~${estimatedCredits} credits). For more credits, you can upgrade your plan at https://firecrawl.dev/pricing.`,
-      },
       error: true,
+      code: BillingError.INSUFFICIENT_CREDITS,
+      message: `Insufficient credits for a ${ttl}s browser session (requires ~${estimatedCredits} credits). For more credits, you can upgrade your plan at https://firecrawl.dev/pricing.`,
+      details: { required: estimatedCredits },
     };
   }
 
@@ -583,12 +763,10 @@ async function createSessionForScrape(
   if (activeCount >= concurrencyLimit) {
     adjustKeylessCredits(req.auth.team_id, -keylessReserved).catch(() => {});
     return {
-      status: 429,
-      body: {
-        success: false,
-        error: `You have reached the maximum number of concurrent jobs (${concurrencyLimit}). Please wait for existing jobs to complete or destroy browser sessions before creating new ones.`,
-      },
       error: true,
+      code: BrowserError.SESSION_LIMIT_EXCEEDED,
+      message: `You have reached the maximum number of concurrent jobs (${concurrencyLimit}). Please wait for existing jobs to complete or destroy browser sessions before creating new ones.`,
+      details: { active: activeCount, limit: concurrencyLimit },
     };
   }
 
@@ -618,6 +796,15 @@ async function createSessionForScrape(
           ttl,
           ...(activityTtl !== undefined ? { activityTtl } : {}),
           ...(persistentStorage !== undefined ? { persistentStorage } : {}),
+          ...(replayContext.skipTlsVerification !== undefined
+            ? { skipTlsVerification: replayContext.skipTlsVerification }
+            : {}),
+          ...(replayContext.mobile !== undefined
+            ? { mobile: replayContext.mobile }
+            : {}),
+          ...(replayContext.location !== undefined
+            ? { location: replayContext.location }
+            : {}),
         },
       );
       break;
@@ -627,13 +814,11 @@ async function createSessionForScrape(
           () => {},
         );
         return {
-          status: 409,
-          body: {
-            success: false,
-            error:
-              "Another session is currently writing to this profile. Only one writer is allowed at a time. You can still access it with saveChanges: false, or try again later.",
-          },
           error: true,
+          code: GatingError.IDEMPOTENCY_CONFLICT,
+          message:
+            "Another session is currently writing to this profile. Only one writer is allowed at a time. You can still access it with saveChanges: false, or try again later.",
+          details: { key: profile?.name },
         };
       }
       lastCreateError = err;
@@ -654,9 +839,10 @@ async function createSessionForScrape(
       error: lastCreateError,
     });
     return {
-      status: 502,
-      body: { success: false, error: "Failed to create browser session." },
       error: true,
+      code: BrowserError.SERVICE_UNAVAILABLE,
+      message: "Failed to create browser session.",
+      details: { dependency: "browser-service" },
     };
   }
 
@@ -735,6 +921,18 @@ async function createSessionForScrape(
       );
     }
   } catch (err) {
+    // Capture failure context BEFORE deleting the session — the page won't
+    // exist anymore after the DELETE.
+    const zdrForcedInit = getScrapeZDR(req.acuc?.flags) === "forced";
+    const capture = await captureFailureContext(
+      svcResponse.sessionId,
+      zdrForcedInit,
+    );
+    const stderr = err instanceof Error ? err.message : String(err ?? "");
+    const replayFailedAt = parseReplayFailure(err);
+    const stderrSnippet =
+      !zdrForcedInit && stderr ? stderr.slice(0, 500) : undefined;
+
     adjustKeylessCredits(req.auth.team_id, -keylessReserved).catch(() => {});
     logger.error("Failed to initialize scrape browser session context", {
       error: err,
@@ -744,13 +942,18 @@ async function createSessionForScrape(
       `/browsers/${svcResponse.sessionId}`,
     ).catch(() => {});
     return {
-      status: 409,
-      body: {
-        success: false,
-        error:
-          "Failed to initialize browser session from the original scrape context. Please rerun the scrape and try again.",
-      },
       error: true,
+      code: BrowserError.EXECUTION_FAILED,
+      message:
+        "Failed to initialize browser session from the original scrape context. Please rerun the scrape and try again.",
+      details: {
+        ...(capture.pageUrl !== undefined ? { pageUrl: capture.pageUrl } : {}),
+        ...(capture.screenshot !== undefined
+          ? { screenshot: capture.screenshot }
+          : {}),
+        ...(replayFailedAt ? { replayFailedAt } : {}),
+        ...(stderrSnippet ? { stderrSnippet } : {}),
+      },
     };
   }
 
@@ -764,7 +967,7 @@ async function createSessionForScrape(
       target_hint: "Interact session",
       origin: req.body?.origin ?? "api",
       integration: integration ?? null,
-      zeroDataRetention: false,
+      zeroDataRetention: zdrForced,
       api_key_id: req.acuc?.api_key_id ?? null,
     });
     const session = await insertBrowserSession({
@@ -803,9 +1006,10 @@ async function createSessionForScrape(
       `/browsers/${svcResponse.sessionId}`,
     ).catch(() => {});
     return {
-      status: 500,
-      body: { success: false, error: "Failed to persist browser session." },
       error: true,
+      code: CommonError.UNKNOWN,
+      message: "Failed to persist browser session.",
+      details: { cause: "insertBrowserSession" },
     };
   }
 }

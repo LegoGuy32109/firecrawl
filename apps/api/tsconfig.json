@@ -13,6 +13,7 @@
     "moduleResolution": "NodeNext",
     "strictNullChecks": true,
     "skipLibCheck": true,
+    "noUnusedLocals": true,
 
     "inlineSources": true,
 
@@ -23,6 +24,7 @@
       "x402-express": ["./src/types/x402"]
     }
   },
+  "exclude": ["src/admin/playground/client"],
   "include": [
     "src/",
     "src/**/*",
