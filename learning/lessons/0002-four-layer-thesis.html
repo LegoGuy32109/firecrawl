@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Lesson 0002 — The four-layer thesis</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+
+<p class="eyebrow">Lesson 0002 · drill · design defense</p>
+<h1>The four-layer thesis</h1>
+<p class="subtitle">Once Rafa is past "why this customer", he wants to know why this <i>much</i>. Drill the four-layer model.</p>
+
+<div class="win">
+  You can recite the four layers in order, name the organising principle, and defend each layer against the cheapest alternative — all without hedging.
+</div>
+
+<h2>The four layers (memorise this)</h2>
+
+<table>
+  <thead><tr><th>#</th><th>Layer</th><th>The job</th><th>The cheap alternative you rejected</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>Typed error & warning catalog</td><td>Make it <i>impossible</i> to ship a failure without recording where it happened.</td><td>Better strings inside the existing free-form <code>error</code> field.</td></tr>
+    <tr><td>2</td><td>Response envelope (the responder)</td><td>One place that owns diagnostics, privacy projection, and step-level traces — so the rule is enforced, not begged for.</td><td>A handful of helper functions every controller calls.</td></tr>
+    <tr><td>3</td><td>Local <code>playwright;cdp</code> engine</td><td>A laptop-sized lab to exercise the contract end-to-end without burning fire-engine credits.</td><td>Iterate against cloud fire-engine.</td></tr>
+    <tr><td>4</td><td>Admin Playground</td><td>The surface a human (you, Rafa, on-call) actually <i>looks</i> at to verify the contract works.</td><td>Print JSON to a terminal during the demo.</td></tr>
+  </tbody>
+</table>
+
+<p>The organising principle: each layer is the cheapest possible thing that <i>forces</i> the next one to behave. The catalog forces engines to capture context; the responder forces routes to project it; the CDP engine lets you iterate; the Playground lets you see it.</p>
+
+<h2>The thesis drill</h2>
+
+<div class="drill" id="d1">
+  <div class="row">
+    <div class="probe">Walk me through the four layers in order.</div>
+    <div class="response">"Bottom up: a typed error catalog where every code carries an <code>httpStatus</code>, an <code>explanation</code>, a <code>fix</code>, and a typed <code>details</code> shape. A response enveloper, <code>makeResponder(req, res)</code>, that every v2 route resolves through — it owns diagnostics, applies privacy, emits step-level traces. A local CDP engine, <code>playwright;cdp</code>, registered alongside the existing one, so I could exercise the contract on my laptop. And an admin Playground that renders the envelope: ErrorView, DiagnosticsWaterfall, the request builder."</div>
+    <div class="coach">Bottom-up order matters: it shows the layers depend on each other. Top-down would imply the Playground was the goal, which would weaken the catalog argument.</div>
+  </div>
+
+  <div class="row">
+    <div class="probe">Why four layers? You could have built just the error envelope and called it done.</div>
+    <div class="response">"Each layer fixes a problem the others don't. The catalog without the responder is a type system nobody enforces — controllers still throw whatever they want. The responder without the catalog has nothing to project. The CDP engine without either is just an engine; the contracts are what make it a lab. The Playground without the rest is a JSON viewer. Cut any one and the argument doesn't hold."</div>
+    <div class="coach">This is the load-bearing answer. Practise it. The structure is "X without Y is ___" four times — once for each layer being the missing one. Don't get cute with the symmetry; let it speak.</div>
+  </div>
+
+  <div class="row">
+    <div class="probe">If you had to ship only one of the four, which?</div>
+    <div class="response">"The responder, layer 2. It's the place the privacy rule and the diagnostics contract get enforced — losing it means every controller has to remember to do those things, and they won't. The catalog is the schema, the engine is the lab, the Playground is the surface — but the responder is the load-bearing piece."</div>
+    <div class="coach">Don't pick the catalog, even though it's the headline. The catalog is data; the responder is the control point. Picking the responder shows you know what <i>actually</i> enforces the contract.</div>
+  </div>
+
+  <div class="row">
+    <div class="probe">If they share an organising principle, name it in one sentence.</div>
+    <div class="response">"Each layer is the cheapest thing that <i>forces</i> the next layer to behave — the type system forces engines to record context, the responder forces routes to project it, the CDP engine forces the loop to be fast, the Playground forces somebody to actually look at the output."</div>
+    <div class="coach">"Forces" is the word doing the work. It separates this build from a stack of helpful utilities. Engineers like utilities; product engineers ship constraints.</div>
+  </div>
+</div>
+
+<div class="drill-controls">
+  <button onclick="document.getElementById('d1').classList.toggle('cover')">Cover / show responses</button>
+</div>
+
+<h2>One probe per layer (this is where Rafa will spend most of the time)</h2>
+
+<div class="drill" id="d2">
+  <div class="row">
+    <div class="probe">[Layer 1] Why a typed catalog and not just enum codes?</div>
+    <div class="response">"Codes alone don't tell the SDK or the operator what to do with them. The catalog pairs every code with an <code>httpStatus</code>, an <code>explanation</code>, and a <code>fix</code>. <code>httpStatus</code> means the responder doesn't need a switch statement — code in, status out. <code>explanation</code> and <code>fix</code> mean the customer sees the same words whether they're reading the API response, the docs, or the SDK exception. The typed <code>details</code> shape — for <code>SCRAPE_ACTION_ERROR</code> that's <code>{ actionIndex, selector, pageUrl, screenshot, actionType, actionStatuses[] }</code> — means the engine code <i>can't</i> ship a failure without recording where it happened. The type checker rejects it."</div>
+    <div class="coach">The "type checker rejects it" is the key line. Frame the catalog as a constraint, not a convenience.</div>
+  </div>
+
+  <div class="row">
+    <div class="probe">[Layer 2] Why a responder, not just helpers?</div>
+    <div class="response">"Helpers are opt-in; a responder is the one channel a route can use. <code>makeResponder(req, res)</code>: every v2 route now resolves through it. It owns the diagnostics struct, applies privacy mode (ZDR strips raw text but keeps structure), and emits step-level traces via <code>responder.step({...})</code>. A 14-step run produces 14 diagnostic entries instead of one boolean. The privacy rule lives in one place — not in forty controllers."</div>
+    <div class="coach">If Rafa says "but you could have just made the helper required" — agree, then say: "a helper you have to remember to call is a helper you forget to call. The responder is unforgettable because it's the route's response object."</div>
+  </div>
+
+  <div class="row">
+    <div class="probe">[Layer 3] You added an entire new engine. Why not just use fire-engine?</div>
+    <div class="response">"Iteration speed. Fire-engine is shared, costs credits, has round-trip latency. To prove the catalog and the responder worked, I needed to trigger <code>SCRAPE_ACTION_ERROR</code> on a 14-step replay, watch the diagnostics waterfall populate, fix the projection, and re-run — fifty times, in an afternoon. Doing that against fire-engine would have burned credits and put me in a shared sandbox with the rest of the team. The CDP engine connects to a local Playwright service over the Chrome DevTools Protocol and exposes the full feature surface the failure path needs — actions, screenshots, mobile emulation, geolocation. The old <code>playwright</code> engine is untouched; it's still there as a fallback for callers who don't need any of that."</div>
+    <div class="coach">If Rafa pushes — "isn't this duplicating production?" — say: "production stays on fire-engine. The engine picker prefers the higher-quality engine when its features match. There's no regression for anyone who didn't opt in." Then point at <code>engines/index.ts</code>.</div>
+  </div>
+
+  <div class="row">
+    <div class="probe">[Layer 4] You spent time on a UI. Why?</div>
+    <div class="response">"Because the contract only matters if somebody looks at it. The Playground is the surface where the diagnostics get rendered — ErrorView leads with 'Action 3 failed: <code>#nav-login</code>', the screenshot, and the catalog's <code>explanation</code> and <code>fix</code>. DiagnosticsWaterfall renders the per-step trace as a timeline. The point isn't the UI; the point is that an internal tool that's used means the contract gets tested. It's also the surface I'd defend the prototype with — if I'd just printed JSON to a terminal you and I would be reading curl output right now, and the failure frame wouldn't read like a bug report."</div>
+    <div class="coach">"An internal tool that's used means the contract gets tested" — that's the line. Dogfooding is one of the role posting's stated themes. Drop it here.</div>
+  </div>
+</div>
+
+<div class="drill-controls">
+  <button onclick="document.getElementById('d2').classList.toggle('cover')">Cover / show responses</button>
+</div>
+
+<h2>The flow — what happens when step 11 of 14 fails</h2>
+
+<p>If Rafa asks "trace it through," he's testing whether you actually know how the layers interact at runtime. Have this answer pre-cached.</p>
+
+<div class="drill" id="d3">
+  <div class="row">
+    <div class="probe">Walk me through what happens when step 11 of a 14-step interact replay fails on a selector miss.</div>
+    <div class="response">"The replay script is built by <code>buildReplayScript()</code> in <code>scrape-replay.ts</code>. Inside the Playwright service, the action loop hits step 11, <code>page.click(selector)</code> throws. The <code>failReplay()</code> helper catches it, builds a structured JSON payload <code>{actionIndex, actionNumber, actionType, reason}</code>, appends it to the error message after the sentinel <code>__FIRECRAWL_REPLAY_FAILURE__</code>, and re-throws. The Playwright service returns a 422 with that message in <code>stderr</code>. Back in <code>controllers/v2/scrape-browser.ts</code>, <code>parseBrowserExecFailure()</code> reads the body, <code>parseReplayFailure()</code> finds the sentinel and parses the JSON. Meanwhile <code>captureFailureContext()</code> hits the browser service twice — once for the live URL, once for a screenshot — both best-effort, both swallowed on error. The responder gets <code>BrowserError.EXECUTION_FAILED</code> with the typed details — <code>replayFailedAt</code>, <code>pageUrl</code>, <code>screenshot</code>, <code>stderrSnippet</code> — and writes it through the privacy projection. The customer sees the structured envelope; the Playground renders ErrorView; the DiagnosticsWaterfall shows ten green rows and one red."</div>
+    <div class="coach">This is the hardest answer to deliver smoothly. Practise it. The names (<code>parseReplayFailure</code>, <code>captureFailureContext</code>) signal you know your own code. Don't paraphrase them.</div>
+  </div>
+</div>
+
+<div class="drill-controls">
+  <button onclick="document.getElementById('d3').classList.toggle('cover')">Cover / show response</button>
+</div>
+
+<h2>Speed run</h2>
+
+<section class="speedrun">
+  <p>Cover responses. Answer aloud. Each in ≤30 seconds, except the runtime trace which can take a minute.</p>
+  <ol>
+    <li>"Walk me through the four layers in order."</li>
+    <li>"Why four layers, not one?"</li>
+    <li>"Ship only one — which?"</li>
+    <li>"Why a typed catalog instead of enum codes?"</li>
+    <li>"Why a responder, not helpers?"</li>
+    <li>"Why a new engine?"</li>
+    <li>"Why a UI?"</li>
+    <li>"Step 11 of 14 fails — trace it through."</li>
+  </ol>
+</section>
+
+<div class="source">
+  <code>git show 12132753b0aa -- apps/api/src/lib/error-catalog.ts apps/api/src/controllers/v2/response-enveloper.ts apps/api/src/scraper/scrapeURL/engines/playwright/cdp.ts</code>. Read these three files end-to-end at least once before the call.
+</div>
+
+<div class="ask">
+  <b>Ask your teacher</b> — want a dedicated lesson on any one of the four layers, where we go deeper into the alternatives I rejected? The runtime-trace probe in particular is worth its own drill lesson.
+</div>
+
+<nav class="lesson-nav">
+  <a href="0001-why-this-feedback.html">Previous</a>
+  <a class="next" href="0003-typed-error-catalog.html">Next — typed error catalog deep drill (placeholder)</a>
+</nav>
+
+</body>
+</html>

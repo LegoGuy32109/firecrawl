@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Lesson 0001 — Why this feedback: the opener drill</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+
+<p class="eyebrow">Lesson 0001 · drill · design defense</p>
+<h1>Why this feedback: the opener drill</h1>
+<p class="subtitle">Rafa opens with "why this customer." Drill until your answer lands in one breath.</p>
+
+<div class="win">
+  By the end you can say the opener in &lt;45 seconds and field five follow-up probes without scrambling.
+</div>
+
+<h2>The opener</h2>
+
+<div class="drill" id="d1">
+  <div class="row">
+    <div class="probe">Eleven pieces of feedback. Walk me through how you chose.</div>
+    <div class="response">"When we spoke on June 10 I told you Interact's biggest user-facing problem was that errors don't say <i>where</i> in a replay something failed. The feedback list confirmed it — items #2, #7, #8 and #11 are all the same shape — and the tickets file in <code>data/</code> said that bucket is 58% of support load. So I built the answer to the problem I'd already flagged, and used #7 as the canonical case because it's the most complex variant: a 14-step Interact run that comes back as one <code>SCRAPE_FAILED</code>."</div>
+    <div class="coach">Lead with the June 10 callback. Without it, this sounds like you stumbled onto the same problem by coincidence. Land the math (58%) before the wedge (#7) — math first proves it's not just four loud customers.</div>
+  </div>
+</div>
+
+<div class="drill-controls">
+  <button onclick="document.getElementById('d1').classList.toggle('cover')">Cover / show response</button>
+  <span style="color: var(--muted)">Read the probe, say the response out loud, then click to check.</span>
+</div>
+
+<h2>The follow-ups Rafa will throw</h2>
+
+<div class="drill" id="d2">
+  <div class="row">
+    <div class="probe">Why is debug-the-failure 58% and not, say, search relevance?</div>
+    <div class="response">"<code>data/tickets.csv</code>, last 90 days. 'Error confusion / debugging help' is 214 tickets; 'scrape failures on protected sites' adds another 96. Together that's 310 of 535 — 58%. 'Search relevance / result count' is 38 — about 7%. Bigger bucket, by a lot."</div>
+    <div class="coach">Have the raw counts ready. Rafa will absolutely test whether you read the data or skimmed it. If you blank on the exact numbers, say "let me pull the file" — better than guessing.</div>
+  </div>
+
+  <div class="row">
+    <div class="probe">#10 is the seven-figure LinkedIn deal. You skipped that?</div>
+    <div class="response">"Skipped on purpose. LinkedIn at scale is bot mitigation and ToS compliance, not a 72-hour prototype. The brief explicitly said 'know the product before you build' and warned against rebuilding what exists — this is an infrastructure project, not a feature."</div>
+    <div class="coach">Resist the temptation to apologise for skipping the big-money one. Confidence is the point. The brief told you to be narrow and deep.</div>
+  </div>
+
+  <div class="row">
+    <div class="probe">What about #6, the Fortune 500? Same dollar size.</div>
+    <div class="response">"That overlaps directly with the Agent product. The brief warned against rebuilding what already exists. The customer's actual ask — 'just understand any website' — is the Agent pitch verbatim. Wrong prototype to ship to you."</div>
+    <div class="coach">Reference the brief's own language. "Know the product before you build" was a line in the assignment; quoting it back shows you respected the rules.</div>
+  </div>
+
+  <div class="row">
+    <div class="probe">Why #7 specifically and not #11? #11 is the auth flow case, which is closer to where customers actually pay.</div>
+    <div class="response">"#11 is in the same bucket — same root problem of can't-localize-failure-in-a-multi-step-flow. I picked #7 because it's the most complex shape of the bug; if the contract works for 14 steps it works for two. The contract layer I built generalizes to #11. The <i>surface</i> would be different — you'd want session state and credential prompts surfaced in Playground instead of action replay — but the error catalog and responder are the same."</div>
+    <div class="coach">This is the question that tests whether you understand your own work. Show you know which parts generalize (layers 1 and 2) and which are problem-specific (layer 4).</div>
+  </div>
+
+  <div class="row">
+    <div class="probe">Would you have shipped this if #7 hadn't been in the list?</div>
+    <div class="response">"Yes. I told you on June 10 it was the problem. The feedback list confirmed it; it didn't generate it."</div>
+    <div class="coach">Short. The longer the answer the less it sounds like you mean it. Rafa is testing conviction here, not technical depth.</div>
+  </div>
+
+  <div class="row">
+    <div class="probe">If you'd had a full week instead of 72 hours, what would you have added?</div>
+    <div class="response">"The contract going out to the SDKs. The TypeScript shapes for error codes are the source of truth — SDKs could codegen from them so customers get autocomplete instead of regexing error strings. That's already in the one-pager as next-step #1. I cut it because it's plumbing work that doesn't change the prototype's argument."</div>
+    <div class="coach">Don't invent new scope on the call. Point at what you already wrote down as cut. Showing the cut list was deliberate, not panicked, is the move.</div>
+  </div>
+
+  <div class="row">
+    <div class="probe">The customer in #2 was very specific: they want to bring their own residential proxies. You're saying 'no, but here's diagnostics.' How is that respecting the customer ask?</div>
+    <div class="response">"They themselves said — quote — 'we assumed making it go away wasn't on the table.' They're asking for the workaround, not the underlying fix. The underlying fix is reliability on flagged domains, which is its own infrastructure project. The diagnostics I built do help: when a burst happens, they get pageUrl, screenshot, and which step in the action chain bit it. That's what they actually need to debug their workaround."</div>
+    <div class="coach">When a customer asks for a workaround, dig for the real ask. This is one of the role posting's explicit themes: "separate what customers ask for from what they actually need." Use that language in the answer if you can do it without sounding rehearsed.</div>
+  </div>
+</div>
+
+<div class="drill-controls">
+  <button onclick="document.getElementById('d2').classList.toggle('cover')">Cover / show responses</button>
+</div>
+
+<h2>Speed run — say the opener in one breath</h2>
+
+<section class="speedrun">
+  <p>Stand up. Close the page or cover responses. For each probe, answer aloud before flipping back. Time the opener — under 45 seconds.</p>
+  <ol>
+    <li>"Eleven pieces of feedback. Walk me through how you chose." (the opener)</li>
+    <li>"#10 is seven figures. You skipped it."</li>
+    <li>"Why #7 and not #11?"</li>
+    <li>"Would you have built this if #7 hadn't been in the list?"</li>
+    <li>"With more time, what would you add?"</li>
+  </ol>
+</section>
+
+<div class="source">
+  <code>~/Projects/velvet-comet/README.md</code> (the brief), <code>~/Projects/velvet-comet/data/tickets.csv</code> (the 58% number), and the one-pager at the top of <code>README.md</code> in commit 12132753. Re-read all three before the call so the numbers don't slip.
+</div>
+
+<div class="ask">
+  <b>Ask your teacher</b> — want more follow-up probes (e.g. "what about #4, the fast-snippets ask"), or want to roleplay a longer drill where I improvise probes back at you? Just say.
+</div>
+
+<nav class="lesson-nav">
+  <a href="../reference/commit-spine.html">Commit spine</a>
+  <a class="next" href="0002-four-layer-thesis.html">Next — the four-layer thesis</a>
+</nav>
+
+</body>
+</html>

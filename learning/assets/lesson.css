@@ -1,0 +1,328 @@
+/* Shared stylesheet for all lessons and references in this workspace.
+   Tufte-inspired: readable serif body, generous margins, restrained colour,
+   prints cleanly to A4. Every lesson <link>s this file. */
+
+:root {
+  --ink: #111;
+  --paper: #fffff8;
+  --rule: #c8c1ad;
+  --muted: #6f675a;
+  --accent: #b94700;     /* warm rust, for emphasis and links */
+  --code-bg: #f3efe4;
+  --quote-bg: #f8f5ea;
+  --max-text: 38rem;
+  --max-wide: 56rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #ece6d6;
+    --paper: #1c1a16;
+    --rule: #45403a;
+    --muted: #a59c89;
+    --accent: #e89060;
+    --code-bg: #2a2620;
+    --quote-bg: #221f1a;
+  }
+}
+
+html {
+  font-size: 17px;
+}
+
+body {
+  font-family: et-book, "EB Garamond", Georgia, serif;
+  background: var(--paper);
+  color: var(--ink);
+  max-width: var(--max-wide);
+  margin: 4rem auto;
+  padding: 0 2rem 6rem;
+  line-height: 1.55;
+}
+
+article, section.lesson {
+  max-width: var(--max-text);
+}
+
+h1, h2, h3, h4, h5 {
+  font-family: Georgia, serif;
+  font-weight: 500;
+  line-height: 1.2;
+  margin-top: 2.5rem;
+}
+h1 { font-size: 2.2rem; margin-top: 0; }
+h2 { font-size: 1.6rem; border-bottom: 1px solid var(--rule); padding-bottom: 0.3rem; }
+h3 { font-size: 1.25rem; }
+h4 { font-size: 1.05rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+
+.eyebrow {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+
+.subtitle {
+  font-style: italic;
+  color: var(--muted);
+  font-size: 1.1rem;
+  margin-top: -0.4rem;
+}
+
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid currentColor; }
+a:hover { background: rgba(185, 71, 0, 0.08); }
+
+p { margin: 1rem 0; }
+
+blockquote {
+  margin: 1.5rem 0;
+  padding: 0.6rem 1.2rem;
+  background: var(--quote-bg);
+  border-left: 3px solid var(--rule);
+  font-style: italic;
+}
+blockquote p:first-child { margin-top: 0; }
+blockquote p:last-child  { margin-bottom: 0; }
+blockquote cite {
+  display: block;
+  margin-top: 0.4rem;
+  font-style: normal;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+code, kbd, pre {
+  font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+code { background: var(--code-bg); padding: 0.05em 0.3em; border-radius: 3px; }
+pre {
+  background: var(--code-bg);
+  padding: 1rem 1.2rem;
+  border-radius: 4px;
+  overflow-x: auto;
+  line-height: 1.45;
+  font-size: 0.85rem;
+}
+pre code { background: none; padding: 0; }
+
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.4rem 0; }
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1.5rem 0;
+  font-size: 0.95rem;
+}
+th, td {
+  text-align: left;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+th { border-bottom: 2px solid var(--ink); }
+
+hr { border: none; border-top: 1px solid var(--rule); margin: 2.5rem 0; }
+
+/* Tufte-style sidenotes — used sparingly for asides that don't break flow. */
+.sidenote {
+  float: right;
+  clear: right;
+  width: 14rem;
+  margin: 0 -16rem 1rem 1.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+@media (max-width: 70rem) {
+  .sidenote {
+    float: none;
+    width: auto;
+    margin: 1rem 0;
+    padding: 0.6rem 1rem;
+    border-left: 2px solid var(--rule);
+    background: var(--quote-bg);
+  }
+}
+
+/* Card grids for "choices and alternatives" tables in design-defense lessons. */
+.choices {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+.choices > .card {
+  border: 1px solid var(--rule);
+  padding: 0.8rem 1rem;
+  background: var(--paper);
+}
+.choices > .card.chosen { border-color: var(--accent); border-width: 1.5px; }
+.choices > .card h4 { margin-top: 0; }
+
+/* The "tangible win" box at the top of every lesson. */
+.win {
+  background: var(--quote-bg);
+  border: 1px solid var(--rule);
+  padding: 0.8rem 1rem;
+  margin: 1.5rem 0;
+  font-size: 0.95rem;
+}
+.win::before {
+  content: "After this lesson";
+  display: block;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+
+/* The "ask your teacher" reminder at the bottom of every lesson. */
+.ask {
+  margin-top: 3rem;
+  padding: 0.8rem 1rem;
+  border-top: 2px solid var(--rule);
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+/* The "primary source" recommendation. */
+.source {
+  margin: 2rem 0 1rem;
+  padding: 0.8rem 1rem;
+  border-left: 3px solid var(--accent);
+  background: var(--code-bg);
+  font-size: 0.92rem;
+}
+.source::before {
+  content: "Primary source";
+  display: block;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+
+/* Inline navigation between lessons. */
+nav.lesson-nav {
+  display: flex;
+  justify-content: space-between;
+  margin: 2.5rem 0 1rem;
+  font-size: 0.9rem;
+}
+nav.lesson-nav a { border: none; }
+nav.lesson-nav a::before { content: "← "; }
+nav.lesson-nav a.next::before { content: ""; }
+nav.lesson-nav a.next::after { content: " →"; }
+
+@media print {
+  body { margin: 0; max-width: none; }
+  a { color: var(--ink); }
+  .sidenote { float: none; width: auto; margin: 1rem 0; }
+  .ask { display: none; }
+}
+
+/* Drill format: probe → response → coaching note rows.
+   The dominant unit in this workspace. Read top-to-bottom; cover the
+   response column for retrieval practice. */
+.drill {
+  margin: 1.6rem 0;
+  border-top: 2px solid var(--ink);
+  border-bottom: 2px solid var(--ink);
+}
+.drill .row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  border-bottom: 1px solid var(--rule);
+  padding: 1rem 0;
+}
+.drill .row:last-child { border-bottom: none; }
+.drill .probe {
+  font-family: Georgia, serif;
+  font-style: italic;
+  color: var(--ink);
+  margin-bottom: 0.6rem;
+  position: relative;
+  padding-left: 2.2rem;
+}
+.drill .probe::before {
+  content: "Rafa";
+  position: absolute;
+  left: 0;
+  top: 0.05em;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-style: normal;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.drill .response {
+  font-family: et-book, "EB Garamond", Georgia, serif;
+  color: var(--ink);
+  margin-bottom: 0.4rem;
+  padding-left: 2.2rem;
+  position: relative;
+}
+.drill .response::before {
+  content: "You";
+  position: absolute;
+  left: 0;
+  top: 0.05em;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.drill .coach {
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-style: italic;
+  padding-left: 2.2rem;
+  border-left: 2px solid var(--rule);
+  margin-left: 0.4rem;
+}
+.drill .coach::before {
+  content: "↳ ";
+  font-style: normal;
+  color: var(--accent);
+}
+
+/* Hide responses for self-quizzing — toggle via a small UI control in lessons. */
+.drill.cover .response { color: var(--paper); background: var(--paper); user-select: none; }
+.drill.cover .response::before { color: var(--accent); }
+.drill.cover .response:hover { color: var(--ink); background: var(--paper); }
+.drill.cover .coach { color: var(--paper); background: var(--paper); }
+.drill.cover .coach:hover { color: var(--muted); }
+
+.drill-controls {
+  margin: 1rem 0 0;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.85rem;
+}
+.drill-controls button {
+  font-family: inherit;
+  font-size: inherit;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  margin-right: 0.4rem;
+}
+.drill-controls button:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Speed-run section: a compact probe list with no answers visible by default. */
+.speedrun ol { padding-left: 1.6rem; }
+.speedrun li { margin: 0.6rem 0; font-style: italic; }
+.speedrun li::marker { font-style: normal; color: var(--muted); font-family: "Helvetica Neue", Arial, sans-serif; font-size: 0.8rem; }
+

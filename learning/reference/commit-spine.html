@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Commit 12132753 — flow and decision spine</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+
+<p class="eyebrow">Reference · commit spine</p>
+<h1>Commit 12132753 — every flow and decision</h1>
+<p class="subtitle">A map of the 290-file diff, organised by layer and by defensible decision. Cite this in lessons; do not memorise it.</p>
+
+<div class="win">
+  Skim this whenever you forget the shape of the build. Each row is a defensible decision; each lesson in <code>./lessons/</code> picks one and goes deeper.
+</div>
+
+<h2>The four-layer framing (from your one-pager)</h2>
+<table>
+  <thead>
+    <tr><th>Layer</th><th>What it is</th><th>Why it exists</th><th>Key files</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>1. Typed error / warning catalog</b></td>
+      <td>Every error code is an enum value with <code>httpStatus</code>, <code>explanation</code>, <code>fix</code>, and a typed <code>details</code> shape. The responder won't accept opaque error strings.</td>
+      <td>Generic <code>SCRAPE_FAILED</code> is gone. The type system makes it impossible to ship a failure without recording <i>where</i> it happened. Forces the engine code to capture <code>actionIndex</code>, <code>selector</code>, <code>pageUrl</code>, <code>screenshot</code> at the moment of failure.</td>
+      <td><code>apps/api/src/lib/error-codes.ts</code>, <code>error-catalog.ts</code>, <code>error-details.ts</code>, <code>error-serde.ts</code>, <code>error.ts</code></td>
+    </tr>
+    <tr>
+      <td><b>2. Response envelope</b></td>
+      <td><code>makeResponder(req, res)</code>. Every v2 route resolves through it. Owns diagnostics, privacy projection, step-level traces.</td>
+      <td>A 14-step action run produces 14 diagnostic entries instead of one boolean. Privacy mode (ZDR) strips raw text but keeps structure, in one place — not 40 if-statements.</td>
+      <td><code>apps/api/src/controllers/v2/response-enveloper.ts</code> (+464), <code>controllers/v2/types.ts</code> (+306)</td>
+    </tr>
+    <tr>
+      <td><b>3. Local <code>playwright;cdp</code> engine</b></td>
+      <td>Second engine alongside <code>playwright</code>. Connects to the local Playwright service over CDP. Exposes actions, screenshots at any size, mobile emulation, geolocation.</td>
+      <td>So you could iterate on the failure path on your laptop without burning fire-engine credits and without sharing a sandbox. The old <code>playwright</code> engine is untouched — fallback parity.</td>
+      <td><code>apps/api/src/scraper/scrapeURL/engines/playwright/cdp.ts</code> (+218), registered in <code>engines/index.ts</code>, exercised by <code>apps/playwright-service-ts/api.ts</code> (+1693)</td>
+    </tr>
+    <tr>
+      <td><b>4. Admin Playground</b></td>
+      <td>Preact bundle mounted at <code>/admin/{BULL_AUTH_KEY}/playground</code>. Request builder, ErrorView, DiagnosticsWaterfall, history, signals-based state.</td>
+      <td>The surface you defend to the team. Not a customer feature — an internal debugger that proves the contract works end-to-end.</td>
+      <td><code>apps/api/src/admin/playground/</code> (entire subtree)</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Supporting infrastructure</h2>
+<table>
+  <thead>
+    <tr><th>What</th><th>Why</th><th>Files</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Replay-fault test site</td>
+      <td>Synthetic flaky pages — disappearing button (visit 1: button present, visit 2+: gone) and vanishing route (200 then 404). Deterministic, reproducible failures for the demo. Per-token visit counters; new token = fresh state.</td>
+      <td><code>apps/test-site/replay-fault-server.mjs</code> (+101)</td>
+    </tr>
+    <tr>
+      <td>Split docker-compose</td>
+      <td><code>docker-compose.dev.yaml</code> for <code>pnpm dev:local</code> (host API + managed deps + replay-fault). <code>docker-compose.playground.yaml</code> for fully containerised demo with DB schema and seed mounted into initdb. Both layer on top of <code>docker-compose.yaml</code>.</td>
+      <td><code>docker-compose.dev.yaml</code>, <code>docker-compose.playground.yaml</code>, <code>docker-compose.snips.yaml</code></td>
+    </tr>
+    <tr>
+      <td>Drizzle migration + local DB seed</td>
+      <td>Fresh-clone-to-running-demo is one command. Migration mounted into <code>/docker-entrypoint-initdb.d/</code>; local seed adds a mock auth function so any non-empty Bearer token works.</td>
+      <td><code>apps/api/drizzle/20260618153654_cynical_hannibal_king/</code>, <code>apps/api/scripts/local-db-setup.sql</code></td>
+    </tr>
+    <tr>
+      <td>E2E tests (snips)</td>
+      <td>The contract is asserted on the wire, not in unit tests. S1-S4 sanity, F1-F4 failure envelope, F5a/F5b replay-fault. Gated on <code>TEST_SUITE_SELF_HOSTED</code> + <code>HAS_PLAYWRIGHT</code> per <code>CLAUDE.md</code>.</td>
+      <td><code>__tests__/snips/v2/scrape-error-envelope.test.ts</code> (+322), <code>scrape-playwright-cdp.test.ts</code> (+593)</td>
+    </tr>
+    <tr>
+      <td>Error-code regression guard</td>
+      <td>Walks the AST of every source file under <code>src/</code> and fails if any file references an error code that doesn't exist in <code>error-codes.ts</code>, or if a code is removed without its references being cleaned up. Catches drift the type checker misses (e.g. codes referenced from strings in tests).</td>
+      <td><code>__tests__/guards/errorcodes-regression.test.ts</code> (+355)</td>
+    </tr>
+    <tr>
+      <td>Admin route consolidation</td>
+      <td>Old admin handlers under <code>controllers/v0/admin/</code> moved to <code>admin/</code>. New <code>admin/admin-index.ts</code> is a typed index page listing every admin route, so a stranger landing on <code>/admin/{key}/</code> can find the playground without docs.</td>
+      <td><code>apps/api/src/admin/admin-index.ts</code> (+434), <code>routes/admin.ts</code> (+79 net), all <code>controllers/v0/admin/*.ts</code> moves</td>
+    </tr>
+    <tr>
+      <td>Playground build</td>
+      <td>esbuild compiles the Preact tree to a single <code>dist/playground.bundle.js</code> + <code>playground.css</code>. The HTML shell inlines both — no separate static-asset routing. <code>react</code> aliased to <code>preact/compat</code> so the UI code reads like React but ships ~3kb of runtime.</td>
+      <td><code>apps/api/src/admin/playground/build.ts</code>, <code>controller.ts</code>, <code>knip.config.ts</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Non-obvious decisions worth defending</h2>
+<table>
+  <thead>
+    <tr><th>Decision</th><th>The probe to expect</th><th>The defense</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Sentinel-in-stderr for crossing the Playwright subprocess boundary</td>
+      <td>"Why not return structured JSON?"</td>
+      <td>The replay script runs inside the Playwright service via <code>page.evaluate</code>-shaped exec. The only reliable channel out on failure is the thrown error's message. Appending <code>__FIRECRAWL_REPLAY_FAILURE__:{json}</code> means you keep the human-readable prefix <i>and</i> structured data, parseable from any stderr or error message. See <code>scrape-replay.ts</code> <code>parseReplayFailure()</code>.</td>
+    </tr>
+    <tr>
+      <td>Screenshot capture is best-effort, never required</td>
+      <td>"What if the screenshot call itself fails?"</td>
+      <td><code>captureFailureContext()</code> swallows both URL- and screenshot-fetch errors. The envelope ships with whatever was captured. Failing to capture the screenshot must not turn a 422 into a 500.</td>
+    </tr>
+    <tr>
+      <td>ZDR strips raw text but keeps structure</td>
+      <td>"Why not also strip <code>actionIndex</code> and <code>selector</code>?"</td>
+      <td>The structure is the bug report; the raw text (pageUrl, screenshot, stderr) is the data. ZDR's contract is "no customer data retained", not "no diagnostics". Privacy projection lives in the responder so this rule is enforced once, not at every call site.</td>
+    </tr>
+    <tr>
+      <td>3-second buffer between action-engine timeout and outer scrape timeout in CDP engine</td>
+      <td>"Why the magic number?"</td>
+      <td>If the two timeouts race, the outer abort signal wins and you lose the per-action diagnostic. The buffer guarantees the action engine has time to serialise its <code>SCRAPE_ACTION_ERROR</code> envelope and reply before the outer signal collapses everything to <code>SCRAPE_TIMEOUT</code>. Documented inline at <code>cdp.ts</code>.</td>
+    </tr>
+    <tr>
+      <td>Per-token visit counters in the replay-fault site (vs a stateful database)</td>
+      <td>"Why an in-memory <code>Map</code>?"</td>
+      <td>The whole point is reproducible failures with zero setup. Tokens are demo-supplied; counters reset on container restart. Stateful storage would add a dependency you don't need and make demo recovery harder, not easier.</td>
+    </tr>
+    <tr>
+      <td>Dummy <code>fc-3d478a296e59403e85c794aba81ffd2a</code> API key prefilled in the playground</td>
+      <td>"Is that a leaked credential?"</td>
+      <td>No. It's a UUID-shaped string the auth middleware accepts because <code>local-db-setup.sql</code> defines a mock auth function that returns success for any non-empty Bearer token. Documented as such in <code>controller.ts</code> with a comment that says "never replace with a live token".</td>
+    </tr>
+    <tr>
+      <td>Preact + compat layer, not React</td>
+      <td>"Why not just use React?"</td>
+      <td>Bundle size. Preact + compat is ~3kb gzipped vs React's ~40kb. The playground is served as inline JavaScript from a single HTML response; every byte you ship is a byte the admin page has to parse on every visit. The compat layer means the source still reads like React.</td>
+    </tr>
+    <tr>
+      <td>Playground hidden behind <code>{BULL_AUTH_KEY}</code> in the URL path</td>
+      <td>"Why not auth middleware?"</td>
+      <td>It's already behind auth — the bull-board admin pattern. Adding a separate auth layer for an admin-only debugger would mean a second secret to rotate. Reuses the existing admin gate that the team already understands.</td>
+    </tr>
+    <tr>
+      <td>E2E tests over unit tests</td>
+      <td>"How do you regression-test this?"</td>
+      <td>Per <code>CLAUDE.md</code>: "E2E (called snips) is always preferred over unit testing." The errors I care about are wire-format guarantees. A unit test that mocks the Playwright service proves nothing useful here; a snip that hits a real fire-engine-or-CDP path proves the entire contract end-to-end. Test gating (<code>TEST_SUITE_SELF_HOSTED</code>, <code>HAS_PLAYWRIGHT</code>, <code>OPENAI_API_KEY</code>) ensures CI runs the right tests on the right matrix.</td>
+    </tr>
+    <tr>
+      <td>Error-code regression guard runs in CI</td>
+      <td>"What stops a code from going stale?"</td>
+      <td>The guard test parses every source file's AST, builds a set of every error code referenced from string literals and member-access expressions, and asserts the set is a subset of the enum union. If you rename a code without updating its references, CI catches it. Plain TypeScript misses string-literal references.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>What you cut, and the framing for each</h2>
+<p>The one-pager lists eight cuts (#1-6, #8-11 except #7). Each cut needs a sentence-long defense. The one-pager gives the headline; the lesson on cuts will expand to a paragraph each.</p>
+
+<div class="source">
+  Primary source for everything here: <code>git show 12132753b0aa</code>. When in doubt, read the diff, not this map.
+</div>
+
+<nav class="lesson-nav">
+  <a href="../MISSION.html" style="visibility:hidden">.</a>
+  <a class="next" href="../lessons/0001-why-this-feedback.html">Lesson 0001 — Why this feedback</a>
+</nav>
+
+</body>
+</html>
