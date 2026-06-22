@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Lesson 0003 — Demo choreography</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+
+<p class="eyebrow">Lesson 0003 · drill · demo</p>
+<h1>Demo choreography</h1>
+<p class="subtitle">A 10-minute demo that walks all four layers in one run, with recovery for the most likely failure modes.</p>
+
+<div class="win">
+  Cold start to four layers shown on screen in ten minutes. One deliberate failure recovery practised. One backup plan ready if everything is on fire.
+</div>
+
+<h2>Pick a stack — and commit to it now, not Monday</h2>
+
+<table>
+  <thead><tr><th>Stack</th><th>Up command</th><th>URL</th><th>Pros / cons</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><b>Playground compose</b> (recommended for the demo)</td>
+      <td><code>docker compose -f docker-compose.yaml -f docker-compose.playground.yaml up</code></td>
+      <td><code>http://localhost:3002/admin/playground-local/playground</code></td>
+      <td>Fully containerized; <code>restart: unless-stopped</code> on the api; mounts the Drizzle migration and seed SQL into <code>initdb.d</code> on first volume creation. Slower to start cold (~60-90s) but most resilient mid-demo.</td>
+    </tr>
+    <tr>
+      <td><code>pnpm dev:local</code> (from <code>apps/api/</code>)</td>
+      <td><code>cd apps/api && pnpm dev:local</code></td>
+      <td><code>http://localhost:3002/admin/local/playground</code></td>
+      <td>One command, fast iteration, you've tuned it heavily. But the harness can be noisy on stderr — Rafa will see <code>tsx</code> reload chatter. Reserve for development; not for screen-share.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p class="sidenote">If you bring up dev:local for the demo and the playground compose is also up, ports 3001, 3002, 5432 collide. The memory rule: pick one, tear the other down first.</p>
+
+<p><b>Pre-demo checklist (Monday morning at the latest):</b></p>
+<ol>
+  <li>Tear down everything: <code>docker compose down -v</code> from the repo root, then bring up playground compose. This guarantees a fresh volume so the initdb mounts run.</li>
+  <li>Verify the playground loads at the URL above. Hard-reload (Ctrl-Shift-R) to flush any stale bundle.</li>
+  <li>Run a smoke scrape against <code>https://example.com</code>. Confirm response shows in the history rail.</li>
+  <li>Run F5a end-to-end with a throwaway token. Confirm ErrorView shows screenshot + pageUrl + actionIndex.</li>
+  <li>Record the demo on screen as a backup video. If everything explodes on the call, you fall back to "let me show you the recording while I diagnose."</li>
+</ol>
+
+<h2>The 10-minute arc</h2>
+
+<table>
+  <thead><tr><th>min</th><th>What you show</th><th>What you say (1-2 sentences)</th><th>What it proves</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>0:00-1:00</td>
+      <td>Open Playground. Point at the left rail (request builder), middle (response/history), right (settings).</td>
+      <td>"This is the admin Playground I built — layer four. It's the surface where the diagnostics get rendered. We'll walk the other three layers through it."</td>
+      <td>Frames the demo around the four-layer model from the one-pager.</td>
+    </tr>
+    <tr>
+      <td>1:00-3:00</td>
+      <td>Scrape <code>https://example.com</code>. Show the success response. Expand the diagnostics waterfall — point at the fetch + parse + transform steps.</td>
+      <td>"Happy path. Notice the diagnostics — every step in the scrape pipeline gets a row with timing and status. That's the responder, layer two, writing through to layer four."</td>
+      <td>Layers 1+2+4 alive in the happy case. No envelope yet — that comes next.</td>
+    </tr>
+    <tr>
+      <td>3:00-5:00</td>
+      <td>New scrape: <code>http://replay-fault:4322/replay-fault/element?token=demo-MONDAY-RAFA</code> (use a unique suffix). Show success. Then run interact with <code>await page.goto(SAME_URL); await page.click('#replay-btn');</code>.</td>
+      <td>"This URL serves the button on visit one, removes it on visit two. The interact replay is visit two — the button's gone. Watch what happens."</td>
+      <td>Sets up the failure deliberately, on a synthetic site you control.</td>
+    </tr>
+    <tr>
+      <td>5:00-7:00</td>
+      <td>Expand ErrorView. Point at the action number, the failing <code>page.click('#replay-btn')</code> line, the screenshot, the catalog explanation+fix block.</td>
+      <td>"This is the answer to feedback #7. Action one of one, the click that missed, the page as it actually looked at the moment of failure. The code is <code>BROWSER_EXECUTION_FAILED</code>; the catalog gives the explanation and the fix."</td>
+      <td>All four layers in one frame. Catalog (the code+text), responder (the diagnostics), CDP engine (the screenshot), Playground (the rendering).</td>
+    </tr>
+    <tr>
+      <td>7:00-9:00</td>
+      <td><b>Option A:</b> Run F5b — same flow against <code>/replay-fault/route?token=...</code>, which 404s on visit two. Shows the contract holds for a different failure shape. <br><b>Option B:</b> Run a 6-step action chain on example.com with one bad selector in the middle. Shows DiagnosticsWaterfall with mixed green/red rows.</td>
+      <td>(A) "Different failure — page-level 404 instead of selector miss — same envelope shape." <br>(B) "Six actions. Step four had a bad selector. Five rows green, one red, with the screenshot from row four. The contract scales to the actual #7 case."</td>
+      <td>The contract <i>generalises</i>. Pick A for time, B if you can afford 2 extra minutes.</td>
+    </tr>
+    <tr>
+      <td>9:00-10:00</td>
+      <td>Open <code>apps/api/src/lib/error-catalog.ts</code> on screen. Scroll to <code>BrowserError.EXECUTION_FAILED</code> and <code>ScrapeError.ACTION</code>. Then jump to <code>response-enveloper.ts</code> and <code>captureFailureContext()</code> in <code>scrape-browser.ts</code>.</td>
+      <td>"That's where the codes live, that's the responder, that's the screenshot capture. Happy to go deeper into any of these."</td>
+      <td>Closes the loop from demo back to code. Invites Rafa to drive the rest of the technical dig.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Probes Rafa will throw mid-demo</h2>
+
+<div class="drill" id="d1">
+  <div class="row">
+    <div class="probe">What's that <code>?token=</code> doing?</div>
+    <div class="response">"The replay-fault server tracks visit counts per token. Fresh token, fresh state. I'm using a timestamped one so the demo doesn't depend on container restart. In-memory Map, no DB — point of the synthetic site is reproducible failure with zero setup."</div>
+    <div class="coach">If Rafa asks "why not a database?", say: stateful storage adds a dependency you don't need; the container restart is faster than seeding anyway.</div>
+  </div>
+
+  <div class="row">
+    <div class="probe">Is that screenshot full-page or just viewport?</div>
+    <div class="response">"Viewport, JPEG, quality 70. Full-page would be useful but I went with the cheapest thing that makes the bug obvious. Hot path on every failure, so I capped the cost."</div>
+    <div class="coach">Show you thought about the cost. The screenshot is best-effort and capped — that's a design decision, not laziness.</div>
+  </div>
+
+  <div class="row">
+    <div class="probe">What if ZDR were on for this team?</div>
+    <div class="response">"Screenshot is gone, raw URL is gone, but the structure stays — <code>actionIndex</code>, <code>actionType</code>, the code, the catalog explanation and fix. The privacy projection lives in the responder so it's applied to every code path once, not at every call site. Demo: <code>localStorage.setItem('demoZdr', 'true')</code> if you want me to flip it." (don't actually flip it on the call unless you've practised)</div>
+    <div class="coach">Don't actually demo the ZDR mode unless you've drilled it. Easy to forget to flip it back and have it confuse the next demo.</div>
+  </div>
+
+  <div class="row">
+    <div class="probe">Why is the URL <code>/admin/playground-local/playground</code> and not <code>/admin/playground</code>?</div>
+    <div class="response">"<code>playground-local</code> is the BULL_AUTH_KEY for the playground compose stack — same pattern as Bull Board uses. It's the existing admin gate. Adding a separate auth layer for an internal debugger would mean a second secret to rotate; this reuses the gate the team already understands."</div>
+    <div class="coach">Naming this without hedging is the move. The BULL_AUTH_KEY pattern is load-bearing.</div>
+  </div>
+
+  <div class="row">
+    <div class="probe">Can I see the curl version of that?</div>
+    <div class="response">"Yes — let me pull it up." (Have <code>cli-verification-tests.md</code> open in another tab.) "Same Bearer token, POST <code>/v2/scrape</code>, then POST <code>/v2/scrape/:jobId/interact</code> with the code body. The envelope on the wire is the same as what the Playground renders — Playground is just a UI on top of the same response shape."</div>
+    <div class="coach">Have a terminal pre-warmed with the exact curl. If Rafa asks this and you fumble, the "Playground is just a UI" claim loses force.</div>
+  </div>
+
+  <div class="row">
+    <div class="probe">Why is this in admin and not a public surface?</div>
+    <div class="response">"It's a debugger for the team and for me. The public surface is the response envelope itself — that ships to every customer. The Playground is the human view; it doesn't need to be public to do its job. If you wanted it public later, the bundle is one HTML response, no separate static-asset routing — easy to move."</div>
+    <div class="coach">"Easy to move" matters. Rafa might want to know how product-extensible this is. The build script (esbuild → single bundle, inlined in controller.ts) is intentionally portable.</div>
+  </div>
+</div>
+
+<div class="drill-controls">
+  <button onclick="document.getElementById('d1').classList.toggle('cover')">Cover / show responses</button>
+</div>
+
+<h2>Recovery playbook — what to do when something breaks live</h2>
+
+<table>
+  <thead><tr><th>Symptom</th><th>Likely cause</th><th>30-second fix</th><th>What to say</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Replay-fault scrape returns the no-button page on visit 1</td>
+      <td>Token reused from your pre-demo testing.</td>
+      <td>New token: append <code>-2</code> or timestamp.</td>
+      <td>"Let me grab a fresh token — these have visit counters." (don't apologise; this is by design)</td>
+    </tr>
+    <tr>
+      <td>Playground returns 404 or "Playground bundle not found"</td>
+      <td>Bundle wasn't built. <code>pnpm build:playground</code> didn't run.</td>
+      <td>In another terminal: <code>cd apps/api && pnpm build:playground</code>, then hard-reload.</td>
+      <td>"Bundle's stale — building." Then continue.</td>
+    </tr>
+    <tr>
+      <td>API returns <code>auth function pgrst_anon_role does not exist</code> or similar</td>
+      <td>Postgres volume was reused without the seed running (initdb only fires on first creation).</td>
+      <td><code>docker exec -i firecrawl-nuq-postgres-1 psql -U postgres &lt; apps/api/scripts/local-db-setup.sql</code></td>
+      <td>"DB volume's stale, applying seed." (per memory `feedback-dev-workflow`)</td>
+    </tr>
+    <tr>
+      <td>Interact returns <code>JOB_NOT_FOUND</code></td>
+      <td><code>USE_DB_AUTHENTICATION</code> isn't true, so <code>log_job</code> skipped the DB write. Or you're on the wrong stack.</td>
+      <td>Confirm playground compose is the active stack; if dev:local, restart with the env var set.</td>
+      <td>"Persistence is off — switching stacks." (rare on playground compose; common on dev:local)</td>
+    </tr>
+    <tr>
+      <td>Connection refused on <code>replay-fault:4322</code></td>
+      <td>Container exited or never started.</td>
+      <td><code>docker compose ps</code> to check; <code>docker compose up -d replay-fault</code> to restart.</td>
+      <td>"replay-fault's down, kicking it." It's a 100-line node server; it doesn't fail often.</td>
+    </tr>
+    <tr>
+      <td>Everything is on fire and Rafa is watching</td>
+      <td>Don't diagnose live.</td>
+      <td>"Let me show you the recording while I diagnose in the background." Have the pre-recorded demo open in a tab.</td>
+      <td>Composure beats correctness here. Acknowledge the bug, show the recording, debug after the call.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>What to have open at 17:55 on Monday</h2>
+
+<ul>
+  <li>Playground tab at <code>http://localhost:3002/admin/playground-local/playground</code>, signed in, history cleared.</li>
+  <li>A terminal in <code>~/Projects/josh-firecrawl</code> with the curl commands from <code>reference-demo-examples</code> memory pasted into your shell history (up-arrow to recall).</li>
+  <li>VS Code or your editor with <code>error-catalog.ts</code>, <code>response-enveloper.ts</code>, <code>scrape-browser.ts</code>, and <code>scrape-replay.ts</code> already open in tabs.</li>
+  <li>Pre-recorded demo video in a hidden tab. Worst-case insurance.</li>
+  <li>The one-pager open in a tab so you can scroll to a section if Rafa references it.</li>
+  <li>Closed: every Discord, Slack, mail client. Notifications off.</li>
+</ul>
+
+<h2>Speed run</h2>
+
+<section class="speedrun">
+  <p>For each row, name the recovery step within 5 seconds.</p>
+  <ol>
+    <li>Replay-fault scrape returns the no-button page.</li>
+    <li>Playground 404s on load.</li>
+    <li>API says <code>auth function ... does not exist</code>.</li>
+    <li>Interact returns <code>JOB_NOT_FOUND</code> on a fresh stack.</li>
+    <li><code>connect ECONNREFUSED replay-fault:4322</code>.</li>
+    <li>Rafa asks for the curl version mid-demo.</li>
+    <li>Rafa asks "what would this look like under ZDR?"</li>
+  </ol>
+</section>
+
+<div class="source">
+  <code>~/.claude/projects/-home-josh-Projects-josh-firecrawl/memory/reference-demo-examples.md</code> for the exact curl. <code>docker-compose.playground.yaml</code> for the env vars. <code>apps/api/package.json</code> for the <code>dev:local</code> and <code>build:playground</code> scripts.
+</div>
+
+<div class="ask">
+  <b>Ask your teacher</b> — want me to run a pre-demo dry-run with you? Have me throw the mid-demo probes at you while you screen-share the actual Playground. Reply and I'll prompt you live.
+</div>
+
+<nav class="lesson-nav">
+  <a href="0002-four-layer-thesis.html">Previous</a>
+  <a class="next" href="0004-typed-error-catalog.html">Next — typed error catalog drill (placeholder)</a>
+</nav>
+
+</body>
+</html>
