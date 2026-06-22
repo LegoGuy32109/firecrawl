@@ -10,5 +10,14 @@ export function toImageSrc(value: string): string {
   }
 
   const mime = trimmed.startsWith("iVBOR") ? "image/png" : "image/jpeg";
+
+  if (trimmed.startsWith("/9j/") || trimmed.startsWith("iVBOR")) {
+    return `data:${mime};base64,${trimmed}`;
+  }
+
+  if (trimmed.startsWith("/")) {
+    return trimmed;
+  }
+
   return `data:${mime};base64,${trimmed}`;
 }

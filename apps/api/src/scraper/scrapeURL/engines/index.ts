@@ -576,6 +576,12 @@ export async function buildFallbackList(meta: Meta): Promise<
     unsupportedFeatures: Set<FeatureFlag>;
   }[]
 > {
+  const requiredFeatures = new Set(
+    (
+      ["actions", "screenshot", "screenshot@fullScreen", "branding"] as const
+    ).filter(feature => meta.featureFlags.has(feature)),
+  );
+
   const shouldPrioritizeTlsClient = meta.options.__experimental_engpicker
     ? (await queryEngpickerVerdict(
         meta.options.__experimental_omceDomain ?? new URL(meta.url).hostname,
@@ -677,6 +683,17 @@ export async function buildFallbackList(meta: Meta): Promise<
     if (supportScore >= priorityThreshold) {
       selectedEngines.push({ engine, supportScore, unsupportedFeatures });
     }
+  }
+
+  if (requiredFeatures.size > 0) {
+    selectedEngines = selectedEngines.filter(({ unsupportedFeatures }) => {
+      for (const feature of requiredFeatures) {
+        if (unsupportedFeatures.has(feature)) {
+          return false;
+        }
+      }
+      return true;
+    });
   }
 
   if (

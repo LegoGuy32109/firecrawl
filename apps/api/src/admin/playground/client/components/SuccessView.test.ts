@@ -76,6 +76,83 @@ describe("SuccessView — seam button visibility", () => {
   });
 });
 
+describe("SuccessView — screenshot response format", () => {
+  beforeEach(resetSignals);
+
+  it("renders a screenshot tab for successful scrape responses", () => {
+    mount({
+      success: true,
+      data: {
+        screenshot: "https://example.com/screenshot.jpeg",
+      },
+    });
+
+    expect(root.textContent).toContain("Screenshot");
+    const image = root.querySelector(
+      'img[alt="screenshot"]',
+    ) as HTMLImageElement | null;
+    expect(image).toBeTruthy();
+    expect(image!.getAttribute("src")).toBe(
+      "https://example.com/screenshot.jpeg",
+    );
+  });
+
+  it("preserves root-relative screenshot URLs instead of treating them as base64", () => {
+    mount({
+      success: true,
+      data: {
+        screenshot: "/storage/v1/object/public/media/screenshot-123.jpeg",
+      },
+    });
+
+    const image = root.querySelector(
+      'img[alt="screenshot"]',
+    ) as HTMLImageElement | null;
+    expect(image).toBeTruthy();
+    expect(image!.getAttribute("src")).toBe(
+      "/storage/v1/object/public/media/screenshot-123.jpeg",
+    );
+  });
+});
+
+describe("SuccessView — diagnostics", () => {
+  beforeEach(resetSignals);
+
+  it("renders engine waterfall diagnostics from diagnostics.sources", async () => {
+    mount({
+      success: true,
+      data: { markdown: "ok" },
+      diagnostics: {
+        privacy: {
+          zeroDataRetention: false,
+          mode: "disabled",
+          reduced: false,
+        },
+        sources: {
+          "playwright;cdp": {
+            name: "source",
+            status: "ok",
+            message: "playwright;cdp",
+          },
+        },
+      },
+    });
+
+    expect(root.textContent).toContain("Diag (1)");
+
+    const diagButton = Array.from(root.querySelectorAll("button")).find(
+      b => b.textContent === "Diag (1)",
+    ) as HTMLButtonElement | undefined;
+    expect(diagButton).toBeTruthy();
+    diagButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await Promise.resolve();
+
+    expect(root.textContent).toContain("source");
+    expect(root.textContent).toContain("playwright;cdp");
+    expect(root.textContent).toContain("ok");
+  });
+});
+
 describe("SuccessView — seam click: navigation", () => {
   beforeEach(resetSignals);
 

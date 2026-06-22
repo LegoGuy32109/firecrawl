@@ -8,6 +8,7 @@ import { hasFormatOfType } from "../../../../lib/format-utils";
 import { ActionError } from "../../error";
 import type { LiveMetadata } from "../../../../controllers/v2/types";
 import type { ActionStatus } from "../../../../lib/error-details";
+import { getPlaywrightServiceHeaders } from "./auth";
 
 const actionStatusValues = new Set<ActionStatus["status"]>([
   "ok",
@@ -44,9 +45,7 @@ export async function scrapeURLWithPlaywrightCDP(
 
   const response = await robustFetch({
     url: (config.PLAYWRIGHT_CDP_URL ?? config.PLAYWRIGHT_MICROSERVICE_URL)!,
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: getPlaywrightServiceHeaders(),
     body: {
       url: meta.rewrittenUrl ?? meta.url,
       wait_after_load: meta.options.waitFor,

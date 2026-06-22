@@ -1,8 +1,8 @@
 import { h } from "preact";
 import { explainError, parseErrorCode } from "../../../../lib/error-catalog";
 import {
+  collectDiagnosticSteps,
   DiagnosticsWaterfall,
-  type DiagnosticStep,
 } from "./DiagnosticsWaterfall";
 import { JsonView } from "./JsonView";
 import { Button } from "./ui/Button";
@@ -126,10 +126,7 @@ export function ErrorView({ body }: Props) {
   const errorMsg = typeof body.error === "string" ? body.error : null;
   const errorId = typeof body.errorId === "string" ? body.errorId : null;
   const details = body.details;
-  const diagnostics = body.diagnostics as Record<string, unknown> | undefined;
-  const actions = diagnostics?.actions as DiagnosticStep[] | undefined;
-  const steps = diagnostics?.steps as DiagnosticStep[] | undefined;
-  const waterfallSteps = (actions?.length ? actions : steps) ?? [];
+  const waterfallSteps = collectDiagnosticSteps(body.diagnostics);
 
   const parsedCode = code ? parseErrorCode(code) : null;
   const catalog = parsedCode ? explainError(parsedCode) : null;

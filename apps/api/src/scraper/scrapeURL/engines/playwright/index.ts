@@ -4,15 +4,14 @@ import { EngineScrapeResult } from "..";
 import { Meta } from "../..";
 import { robustFetch } from "../../lib/fetch";
 import { getInnerJson } from "@mendable/firecrawl-rs";
+import { getPlaywrightServiceHeaders } from "./auth";
 
 export async function scrapeURLWithPlaywright(
   meta: Meta,
 ): Promise<EngineScrapeResult> {
   const response = await robustFetch({
     url: config.PLAYWRIGHT_MICROSERVICE_URL!,
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: getPlaywrightServiceHeaders(),
     body: {
       url: meta.rewrittenUrl ?? meta.url,
       wait_after_load: meta.options.waitFor,

@@ -3,8 +3,8 @@ import { useState } from "preact/hooks";
 import { activeFeature, openInInteract, type Feature } from "../signals";
 import { JsonView } from "./JsonView";
 import {
+  collectDiagnosticSteps,
   DiagnosticsWaterfall,
-  type DiagnosticStep,
 } from "./DiagnosticsWaterfall";
 import { toImageSrc } from "../imageSrc";
 import { Button } from "./ui/Button";
@@ -39,6 +39,10 @@ function imagePreview(value: string, alt: string) {
       <img className="playground-media-image" src={src} alt={alt} />
     </a>
   );
+}
+
+function renderScreenshot(value: unknown) {
+  return imagePreview(String(value), "screenshot");
 }
 
 function renderActions(value: unknown) {
@@ -87,7 +91,7 @@ const FORMAT_TABS: FormatTab[] = [
     id: "screenshot",
     label: "Screenshot",
     dataKey: "screenshot",
-    render: v => imagePreview(v as string, "screenshot"),
+    render: renderScreenshot,
   },
   {
     id: "json",
@@ -301,8 +305,7 @@ export function SuccessView({
     body.data && typeof body.data === "object"
       ? (body.data as Record<string, unknown>)
       : {};
-  const diagnostics = body.diagnostics as Record<string, unknown> | undefined;
-  const steps = (diagnostics?.steps as DiagnosticStep[] | undefined) ?? [];
+  const steps = collectDiagnosticSteps(body.diagnostics);
 
   const activeFormatTabs = FORMAT_TABS.filter(t => {
     const v = data[t.dataKey];
